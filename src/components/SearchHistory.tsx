@@ -487,11 +487,11 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
 
         .section-title {
           font-family: var(--font-display);
-          font-size: 2rem;
-          font-weight: 800;
+          font-size: 1.75rem;
+          font-weight: 500;
           color: var(--text-primary);
           margin: 0 0 1.5rem 0;
-          letter-spacing: -0.03em;
+          letter-spacing: -0.01em;
         }
 
         .search-bar-wrapper {
@@ -620,11 +620,11 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
 
         .card-name {
           font-family: var(--font-display);
-          font-size: 1.1rem;
-          font-weight: 700;
+          font-size: 1rem;
+          font-weight: 500;
           color: var(--text-primary);
           margin: 0 0 0.25rem 0;
-          letter-spacing: -0.01em;
+          letter-spacing: 0;
         }
 
         .card-type {
@@ -711,24 +711,24 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
         }
 
         .patient-badge {
-          width: 48px;
-          height: 48px;
-          background: var(--brand-primary);
-          border-radius: 16px;
+          width: 44px;
+          height: 44px;
+          background: linear-gradient(135deg, #e0f7f5 0%, #d4f0ed 100%);
+          border-radius: 14px;
           display: flex;
           align-items: center;
           justify-content: center;
-          color: white;
-          box-shadow: 0 8px 20px rgba(0, 105, 92, 0.25);
+          color: var(--brand-primary);
+          box-shadow: 0 2px 8px rgba(38, 166, 154, 0.1);
         }
 
         .header-text h1 {
           font-family: var(--font-display);
-          font-size: 1.75rem;
-          font-weight: 800;
+          font-size: 1.5rem;
+          font-weight: 500;
           color: var(--text-primary);
           margin: 0;
-          letter-spacing: -0.02em;
+          letter-spacing: 0;
         }
 
         .name-display-wrapper {
@@ -837,15 +837,15 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
         .ai-header {
           display: flex;
           align-items: center;
-          gap: 0.75rem;
-          color: var(--brand-dark);
-          font-weight: 800;
-          margin-bottom: 1.5rem;
-          font-size: 1rem;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          border-bottom: 2px solid rgba(38, 166, 154, 0.1);
-          padding-bottom: 0.75rem;
+          gap: 0.5rem;
+          color: var(--brand-primary);
+          font-weight: 500;
+          margin-bottom: 1rem;
+          font-size: 0.875rem;
+          text-transform: none;
+          letter-spacing: 0;
+          border-bottom: 1px solid rgba(38, 166, 154, 0.15);
+          padding-bottom: 0.5rem;
         }
 
         .ai-card {
@@ -854,35 +854,35 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
           line-height: 1.7;
         }
 
-        /* Buttons */
         .btn-primary {
-          background: var(--brand-primary);
-          color: white;
-          border: none;
-          padding: 0.75rem 1.5rem;
+          background: linear-gradient(135deg, #e0f7f5 0%, #d4f0ed 100%);
+          color: var(--brand-primary);
+          border: 1px solid rgba(38, 166, 154, 0.25);
+          padding: 0.625rem 1.25rem;
           border-radius: var(--radius-full);
-          font-weight: 600;
+          font-weight: 500;
           display: flex;
           align-items: center;
           gap: 0.5rem;
           cursor: pointer;
           transition: all 0.2s;
-          box-shadow: 0 4px 12px rgba(0, 105, 92, 0.2);
+          box-shadow: none;
         }
 
         .btn-primary:hover {
+          background: linear-gradient(135deg, #d4f0ed 0%, #c8ebe8 100%);
+          border-color: var(--brand-primary);
           transform: translateY(-1px);
-          box-shadow: 0 6px 16px rgba(0, 105, 92, 0.3);
-          background: var(--brand-vibrant);
+          box-shadow: 0 2px 8px rgba(38, 166, 154, 0.15);
         }
 
         .btn-secondary {
           background: white;
-          color: var(--text-primary);
-          border: 1px solid rgba(0,0,0,0.1);
-          padding: 0.75rem 1.5rem;
+          color: var(--text-secondary);
+          border: 1px solid rgba(0,0,0,0.08);
+          padding: 0.625rem 1.25rem;
           border-radius: var(--radius-full);
-          font-weight: 600;
+          font-weight: 500;
           display: flex;
           align-items: center;
           gap: 0.5rem;
@@ -891,8 +891,8 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
         }
 
         .btn-secondary:hover {
-          background: #F9FAFB;
-          border-color: var(--brand-primary);
+          background: #f8fafb;
+          border-color: rgba(38, 166, 154, 0.3);
           color: var(--brand-primary);
         }
 
