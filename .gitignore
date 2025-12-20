@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-electron/
+
+# Environment variables (contains secrets)
+.env
+.env.local
+
+# Electron specific
+electron/
+
+# IDE
+.vscode/
+*.log
