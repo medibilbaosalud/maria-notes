@@ -13,6 +13,8 @@
   "dependencies": {
     "@google/generative-ai": "^0.1.3",
     "@supabase/supabase-js": "^2.86.2",
+    "dexie": "^4.2.1",
+    "dexie-react-hooks": "^4.2.0",
     "framer-motion": "^12.23.25",
     "lucide-react": "^0.556.0",
     "react": "^18.2.0",

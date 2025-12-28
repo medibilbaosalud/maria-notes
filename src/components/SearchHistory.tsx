@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, FileText, ChevronRight, Copy, Check, Sparkles, Trash2, FileOutput, Printer, X, Calendar, User, Pencil, Save } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { searchMedicalRecords, deleteMedicalRecord, updateMedicalRecord, MedicalRecord } from '../services/supabase';
+import { searchMedicalRecords, deleteMedicalRecord, updateMedicalRecord, MedicalRecord } from '../services/storage';
 import { GeminiService } from '../services/gemini';
 import ReactMarkdown from 'react-markdown';
 
@@ -20,11 +20,15 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportContent, setReportContent] = useState('');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
-  const [isEditingReport, _setIsEditingReport] = useState(false);
+  const [isEditingReport, setIsEditingReport] = useState(false);
 
   // Name Editing State
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState('');
+
+  // History Editing State
+  const [isEditingHistory, setIsEditingHistory] = useState(false);
+  const [editedHistory, setEditedHistory] = useState('');
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,7 +53,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
+  const handleDelete = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault(); // Add preventDefault
 
@@ -208,6 +212,50 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
     }
   };
 
+  const handleStartEditingHistory = () => {
+    if (selectedRecord) {
+      setEditedHistory(selectedRecord.medical_history || '');
+      setIsEditingHistory(true);
+    }
+  };
+
+  const handleSaveHistory = async () => {
+    if (!selectedRecord) return;
+
+    try {
+      const updated = await updateMedicalRecord(selectedRecord.id!, { medical_history: editedHistory });
+      if (updated && updated.length > 0) {
+        const updatedRecord = { ...selectedRecord, medical_history: editedHistory };
+        setSelectedRecord(updatedRecord);
+        setResults(results.map(r => r.id === selectedRecord.id ? updatedRecord : r));
+        setIsEditingHistory(false);
+      } else {
+        alert("No se pudo guardar los cambios.");
+      }
+    } catch (error) {
+      console.error("Error saving history:", error);
+      alert("Error al guardar la historia");
+    }
+  };
+
+  const handleSaveReport = async () => {
+    if (!selectedRecord) return;
+
+    try {
+      const updated = await updateMedicalRecord(selectedRecord.id!, { medical_report: reportContent });
+      if (updated && updated.length > 0) {
+        setSelectedRecord({ ...selectedRecord, medical_report: reportContent });
+        setResults(results.map(r => r.id === selectedRecord.id ? { ...r, medical_report: reportContent } : r));
+        setIsEditingReport(false);
+      } else {
+        alert("No se pudo guardar el informe.");
+      }
+    } catch (error) {
+      console.error("Error saving report:", error);
+      alert("Error al guardar el informe");
+    }
+  };
+
   const parseContent = (content: string) => {
     const [history, notes] = content.split('---MARIA_NOTES---');
     return { history: history?.trim(), notes: notes?.trim() };
@@ -345,9 +393,35 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
 
                       <div className="detail-scroll-area">
                         <div className="paper-document">
-                          <div className="document-content markdown-body">
-                            <ReactMarkdown>{history}</ReactMarkdown>
+                          <div className="document-header">
+                            <span className="doc-label">Historia Médica</span>
+                            {isEditingHistory ? (
+                              <div className="edit-actions">
+                                <button className="icon-btn save-history" onClick={handleSaveHistory}>
+                                  <Save size={16} />
+                                </button>
+                                <button className="icon-btn cancel-history" onClick={() => setIsEditingHistory(false)}>
+                                  <X size={16} />
+                                </button>
+                              </div>
+                            ) : (
+                              <button className="icon-btn edit-doc" onClick={handleStartEditingHistory}>
+                                <Pencil size={16} />
+                              </button>
+                            )}
                           </div>
+                          {isEditingHistory ? (
+                            <textarea
+                              className="history-editor"
+                              value={editedHistory}
+                              onChange={(e) => setEditedHistory(e.target.value)}
+                              placeholder="Editar historia médica..."
+                            />
+                          ) : (
+                            <div className="document-content markdown-body">
+                              <ReactMarkdown>{history}</ReactMarkdown>
+                            </div>
+                          )}
                         </div>
 
                         {notes && (
@@ -460,6 +534,17 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
               <div className="modal-footer">
                 {!isGeneratingReport && (
                   <>
+                    {isEditingReport ? (
+                      <button className="btn-primary" onClick={handleSaveReport}>
+                        <Save size={16} />
+                        <span>Guardar Cambios</span>
+                      </button>
+                    ) : (
+                      <button className="btn-secondary" onClick={() => setIsEditingReport(true)}>
+                        <Pencil size={16} />
+                        <span>Editar</span>
+                      </button>
+                    )}
                     <button className="btn-secondary" onClick={() => handleCopy(reportContent)}>
                       {copied ? <Check size={16} /> : <Copy size={16} />}
                       <span>{copied ? 'Copiado' : 'Copiar Texto'}</span>
@@ -799,7 +884,89 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
           height: auto; /* Allow it to grow naturally */
           flex-shrink: 0; /* Prevent shrinking */
           border: 1px solid rgba(0,0,0,0.05);
-          display: block;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .document-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 1.5rem;
+          padding-bottom: 1rem;
+          border-bottom: 1px solid #f1f5f9;
+        }
+
+        .doc-label {
+          font-size: 0.75rem;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          color: var(--text-tertiary);
+        }
+
+        .edit-actions {
+          display: flex;
+          gap: 0.5rem;
+        }
+
+        .edit-doc {
+          opacity: 0.5;
+          transition: opacity 0.2s;
+        }
+
+        .paper-document:hover .edit-doc {
+          opacity: 1;
+        }
+
+        .save-history {
+          color: var(--brand-primary) !important;
+          border-color: var(--brand-primary) !important;
+        }
+
+        .cancel-history {
+          color: #ef4444 !important;
+        }
+
+        .history-editor {
+          flex: 1;
+          width: 100%;
+          min-height: 300px;
+          padding: 1rem;
+          border: 1px solid #e2e8f0;
+          border-radius: var(--radius-md);
+          font-family: 'Georgia', serif;
+          font-size: 1.1rem;
+          line-height: 1.7;
+          color: #374151;
+          resize: vertical;
+          outline: none;
+          transition: border-color 0.2s;
+        }
+
+        .history-editor:focus {
+          border-color: var(--brand-primary);
+          box-shadow: 0 0 0 3px rgba(38, 166, 154, 0.1);
+        }
+
+        .report-editor {
+          flex: 1;
+          width: 100%;
+          min-height: 300px;
+          padding: 1.5rem;
+          border: 1px solid #e2e8f0;
+          border-radius: var(--radius-md);
+          font-family: var(--font-body);
+          font-size: 1rem;
+          line-height: 1.6;
+          color: #374151;
+          resize: vertical;
+          outline: none;
+        }
+
+        .report-editor:focus {
+          border-color: var(--brand-primary);
+          box-shadow: 0 0 0 3px rgba(38, 166, 154, 0.1);
         }
 
         .document-content {

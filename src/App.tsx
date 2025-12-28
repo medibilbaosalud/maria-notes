@@ -6,7 +6,7 @@ import { Settings } from './components/Settings';
 import { SearchHistory } from './components/SearchHistory';
 import { ReportsView } from './components/ReportsView';
 import { AIService } from './services/ai';
-import { saveMedicalRecord } from './services/supabase';
+import { saveMedicalRecord, updateMedicalRecord } from './services/storage';
 import './App.css';
 
 // Fallback notification component
@@ -72,7 +72,7 @@ function App() {
     const [currentPatientName, setCurrentPatientName] = useState<string>('');
     const [isLoading, setIsLoading] = useState(false);
     const [currentView, setCurrentView] = useState<'record' | 'history' | 'reports' | 'result'>('record');
-    const [savedRecordId, setSavedRecordId] = useState<string | null>(null);
+    const [savedRecordId, setSavedRecordId] = useState<number | null>(null);
 
     // Fallback notification state
     const [showFallbackNotice, setShowFallbackNotice] = useState(false);
@@ -186,9 +186,7 @@ function App() {
 
                                 if (savedRecordId) {
                                     console.log('Saving report to record:', savedRecordId);
-                                    await import('./services/supabase').then(mod =>
-                                        mod.updateMedicalRecord(savedRecordId, { medical_report: reportResult.data })
-                                    );
+                                    await updateMedicalRecord(savedRecordId, { medical_report: reportResult.data });
                                 } else {
                                     console.warn('No savedRecordId found, report will not be saved to DB');
                                 }
