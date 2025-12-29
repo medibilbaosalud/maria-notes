@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, FileText, ChevronRight, Copy, Check, Sparkles, Trash2, FileOutput, Printer, X, Calendar, User, Pencil, Save } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { searchMedicalRecords, deleteMedicalRecord, updateMedicalRecord, syncFromCloud, MedicalRecord } from '../services/storage';
+import { searchMedicalRecords, MedicalRecord, deleteMedicalRecord as deleteFromSupabase, updateMedicalRecord as updateInSupabase } from '../services/supabase';
 import { AIService } from '../services/ai';
 import ReactMarkdown from 'react-markdown';
 
@@ -44,12 +44,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
   };
 
   useEffect(() => {
-    const init = async () => {
-      setIsLoading(true);
-      await syncFromCloud();
-      handleSearch({ preventDefault: () => { } } as React.FormEvent);
-    };
-    init();
+    handleSearch({ preventDefault: () => { } } as React.FormEvent);
   }, []);
 
   const handleCopy = (text: string) => {
@@ -58,15 +53,15 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleDelete = async (id: number, e: React.MouseEvent) => {
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    e.preventDefault(); // Add preventDefault
+    e.preventDefault();
 
     if (window.confirm('¿Estás seguro de que quieres eliminar esta consulta?')) {
       try {
-        const success = await deleteMedicalRecord(id);
+        const success = await deleteFromSupabase(id);
         if (success) {
-          setResults(prevResults => prevResults.filter(r => r.id !== id)); // Use functional update
+          setResults(prevResults => prevResults.filter(r => r.id !== id));
           if (selectedRecord?.id === id) {
             setSelectedRecord(null);
           }
@@ -102,7 +97,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
 
       if (selectedRecord.id) {
         console.log("Attempting to save report for ID:", selectedRecord.id);
-        const updated = await updateMedicalRecord(selectedRecord.id, { medical_report: report });
+        const updated = await updateInSupabase(selectedRecord.id, { medical_report: report });
 
         if (updated) {
           console.log("Report saved to Supabase successfully:", updated);
@@ -110,7 +105,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
           setResults(results.map(r => r.id === selectedRecord.id ? { ...r, medical_report: report } : r));
           // alert("Informe guardado correctamente en la base de datos."); // Optional: Uncomment if user wants explicit confirmation
         } else {
-          console.error("Failed to update record in Supabase. updateMedicalRecord returned null.");
+          console.error("Failed to update record in Supabase. updateInSupabase returned null.");
           alert("Error: No se pudo guardar el informe en la base de datos. Revise la consola.");
         }
       } else {
@@ -201,7 +196,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
     if (!selectedRecord || !editedName.trim()) return;
 
     try {
-      const updated = await updateMedicalRecord(selectedRecord.id!, { patient_name: editedName });
+      const updated = await updateInSupabase(selectedRecord.id!, { patient_name: editedName });
 
       if (updated && updated.length > 0) {
         const updatedRecord = { ...selectedRecord, patient_name: editedName };
@@ -229,7 +224,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
     if (!selectedRecord) return;
 
     try {
-      const updated = await updateMedicalRecord(selectedRecord.id!, { medical_history: editedHistory });
+      const updated = await updateInSupabase(selectedRecord.id!, { medical_history: editedHistory });
       if (updated && updated.length > 0) {
         const updatedRecord = { ...selectedRecord, medical_history: editedHistory };
         setSelectedRecord(updatedRecord);
@@ -248,7 +243,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
     if (!selectedRecord) return;
 
     try {
-      const updated = await updateMedicalRecord(selectedRecord.id!, { medical_report: reportContent });
+      const updated = await updateInSupabase(selectedRecord.id!, { medical_report: reportContent });
       if (updated && updated.length > 0) {
         setSelectedRecord({ ...selectedRecord, medical_report: reportContent });
         setResults(results.map(r => r.id === selectedRecord.id ? { ...r, medical_report: reportContent } : r));
