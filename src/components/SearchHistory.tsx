@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, FileText, ChevronRight, Copy, Check, Sparkles, Trash2, FileOutput, Printer, X, Calendar, User, Pencil, Save } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { searchMedicalRecords, deleteMedicalRecord, updateMedicalRecord, MedicalRecord } from '../services/storage';
-import { GeminiService } from '../services/gemini';
+import { AIService } from '../services/ai';
 import ReactMarkdown from 'react-markdown';
 
 interface SearchHistoryProps {
@@ -86,11 +86,12 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
 
     setIsGeneratingReport(true);
     try {
-      const geminiService = new GeminiService(apiKey);
-      const report = await geminiService.generateMedicalReport(
+      const aiService = new AIService(apiKey);
+      const reportResult = await aiService.generateMedicalReport(
         selectedRecord.transcription,
         selectedRecord.patient_name
       );
+      const report = reportResult.data;
 
       setReportContent(report);
 

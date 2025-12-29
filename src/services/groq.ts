@@ -1,15 +1,14 @@
-// Groq API Service - Fallback for when Gemini fails
+// Groq API Service - Primary AI Service
 // Uses Groq's LPU for fast inference with Llama/Whisper models
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1';
 
 // Model priority cascades (best to fallback)
 const GROQ_TEXT_MODELS = [
-    'groq/compound',
-    'meta-llama/llama-4-maverick-17b-128e-instruct',
-    'llama-3.3-70b-versatile',
-    'meta-llama/llama-4-scout-17b-16e-instruct',
-    'qwen/qwen3-32b',
+    'llama-3.3-70b-versatile',                       // Most robust - 70B params, best for complex instructions
+    'meta-llama/llama-4-maverick-17b-128e-instruct', // Llama 4 - good instruction following
+    'meta-llama/llama-4-scout-17b-16e-instruct',     // Llama 4 backup
+    'qwen/qwen3-32b',                                // Qwen3 - reliable fallback
 ];
 
 const GROQ_WHISPER_MODELS = [

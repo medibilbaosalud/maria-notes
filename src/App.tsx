@@ -9,63 +9,13 @@ import { AIService } from './services/ai';
 import { saveMedicalRecord, updateMedicalRecord } from './services/storage';
 import './App.css';
 
-// Fallback notification component
-const FallbackNotification = ({ show, onClose }: { show: boolean; onClose: () => void }) => {
-    if (!show) return null;
 
-    return (
-        <div className="fallback-notification">
-            <span className="fallback-icon">⚡</span>
-            <span>Usando Groq como respaldo</span>
-            <button onClick={onClose} className="fallback-close">×</button>
-            <style>{`
-                .fallback-notification {
-                    position: fixed;
-                    bottom: 24px;
-                    right: 24px;
-                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                    color: #e0e0e0;
-                    padding: 12px 20px;
-                    border-radius: 12px;
-                    display: flex;
-                    align-items: center;
-                    gap: 10px;
-                    font-size: 0.9rem;
-                    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-                    z-index: 9999;
-                    animation: slideIn 0.3s ease-out;
-                    border: 1px solid rgba(255,255,255,0.1);
-                }
-                .fallback-icon {
-                    font-size: 1.1rem;
-                }
-                .fallback-close {
-                    background: none;
-                    border: none;
-                    color: #888;
-                    font-size: 1.2rem;
-                    cursor: pointer;
-                    padding: 0 0 0 8px;
-                    margin-left: 4px;
-                }
-                .fallback-close:hover {
-                    color: #fff;
-                }
-                @keyframes slideIn {
-                    from { transform: translateX(100px); opacity: 0; }
-                    to { transform: translateX(0); opacity: 1; }
-                }
-            `}</style>
-        </div>
-    );
-};
 
-// API Keys from environment variables
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+// API Key from environment variable
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '';
 
 function App() {
-    const [apiKey, setApiKey] = useState<string>(GEMINI_API_KEY);
+    const [apiKey, setApiKey] = useState<string>(GROQ_API_KEY);
     const [showSettings, setShowSettings] = useState(false);
     const [history, setHistory] = useState<string>('');
     const [transcription, setTranscription] = useState<string>('');
@@ -74,12 +24,11 @@ function App() {
     const [currentView, setCurrentView] = useState<'record' | 'history' | 'reports' | 'result'>('record');
     const [savedRecordId, setSavedRecordId] = useState<number | null>(null);
 
-    // Fallback notification state
-    const [showFallbackNotice, setShowFallbackNotice] = useState(false);
+
 
     const handleSaveSettings = (key: string) => {
         setApiKey(key);
-        localStorage.setItem('gemini_api_key', key);
+        localStorage.setItem('groq_api_key', key);
         setShowSettings(false);
     };
 
@@ -106,21 +55,15 @@ function App() {
         setIsLoading(true);
         setHistory('');
         setSavedRecordId(null);
-        setShowFallbackNotice(false);
+
         setCurrentView('result');
 
         try {
-            const aiService = new AIService(apiKey, GROQ_API_KEY);
+            const aiService = new AIService(apiKey);
             const base64Audio = await blobToBase64(blob);
 
             console.log('Transcribing audio...');
             const transcriptResult = await aiService.transcribeAudio(base64Audio, blob.type, blob);
-
-            if (transcriptResult.fallbackUsed) {
-                setShowFallbackNotice(true);
-                // Auto-hide after 5 seconds
-                setTimeout(() => setShowFallbackNotice(false), 5000);
-            }
 
             setTranscription(transcriptResult.data);
             setCurrentPatientName(patientName);
@@ -128,10 +71,7 @@ function App() {
             console.log('Generating history (auto-detecting type)...');
             const historyResult = await aiService.generateMedicalHistory(transcriptResult.data, patientName);
 
-            if (historyResult.fallbackUsed && !showFallbackNotice) {
-                setShowFallbackNotice(true);
-                setTimeout(() => setShowFallbackNotice(false), 5000);
-            }
+
 
             setHistory(historyResult.data);
 
@@ -176,13 +116,8 @@ function App() {
                             isLoading={isLoading}
                             patientName={currentPatientName}
                             onGenerateReport={async () => {
-                                const aiService = new AIService(apiKey, GROQ_API_KEY);
+                                const aiService = new AIService(apiKey);
                                 const reportResult = await aiService.generateMedicalReport(transcription, currentPatientName);
-
-                                if (reportResult.fallbackUsed) {
-                                    setShowFallbackNotice(true);
-                                    setTimeout(() => setShowFallbackNotice(false), 5000);
-                                }
 
                                 if (savedRecordId) {
                                     console.log('Saving report to record:', savedRecordId);
@@ -220,11 +155,7 @@ function App() {
                 />
             )}
 
-            {/* Fallback notification */}
-            <FallbackNotification
-                show={showFallbackNotice}
-                onClose={() => setShowFallbackNotice(false)}
-            />
+
         </Layout>
     );
 }

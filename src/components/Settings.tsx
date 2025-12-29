@@ -77,7 +77,7 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
             <div className="form-group">
-              <label>Google Gemini API Key</label>
+              <label>Groq API Key</label>
               <div className="input-wrapper">
                 <input
                   type="password"
