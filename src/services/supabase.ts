@@ -17,6 +17,7 @@ export interface MedicalRecord {
     transcription: string;
     medical_history: string;
     medical_report?: string;
+    ai_model?: string;
     created_at?: string;
 }
 

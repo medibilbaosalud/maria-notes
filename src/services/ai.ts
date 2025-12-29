@@ -5,6 +5,7 @@ import { GroqService } from './groq';
 
 export interface AIResult<T> {
     data: T;
+    model: string;
 }
 
 export class AIService {
@@ -27,18 +28,18 @@ export class AIService {
 
         console.log('[AIService] Transcribing with Groq...');
         const result = await this.groq.transcribeAudio(audioBlob);
-        return { data: result };
+        return { data: result.text, model: result.model };
     }
 
     async generateMedicalHistory(transcription: string, patientName: string = ""): Promise<AIResult<string>> {
         console.log('[AIService] Generating medical history with Groq...');
         const result = await this.groq.generateMedicalHistory(transcription, patientName);
-        return { data: result };
+        return { data: result.text, model: result.model };
     }
 
     async generateMedicalReport(transcription: string, patientName: string = ""): Promise<AIResult<string>> {
         console.log('[AIService] Generating medical report with Groq...');
         const result = await this.groq.generateMedicalReport(transcription, patientName);
-        return { data: result };
+        return { data: result.text, model: result.model };
     }
 }

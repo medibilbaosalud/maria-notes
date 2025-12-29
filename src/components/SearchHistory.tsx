@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, FileText, ChevronRight, Copy, Check, Sparkles, Trash2, FileOutput, Printer, X, Calendar, User, Pencil, Save } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { searchMedicalRecords, deleteMedicalRecord, updateMedicalRecord, MedicalRecord } from '../services/storage';
+import { searchMedicalRecords, deleteMedicalRecord, updateMedicalRecord, syncFromCloud, MedicalRecord } from '../services/storage';
 import { AIService } from '../services/ai';
 import ReactMarkdown from 'react-markdown';
 
@@ -44,7 +44,12 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
   };
 
   useEffect(() => {
-    handleSearch({ preventDefault: () => { } } as React.FormEvent);
+    const init = async () => {
+      setIsLoading(true);
+      await syncFromCloud();
+      handleSearch({ preventDefault: () => { } } as React.FormEvent);
+    };
+    init();
   }, []);
 
   const handleCopy = (text: string) => {

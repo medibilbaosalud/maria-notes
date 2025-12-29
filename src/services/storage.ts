@@ -10,7 +10,7 @@ const syncToCloud = async (record: MedicalRecord, operation: 'insert' | 'update'
 
     try {
         if (operation === 'insert') {
-            // For cloud, we don't send the local id
+            // For cloud, we don't send the local id, but we send other fields including ai_model
             const { id, ...cloudRecord } = record;
             await supabase.from('medical_records').insert([cloudRecord]);
             console.log('[Cloud Sync] Record inserted');
@@ -31,7 +31,7 @@ const syncToCloud = async (record: MedicalRecord, operation: 'insert' | 'update'
     }
 };
 
-export const saveMedicalRecord = async (record: Omit<MedicalRecord, 'id' | 'created_at'>): Promise<MedicalRecord[] | null> => {
+export const saveMedicalRecord = async (record: Omit<MedicalRecord, 'id' | 'created_at'> & { ai_model?: string }): Promise<MedicalRecord[] | null> => {
     try {
         const newRecord: MedicalRecord = {
             ...record,
@@ -94,5 +94,51 @@ export const updateMedicalRecord = async (id: string | number, updates: Partial<
     } catch (error) {
         console.error('Error updating record:', error);
         return null;
+    }
+};
+
+export const syncFromCloud = async (): Promise<number> => {
+    if (!isCloudSyncEnabled() || !supabase) return 0;
+
+    try {
+        console.log('[Cloud Sync] Checking for new records...');
+        const { data: cloudRecords, error } = await supabase
+            .from('medical_records')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (error || !cloudRecords) {
+            console.error('[Cloud Sync] Fetch failed:', error);
+            return 0;
+        }
+
+        const localRecords = await db.medical_records.toArray();
+        const localCreatedAts = new Set(localRecords.map(r => r.created_at));
+
+        const newRecords: any[] = [];
+        let addedCount = 0;
+
+        for (const cloudRec of cloudRecords) {
+            const cloudCreatedAt = cloudRec.created_at || '';
+            if (cloudCreatedAt && !localCreatedAts.has(cloudCreatedAt)) {
+                // Remove the UUID 'id' from Supabase, let Dexie generate a local auto-increment ID
+                const { id, ...recordToInsert } = cloudRec;
+                newRecords.push(recordToInsert);
+                addedCount++;
+            }
+        }
+
+        if (newRecords.length > 0) {
+            await db.medical_records.bulkAdd(newRecords);
+            console.log(`[Cloud Sync] Imported ${addedCount} records from cloud.`);
+        } else {
+            console.log('[Cloud Sync] Local DB is up to date.');
+        }
+
+        return addedCount;
+
+    } catch (error) {
+        console.error('[Cloud Sync] Sync error:', error);
+        return 0;
     }
 };

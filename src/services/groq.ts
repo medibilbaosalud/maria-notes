@@ -27,7 +27,7 @@ export class GroqService {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    async transcribeAudio(audioBlob: Blob): Promise<string> {
+    async transcribeAudio(audioBlob: Blob): Promise<{ text: string, model: string }> {
         let lastError = null;
 
         for (const modelName of GROQ_WHISPER_MODELS) {
@@ -54,7 +54,7 @@ export class GroqService {
                 }
 
                 const text = await response.text();
-                return text;
+                return { text, model: modelName };
             } catch (error: any) {
                 console.warn(`[Groq] Transcription failed with ${modelName}:`, error);
                 lastError = error;
@@ -69,7 +69,7 @@ export class GroqService {
         throw lastError || new Error("All Groq Whisper models failed.");
     }
 
-    async generateText(prompt: string): Promise<string> {
+    async generateText(prompt: string): Promise<{ text: string, model: string }> {
         let lastError = null;
 
         for (const modelName of GROQ_TEXT_MODELS) {
@@ -98,7 +98,8 @@ export class GroqService {
                 }
 
                 const data = await response.json();
-                return data.choices[0]?.message?.content || '';
+                const content = data.choices[0]?.message?.content || '';
+                return { text: content, model: modelName };
             } catch (error: any) {
                 console.warn(`[Groq] Text generation failed with ${modelName}:`, error);
                 lastError = error;
@@ -113,7 +114,7 @@ export class GroqService {
         throw lastError || new Error("All Groq text models failed.");
     }
 
-    async generateMedicalHistory(transcription: string, patientName: string = ""): Promise<string> {
+    async generateMedicalHistory(transcription: string, patientName: string = ""): Promise<{ text: string, model: string }> {
         const prompt = `
 Eres Maria Notes, asistente clínico especializado en Otorrinolaringología. Tu tarea es transformar transcripciones de consulta en notas clínicas estructuradas, concisas y en estilo telegráfico.
 
@@ -180,7 +181,7 @@ ${transcription}
         return this.generateText(prompt);
     }
 
-    async generateMedicalReport(transcription: string, patientName: string = ""): Promise<string> {
+    async generateMedicalReport(transcription: string, patientName: string = ""): Promise<{ text: string, model: string }> {
         const prompt = `
 Eres Maria Notes, asistente clínico experto. Genera un INFORME MÉDICO FORMAL basado en la transcripción.
 

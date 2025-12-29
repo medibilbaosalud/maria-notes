@@ -80,7 +80,8 @@ function App() {
                 patient_name: patientName || 'Paciente Sin Nombre',
                 consultation_type: 'Auto-detected',
                 transcription: transcriptResult.data,
-                medical_history: historyResult.data
+                medical_history: historyResult.data,
+                ai_model: historyResult.model
             });
 
             if (savedData && savedData[0]?.id) {
