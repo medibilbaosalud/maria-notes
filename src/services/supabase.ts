@@ -82,3 +82,25 @@ export const updateMedicalRecord = async (id: string, updates: Partial<MedicalRe
     }
     return data;
 };
+// AI Audit Logging
+export const logAIAudit = async (auditData: {
+    patient_name: string;
+    pipeline_version: string;
+    models_used: any;
+    extraction_data: any;
+    generation_versions: any[];
+    validation_logs: any[];
+    corrections_applied: number;
+    successful: boolean;
+    duration_ms: number;
+}) => {
+    if (!supabase) return;
+
+    // Fire and forget - don't block UI
+    supabase.from('ai_audit_logs').insert([{
+        ...auditData,
+        created_at: new Date().toISOString()
+    }]).then(({ error }) => {
+        if (error) console.error('Error logging AI audit:', error);
+    });
+};

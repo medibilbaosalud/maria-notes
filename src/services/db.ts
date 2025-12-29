@@ -6,6 +6,7 @@ export interface MedicalRecord {
     consultation_type: string;
     transcription: string;
     medical_history: string;
+    original_medical_history?: string; // Preserves the raw AI output before user edits
     medical_report?: string;
     ai_model?: string;
     created_at: string;

@@ -1,12 +1,11 @@
 import { db, type MedicalRecord } from './db';
 import { supabase } from './supabase';
-import { isCloudSyncEnabled } from '../hooks/useCloudSync';
 
 export type { MedicalRecord };
 
 // Helper to sync a record to Supabase (fire-and-forget)
 const syncToCloud = async (record: MedicalRecord, operation: 'insert' | 'update' | 'delete') => {
-    if (!isCloudSyncEnabled() || !supabase) return;
+    if (!supabase) return;
 
     try {
         if (operation === 'insert') {
@@ -98,7 +97,7 @@ export const updateMedicalRecord = async (id: string | number, updates: Partial<
 };
 
 export const syncFromCloud = async (): Promise<number> => {
-    if (!isCloudSyncEnabled() || !supabase) return 0;
+    if (!supabase) return 0;
 
     try {
         console.log('[Cloud Sync] Checking for new records...');

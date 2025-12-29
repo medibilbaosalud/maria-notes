@@ -81,6 +81,7 @@ function App() {
                 consultation_type: 'Auto-detected',
                 transcription: transcriptResult.data,
                 medical_history: historyResult.data,
+                original_medical_history: historyResult.data, // Store the raw AI output
                 ai_model: historyResult.model
             });
 
