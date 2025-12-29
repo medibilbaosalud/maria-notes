@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Search, FileOutput, ChevronRight, Printer, Copy, Check } from 'lucide-react';
+import { Search, FileOutput, ChevronRight, Printer, Copy, Check, Pencil, Save, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
-import { searchMedicalRecords, MedicalRecord } from '../services/supabase';
+import { searchMedicalRecords, updateMedicalRecord, MedicalRecord } from '../services/supabase';
 
 export const ReportsView: React.FC = () => {
     const [query, setQuery] = useState('');
@@ -10,6 +10,8 @@ export const ReportsView: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [selectedRecord, setSelectedRecord] = useState<MedicalRecord | null>(null);
     const [copied, setCopied] = useState(false);
+    const [isEditingReport, setIsEditingReport] = useState(false);
+    const [editedReportContent, setEditedReportContent] = useState('');
 
     const handleSearch = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -32,6 +34,30 @@ export const ReportsView: React.FC = () => {
         navigator.clipboard.writeText(text);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
+    };
+
+    const handleStartEditReport = () => {
+        if (selectedRecord?.medical_report) {
+            setEditedReportContent(selectedRecord.medical_report);
+            setIsEditingReport(true);
+        }
+    };
+
+    const handleSaveReport = async () => {
+        if (!selectedRecord) return;
+        try {
+            const updated = await updateMedicalRecord(selectedRecord.id!, { medical_report: editedReportContent });
+            if (updated && updated.length > 0) {
+                setSelectedRecord({ ...selectedRecord, medical_report: editedReportContent });
+                setResults(results.map(r => r.id === selectedRecord.id ? { ...r, medical_report: editedReportContent } : r));
+                setIsEditingReport(false);
+            } else {
+                alert("No se pudo guardar el informe.");
+            }
+        } catch (error) {
+            console.error("Error saving report:", error);
+            alert("Error al guardar el informe");
+        }
     };
 
     const handlePrint = (content: string, patientName: string) => {
@@ -152,25 +178,59 @@ export const ReportsView: React.FC = () => {
                                 <div className="preview-header">
                                     <h3>Informe: {selectedRecord.patient_name}</h3>
                                     <div className="actions">
-                                        <button
-                                            className="action-button primary"
-                                            onClick={() => handleCopy(selectedRecord.medical_report!)}
-                                        >
-                                            {copied ? <Check size={16} /> : <Copy size={16} />}
-                                            {copied ? 'Copiado' : 'Copiar'}
-                                        </button>
-                                        <button
-                                            className="action-button success"
-                                            onClick={() => handlePrint(selectedRecord.medical_report!, selectedRecord.patient_name)}
-                                        >
-                                            <Printer size={16} /> Imprimir
-                                        </button>
+                                        {isEditingReport ? (
+                                            <>
+                                                <button
+                                                    className="action-button success"
+                                                    onClick={handleSaveReport}
+                                                >
+                                                    <Save size={16} /> Guardar
+                                                </button>
+                                                <button
+                                                    className="action-button secondary"
+                                                    onClick={() => setIsEditingReport(false)}
+                                                >
+                                                    <X size={16} /> Cancelar
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <button
+                                                    className="action-button secondary"
+                                                    onClick={handleStartEditReport}
+                                                >
+                                                    <Pencil size={16} /> Editar
+                                                </button>
+                                                <button
+                                                    className="action-button primary"
+                                                    onClick={() => handleCopy(selectedRecord.medical_report!)}
+                                                >
+                                                    {copied ? <Check size={16} /> : <Copy size={16} />}
+                                                    {copied ? 'Copiado' : 'Copiar'}
+                                                </button>
+                                                <button
+                                                    className="action-button success"
+                                                    onClick={() => handlePrint(selectedRecord.medical_report!, selectedRecord.patient_name)}
+                                                >
+                                                    <Printer size={16} /> Imprimir
+                                                </button>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="report-body">
-                                    <div className="markdown-content">
-                                        <ReactMarkdown>{selectedRecord.medical_report}</ReactMarkdown>
-                                    </div>
+                                    {isEditingReport ? (
+                                        <textarea
+                                            className="report-editor"
+                                            value={editedReportContent}
+                                            onChange={(e) => setEditedReportContent(e.target.value)}
+                                            placeholder="Editar informe..."
+                                        />
+                                    ) : (
+                                        <div className="markdown-content">
+                                            <ReactMarkdown>{selectedRecord.medical_report}</ReactMarkdown>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         ) : (
@@ -298,6 +358,26 @@ export const ReportsView: React.FC = () => {
                 }
                 .action-button.primary { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--glass-border); }
                 .action-button.success { background: #10b981; color: white; }
+                .action-button.secondary { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+                .action-button.secondary:hover { background: #e2e8f0; }
+
+                .report-editor {
+                    width: 100%;
+                    min-height: 400px;
+                    padding: 1.5rem;
+                    font-family: 'Georgia', serif;
+                    font-size: 1rem;
+                    line-height: 1.6;
+                    border: 1px solid var(--glass-border);
+                    border-radius: 8px;
+                    resize: vertical;
+                    background: #fafafa;
+                }
+                .report-editor:focus {
+                    outline: none;
+                    border-color: var(--brand-primary);
+                    box-shadow: 0 0 0 3px rgba(38, 166, 154, 0.1);
+                }
             `}</style>
         </div>
     );

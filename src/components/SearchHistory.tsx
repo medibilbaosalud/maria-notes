@@ -257,6 +257,67 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
     }
   };
 
+  const handlePrintHistory = (content: string, patientName: string) => {
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      const htmlContent = content
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>Historia Médica - ${patientName}</title>
+            <style>
+              body { font-family: 'Georgia', serif; padding: 40px; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; }
+              .header-container { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; }
+              .logo-img { width: 180px; height: auto; }
+              .doctor-info { text-align: right; font-family: 'Arial', sans-serif; font-size: 14px; color: #000; }
+              .doctor-name { font-weight: bold; font-size: 16px; margin-bottom: 4px; }
+              .report-title { text-align: center; font-weight: bold; text-decoration: underline; font-size: 18px; margin-bottom: 30px; text-transform: uppercase; }
+              .patient-info { margin-bottom: 20px; font-size: 16px; }
+              .content { font-size: 14px; }
+              .footer { margin-top: 60px; text-align: center; font-size: 12px; color: #666; font-family: 'Arial', sans-serif; }
+              strong { font-weight: bold; color: #000; }
+            </style>
+          </head>
+          <body>
+            <div class="header-container">
+              <img src="${window.location.origin}/medibilbao_logo.png" alt="MediBilbao Salud" class="logo-img" />
+              <div class="doctor-info">
+                <div class="doctor-name">Dra. Itziar Gotxi</div>
+                <div>Especialista en</div>
+                <div>Otorrinolaringología</div>
+                <br/>
+                <div>Nº. Col. 484809757</div>
+              </div>
+            </div>
+
+            <div class="report-title">HISTORIA CLÍNICA</div>
+
+            <div class="patient-info">
+              <strong>Paciente:</strong> ${patientName}
+            </div>
+
+            <div class="content">
+              ${htmlContent}
+            </div>
+
+            <div class="footer">
+              <div>MediSalud Bilbao Gran Vía 63bis 2º dpto.6 48011 BILBAO Tel: 944329670</div>
+              <div>Email:info@medibilbaosalud.com www.medibilbaosalud.com</div>
+            </div>
+
+            <script>
+              window.onload = function() { window.print(); window.close(); }
+            </script>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+    }
+  };
+
   const parseContent = (content: string) => {
     const [history, notes] = content.split('---MARIA_NOTES---');
     return { history: history?.trim(), notes: notes?.trim() };
@@ -396,20 +457,32 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
                         <div className="paper-document">
                           <div className="document-header">
                             <span className="doc-label">Historia Médica</span>
-                            {isEditingHistory ? (
-                              <div className="edit-actions">
-                                <button className="icon-btn save-history" onClick={handleSaveHistory}>
-                                  <Save size={16} />
+                            <div className="doc-actions">
+                              {!isEditingHistory && (
+                                <>
+                                  <button className="icon-btn copy-doc" onClick={() => handleCopy(history || '')} title="Copiar">
+                                    {copied ? <Check size={16} /> : <Copy size={16} />}
+                                  </button>
+                                  <button className="icon-btn print-doc" onClick={() => handlePrintHistory(history || '', selectedRecord.patient_name)} title="Imprimir">
+                                    <Printer size={16} />
+                                  </button>
+                                </>
+                              )}
+                              {isEditingHistory ? (
+                                <div className="edit-actions">
+                                  <button className="icon-btn save-history" onClick={handleSaveHistory}>
+                                    <Save size={16} />
+                                  </button>
+                                  <button className="icon-btn cancel-history" onClick={() => setIsEditingHistory(false)}>
+                                    <X size={16} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button className="icon-btn edit-doc" onClick={handleStartEditingHistory} title="Editar">
+                                  <Pencil size={16} />
                                 </button>
-                                <button className="icon-btn cancel-history" onClick={() => setIsEditingHistory(false)}>
-                                  <X size={16} />
-                                </button>
-                              </div>
-                            ) : (
-                              <button className="icon-btn edit-doc" onClick={handleStartEditingHistory}>
-                                <Pencil size={16} />
-                              </button>
-                            )}
+                              )}
+                            </div>
                           </div>
                           {isEditingHistory ? (
                             <textarea
@@ -1217,6 +1290,24 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
             color: var(--text-secondary);
             font-size: 1rem;
             min-height: 1.5em;
+        }
+
+        .doc-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .icon-btn.copy-doc,
+        .icon-btn.print-doc {
+            background: #f8fafc;
+            color: var(--brand-primary);
+        }
+
+        .icon-btn.copy-doc:hover,
+        .icon-btn.print-doc:hover {
+            background: var(--brand-primary);
+            color: white;
         }
       `}</style>
     </div>
