@@ -5,6 +5,7 @@ import { Recorder } from './components/Recorder';
 import { HistoryView } from './components/HistoryView';
 import { Settings } from './components/Settings';
 import { AIService } from './services/ai';
+import { ReportsView } from './components/ReportsView';
 import { ExtractionResult } from './services/groq';
 import { saveMedicalRecord, updateMedicalRecord, saveLabTestLog } from './services/storage';
 import { AudioTestLab } from './components/AudioTestLab';
@@ -113,7 +114,7 @@ function App() {
     const [transcription, setTranscription] = useState<string>('');
     const [currentPatientName, setCurrentPatientName] = useState<string>('');
     const [isLoading, setIsLoading] = useState(false);
-    const [processingStatus, setProcessingStatus] = useState<string>('');
+    const [_processingStatus, setProcessingStatus] = useState<string>('');
     const [currentView, setCurrentView] = useState<'record' | 'history' | 'reports' | 'result' | 'test-lab'>('record');
     const [savedRecordId, setSavedRecordId] = useState<number | null>(null);
     const [pipelineMetadata, setPipelineMetadata] = useState<{
@@ -346,8 +347,8 @@ function App() {
                     medical_history: updatedContent,
                     ai_model: 'kimi-k2-merged'
                 });
-                if (saved && saved[0]) {
-                    setSavedRecordId(saved[0].id);
+                if (saved && saved[0] && saved[0].id !== undefined) {
+                    setSavedRecordId(Number(saved[0].id));
                     alert('Historia guardada correctamente');
                 }
             }
@@ -368,8 +369,8 @@ function App() {
             <Layout
                 currentView={currentView}
                 onNavigate={setCurrentView}
-                onSettingsClick={() => setShowSettings(true)}
-                onChainClick={() => setCurrentView('test-lab')}
+                onOpenSettings={() => setShowSettings(true)}
+                onOpenLessons={() => setShowLessons(true)}
             >
                 {currentView === 'record' && (
                     <div className="view-content">
