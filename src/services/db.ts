@@ -26,6 +26,7 @@ export interface LabTestLog {
         versionsCount: number;
         validationHistory?: { type: string; field: string; reason: string }[];
         remainingErrors?: { type: string; field: string; reason: string }[];
+        active_memory_used?: boolean;
     };
 }
 

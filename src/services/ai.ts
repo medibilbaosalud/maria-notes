@@ -14,6 +14,7 @@ export interface AIResultWithMetadata extends AIResult<string> {
     validations?: ValidationResult[];
     corrections_applied?: number;
     remaining_errors?: { type: string; field: string; reason: string }[]; // Unresolved errors for UI warning
+    active_memory_used?: boolean;
 }
 
 export class AIService {
@@ -71,6 +72,7 @@ export class AIService {
         const versions: PipelineResult['versions'] = [];
         let generatedHistory = '';
         let generationModel = '';
+        let activeMemoryUsed = false;
         let allValidations: ValidationResult[] = [];
         let previousErrors: any[] = [];
 
@@ -85,6 +87,7 @@ export class AIService {
 
             generatedHistory = genResult.text;
             generationModel = genResult.model;
+            if (genResult.active_memory_used) activeMemoryUsed = true;
 
             versions.push({
                 phase: attempt === 0 ? 'generation_merged' : `correction_${attempt}`,
@@ -159,7 +162,8 @@ export class AIService {
             extraction: mergedExtraction,
             validations: allValidations,
             corrections_applied: correctionsApplied,
-            remaining_errors: finalErrors.length > 0 ? finalErrors : undefined
+            remaining_errors: finalErrors.length > 0 ? finalErrors : undefined,
+            active_memory_used: activeMemoryUsed
         };
     }
 
@@ -200,6 +204,7 @@ export class AIService {
                 extraction: pipelineResult.extraction,
                 validations: pipelineResult.validations,
                 corrections_applied: pipelineResult.corrections_applied,
+                active_memory_used: pipelineResult.active_memory_used
             };
         } catch (error) {
             console.error('[AIService] Pipeline failed:', error);

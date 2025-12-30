@@ -244,3 +244,32 @@ export async function processDoctorFeedback(
 
     return lesson as ImprovementLesson;
 }
+
+export async function getRelevantLessonsForPrompt(): Promise<string> {
+    if (!supabase) return '';
+
+    try {
+        // Fetch last 10 lessons
+        const { data, error } = await supabase
+            .from('ai_improvement_lessons')
+            .select('lesson_summary, improvement_category')
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+        if (error || !data) return '';
+
+        // Filter valid lessons (length > 5) and take top 5
+        const validLessons = data
+            .filter(l => l.lesson_summary && l.lesson_summary.length > 5)
+            .slice(0, 5);
+
+        if (validLessons.length === 0) return '';
+
+        return validLessons
+            .map(l => `- [PREFERENCIA APRENDIDA]: ${l.lesson_summary}`)
+            .join('\n');
+    } catch (error) {
+        console.error('[DoctorFeedback] Error fetching lessons for prompt:', error);
+        return '';
+    }
+}

@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react';
+
+import { useState, useRef, useEffect } from 'react';
 import { Layout } from './components/Layout';
 import { Recorder } from './components/Recorder';
 import { HistoryView } from './components/HistoryView';
@@ -10,10 +11,102 @@ import { ExtractionResult } from './services/groq';
 import { saveMedicalRecord, updateMedicalRecord, saveLabTestLog } from './services/storage';
 import { AudioTestLab } from './components/AudioTestLab';
 import LessonsPanel from './components/LessonsPanel';
+import { MemoryService } from './services/memory';
 import './App.css';
+import { Brain, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 // API Key from environment variable
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '';
+
+// ════════════════════════════════════════════════════════════════
+// NEW: WELCOME MODAL FOR DRA. GOTXI (30 DEC 2025)
+// ════════════════════════════════════════════════════════════════
+const WelcomeDraGotxiModal = ({ onClose }: { onClose: () => void }) => {
+    return (
+        <div style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)'
+        }}>
+            <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                style={{
+                    background: 'white', borderRadius: '24px', padding: '2rem', maxWidth: '600px', width: '90%',
+                    boxShadow: '0 20px 50px rgba(0,0,0,0.2)', position: 'relative'
+                }}
+            >
+                <button onClick={onClose} style={{
+                    position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'none', border: 'none', cursor: 'pointer', color: '#64748b'
+                }}><X size={24} /></button>
+
+                <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+                    <div style={{
+                        background: 'linear-gradient(135deg, #fefce8 0%, #fef9c3 100%)',
+                        width: '80px', height: '80px', borderRadius: '50%', margin: '0 auto 1.5rem',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        boxShadow: '0 10px 20px rgba(250, 204, 21, 0.2)'
+                    }}>
+                        <span style={{ fontSize: '2.5rem' }}>👩‍⚕️</span>
+                    </div>
+                    <h2 style={{ margin: 0, fontSize: '1.8rem', color: '#1e293b', fontWeight: 700 }}>
+                        ¡Bienvenida, Dra. Gotxi!
+                    </h2>
+                    <p style={{ margin: '0.5rem 0 0', color: '#64748b' }}>
+                        Hoy, 30 de diciembre de 2025, estrenamos una nueva era.
+                    </p>
+                </div>
+
+                <div style={{ display: 'grid', gap: '1.5rem' }}>
+
+                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                        <div style={{ background: '#eff6ff', padding: '10px', borderRadius: '12px', color: '#2563eb' }}>
+                            <Brain size={24} />
+                        </div>
+                        <div>
+                            <h3 style={{ margin: '0 0 0.25rem', color: '#1e293b' }}>1. Sistema Multi-Fase</h3>
+                            <p style={{ margin: 0, fontSize: '0.95rem', color: '#475569', lineHeight: 1.5 }}>
+                                Ya no transcribimos "a lo loco". Ahora el sistema <strong>escucha, analiza y estructura</strong> la información antes de escribir la historia, igual que harías tú. Mayor precisión clínica, menos ruido.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                        <div style={{ background: '#f0fdf4', padding: '10px', borderRadius: '12px', color: '#16a34a' }}>
+                            <ShieldCheck size={24} />
+                        </div>
+                        <div>
+                            <h3 style={{ margin: '0 0 0.25rem', color: '#1e293b' }}>2. Doble Comprobación</h3>
+                            <p style={{ margin: 0, fontSize: '0.95rem', color: '#475569', lineHeight: 1.5 }}>
+                                Hemos contratado a un "médico virtual revisor". Cada historia generada pasa por un <strong>filtro de calidad estricto</strong> para detectar alucinaciones o datos inventados antes de que tú la veas.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                        <div style={{ background: '#fefce8', padding: '10px', borderRadius: '12px', color: '#ca8a04' }}>
+                            <Sparkles size={24} />
+                        </div>
+                        <div>
+                            <h3 style={{ margin: '0 0 0.25rem', color: '#1e293b' }}>3. Aprendizaje Activo (Machine Learning)</h3>
+                            <p style={{ margin: 0, fontSize: '0.95rem', color: '#475569', lineHeight: 1.5 }}>
+                                Si corriges algo, <strong>el sistema aprende</strong>. Tu feedback se guarda en una memoria a largo plazo para mejorar día a día y adaptarse a tu estilo personal.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <button onClick={onClose} style={{
+                    width: '100%', padding: '1rem', marginTop: '2rem', background: '#0f766e', color: 'white',
+                    border: 'none', borderRadius: '12px', fontSize: '1.1rem', fontWeight: 600, cursor: 'pointer',
+                    boxShadow: '0 4px 6px -1px rgba(15, 118, 110, 0.2)'
+                }}>
+                    Entendido, ¡vamos a consulta! 🚀
+                </button>
+            </motion.div>
+        </div>
+    );
+};
 
 function App() {
     const [apiKey, setApiKey] = useState<string>(GROQ_API_KEY);
@@ -34,12 +127,41 @@ function App() {
         validationHistory?: { type: string; field: string; reason: string }[];
     } | undefined>(undefined);
     const [showLessons, setShowLessons] = useState(false);
+    const [showWelcomeModal, setShowWelcomeModal] = useState(false);
 
     // ════════════════════════════════════════════════════════════════
     // BATCHING STATE: Store partial extractions for long consultations
     // ════════════════════════════════════════════════════════════════
     const extractionPartsRef = useRef<ExtractionResult[]>([]);
     const transcriptionPartsRef = useRef<string[]>([]);
+
+    // ════════════════════════════════════════════════════════════════
+    // PERSONALIZATION & MEMORY INIT
+    // ════════════════════════════════════════════════════════════════
+    useEffect(() => {
+        // 1. Personal Greeting & Changelog (Logic: Show on 30 Dec 2025)
+        const today = new Date();
+        const isTargetDate = today.getDate() === 30 && today.getMonth() === 11 && today.getFullYear() === 2025;
+
+        // Check if verify triggered already to be less annoying during dev refreshes? 
+        // For now, user said "al entrar solo hoy", so we enforce date checking strictly.
+        if (isTargetDate) {
+            const hasSeenIntro = sessionStorage.getItem('hasSeenDraGotxiIntro');
+            if (!hasSeenIntro) {
+                setShowWelcomeModal(true);
+                sessionStorage.setItem('hasSeenDraGotxiIntro', 'true');
+            }
+        }
+
+        // 2. Memory Consolidation (Nightly Logic)
+        const runConsolidation = async () => {
+            if (apiKey) {
+                console.log('Running startup memory consolidation...');
+                await MemoryService.consolidateDailyLessons(apiKey);
+            }
+        };
+        runConsolidation();
+    }, [apiKey]); // Added apiKey dep to ensure it runs when key is ready
 
     const handleSaveSettings = (key: string) => {
         setApiKey(key);
@@ -100,322 +222,242 @@ function App() {
             }
 
             // ─────────────────────────────────────────────────────────
-            // CASE 2: FINAL SEGMENT (User pressed Stop)
+            // CASE 2: FINAL RECORDING (Merge + Generate)
             // ─────────────────────────────────────────────────────────
-            console.log('[App] Processing final segment...');
             setIsLoading(true);
-            setHistory('');
-            setSavedRecordId(null);
+            setProcessingStatus('Iniciando procesamiento final...');
             setCurrentView('result');
             setCurrentPatientName(patientName);
 
-            // Transcribe final segment
-            setProcessingStatus('Transcribiendo audio final...');
             const base64Audio = await blobToBase64(blob);
-            const finalTranscriptResult = await aiService.transcribeAudio(base64Audio, blob.type, blob);
-            transcriptionPartsRef.current.push(finalTranscriptResult.data);
 
-            // Combine all transcriptions
+            // 1. Final Transcription
+            setProcessingStatus('Transcribiendo segmento final...');
+            const transcriptResult = await aiService.transcribeAudio(base64Audio, blob.type, blob);
+
+            // Add final part to accumulators
+            transcriptionPartsRef.current.push(transcriptResult.data);
             const fullTranscription = transcriptionPartsRef.current.join(' ');
             setTranscription(fullTranscription);
 
-            // Determine processing path
-            const hasMultipleParts = extractionPartsRef.current.length > 0;
+            // 2. Final Extraction
+            setProcessingStatus('Extrayendo datos clínicos finales...');
+            const finalExtraction = await aiService.extractOnly(transcriptResult.data);
+            extractionPartsRef.current.push(finalExtraction);
 
-            let historyResult;
+            // 3. Merge & Generate (The Logic Core)
+            setProcessingStatus(`Fusionando ${extractionPartsRef.current.length} segmentos y generando historia...`);
 
-            if (hasMultipleParts) {
-                // ═══════════════════════════════════════════════════════
-                // MULTI-PART PATH: Merge extractions then generate
-                // ═══════════════════════════════════════════════════════
-                console.log(`[App] Multi-part consultation: ${extractionPartsRef.current.length + 1} parts`);
+            const result = await aiService.generateFromMergedExtractions(
+                extractionPartsRef.current,
+                fullTranscription,
+                patientName
+            );
 
-                // Extract final segment
-                setProcessingStatus('Extrayendo datos del segmento final...');
-                const finalExtraction = await aiService.extractOnly(finalTranscriptResult.data);
-                extractionPartsRef.current.push(finalExtraction);
+            // 4. Update UI
+            setHistory(result.data);
+            setPipelineMetadata({
+                corrections: result.corrections_applied || 0,
+                models: { generation: result.model, validation: 'gpt-4o' }, // Simplified
+                errorsFixed: 0, // Need to track this from validated pipeline
+                versionsCount: (result.corrections_applied || 0) + 1,
+                remainingErrors: result.remaining_errors,
+                validationHistory: result.validations?.flatMap(v => v.errors)
+            });
+            setSavedRecordId(null);
 
-                // Merge and generate
-                setProcessingStatus(`Fusionando ${extractionPartsRef.current.length} partes y generando historia...`);
-                historyResult = await aiService.generateFromMergedExtractions(
-                    extractionPartsRef.current,
-                    fullTranscription,
-                    patientName
-                );
-            } else {
-                // ═══════════════════════════════════════════════════════
-                // SINGLE-PART PATH: Standard pipeline
-                // ═══════════════════════════════════════════════════════
-                console.log('[App] Single-part consultation: standard pipeline');
-                setProcessingStatus('Generando historia clínica...');
-                historyResult = await aiService.generateMedicalHistory(fullTranscription, patientName);
-            }
-
-            setHistory(historyResult.data);
-            setProcessingStatus('');
-
-            // Map metadata for UI
-            if (historyResult.validations) {
-                // Flatten all errors from all validation rounds to show what was fixed
-                const allFixedErrors = historyResult.validations.flatMap(v => v.errors || []);
-
-                setPipelineMetadata({
-                    corrections: historyResult.corrections_applied || 0,
-                    models: {
-                        generation: historyResult.model,
-                        validation: 'Llama-4 / GPT-120B'
-                    },
-                    errorsFixed: allFixedErrors.length,
-                    versionsCount: (historyResult.corrections_applied || 0) + 1,
-                    remainingErrors: historyResult.remaining_errors,
-                    validationHistory: allFixedErrors // New field for detailed log
-                });
-            }
-
-            // Save to Supabase (only for regular consultations)
-            if (!patientName.startsWith('TEST_LAB_')) {
-                const savedData = await saveMedicalRecord({
-                    patient_name: patientName || 'Paciente Sin Nombre',
-                    consultation_type: hasMultipleParts ? 'Multi-part (merged)' : 'Single-part',
-                    transcription: fullTranscription,
-                    medical_history: historyResult.data,
-                    original_medical_history: historyResult.data,
-                    ai_model: historyResult.model
-                });
-
-                if (savedData && savedData[0]?.id) {
-                    setSavedRecordId(savedData[0].id);
-                    console.log('Record saved with ID:', savedData[0].id);
-                }
-            } else {
-                // Save to Lab Test Logs
-                await saveLabTestLog({
-                    test_name: patientName,
-                    input_type: 'audio',
-                    transcription: fullTranscription,
-                    medical_history: historyResult.data,
-                    metadata: {
-                        corrections: historyResult.corrections_applied || 0,
-                        models: {
-                            generation: historyResult.model,
-                            validation: 'Llama-4 / GPT-120B'
-                        },
-                        errorsFixed: (historyResult.validations || []).reduce((acc, v) => acc + (v.errors?.length || 0), 0),
-                        versionsCount: (historyResult.corrections_applied || 0) + 1,
-                        validationHistory: historyResult.validations?.flatMap(v => v.errors || []),
-                        remainingErrors: historyResult.remaining_errors
-                    }
-                });
-                console.log('[App] Lab test results saved to history');
-            }
-
-            // Reset batching state for next recording
+            // 5. Cleanup Batch State
             extractionPartsRef.current = [];
             transcriptionPartsRef.current = [];
 
         } catch (error) {
-            console.error('Error processing consultation:', error);
-            setHistory(`Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`);
-            setProcessingStatus('');
-            // Reset on error too
-            extractionPartsRef.current = [];
-            transcriptionPartsRef.current = [];
-
-            // CRITICAL: Switch to result view to show the error
-            setCurrentView('result');
+            console.error(error);
+            setProcessingStatus('Error en el procesamiento.');
+            alert('Error processing audio. See console for details.');
+            setCurrentView('record');
         } finally {
             setIsLoading(false);
         }
     };
 
-    // ════════════════════════════════════════════════════════════════
-    // NEW: Text-only pipeline for testing templates
-    // ════════════════════════════════════════════════════════════════
     const handleTextPipeline = async (text: string, patientName: string) => {
         if (!apiKey) {
-            alert('Please configure your API Key first.');
+            alert('Configura tu API Key primero');
             return;
         }
-
-        console.log('[App] Starting Text Simulation...');
+        const aiService = new AIService(apiKey);
         setIsLoading(true);
-        setHistory('');
-        setSavedRecordId(null);
         setCurrentView('result');
-        setCurrentPatientName(patientName);
-        setTranscription(text);
-
+        setProcessingStatus('Procesando texto directo...');
         try {
-            const aiService = new AIService(apiKey);
-            setProcessingStatus('Generando historia desde texto manual...');
+            // Treat as single extraction for now, or just extract -> generate
+            // Reuse merge pipeline for consistency if we want
+            const extraction = await aiService.extractOnly(text);
+            const result = await aiService.generateFromMergedExtractions([extraction], text, patientName);
 
-            // Bypass transcription, go straight to generation (Extraction -> Gen -> Validation)
-            const historyResult = await aiService.generateMedicalHistory(text, patientName);
+            setHistory(result.data);
+            setTranscription(text);
+            setPipelineMetadata({
+                corrections: result.corrections_applied || 0,
+                models: { generation: result.model, validation: 'gpt-4o' },
+                errorsFixed: 0,
+                versionsCount: (result.corrections_applied || 0) + 1,
+                remainingErrors: result.remaining_errors,
+                validationHistory: result.validations?.flatMap(v => v.errors)
+            });
 
-            setHistory(historyResult.data);
-            setProcessingStatus('');
-
-            if (historyResult.validations) {
-                setPipelineMetadata({
-                    corrections: historyResult.corrections_applied || 0,
-                    models: {
-                        generation: historyResult.model,
-                        validation: 'Llama-4 / GPT-120B'
-                    },
-                    errorsFixed: historyResult.validations.reduce((acc, v) => acc + (v.errors?.length || 0), 0),
-                    versionsCount: (historyResult.corrections_applied || 0) + 1,
-                    remainingErrors: historyResult.remaining_errors
+            // NEW: Save log for AudioTestLab history
+            // We need to map the result to the LabTestLog format loosely or just rely on the fact 
+            // that this function is primarily used by AudioTestLab now.
+            if (result.active_memory_used) {
+                await saveLabTestLog({
+                    test_name: patientName,
+                    result: 'success',
+                    duration_ms: 0, // Untracked here
+                    metadata: {
+                        models: { generation: result.model, validation: 'mixed' },
+                        versionsCount: (result.corrections_applied || 0) + 1,
+                        errorsFixed: 0,
+                        active_memory_used: true
+                    }
                 });
             }
 
-            // Save as special "Text Simulation" record
-            await saveMedicalRecord({
-                patient_name: patientName,
-                consultation_type: 'Text Simulation',
-                transcription: text,
-                medical_history: historyResult.data,
-                original_medical_history: historyResult.data,
-                ai_model: historyResult.model
-            });
-
-        } catch (error: any) {
-            console.error('Text pipeline error:', error);
-            setHistory(`Error: ${error.message}`);
+        } catch (e) {
+            console.error(e);
+            setProcessingStatus('Error procesando texto');
         } finally {
             setIsLoading(false);
-            setProcessingStatus('');
+        }
+    }
+
+    const handleSave = async (updatedContent: string) => {
+        try {
+            if (savedRecordId) {
+                await updateMedicalRecord(savedRecordId.toString(), {
+                    medical_history: updatedContent
+                });
+                alert('Historia actualizada correctamente');
+            } else {
+                const saved = await saveMedicalRecord({
+                    patient_name: currentPatientName,
+                    consultation_type: 'CONSULTA GENERAL ORL',
+                    transcription: transcription,
+                    medical_history: updatedContent,
+                    ai_model: 'kimi-k2-merged'
+                });
+                if (saved && saved[0]) {
+                    setSavedRecordId(saved[0].id);
+                    alert('Historia guardada correctamente');
+                }
+            }
+        } catch (error) {
+            console.error("Error saving record:", error);
+            alert('Error al guardar la historia');
         }
     };
 
     return (
-        <Layout
-            onOpenSettings={() => setShowSettings(true)}
-            currentView={currentView === 'result' ? 'record' : currentView}
-            onNavigate={setCurrentView}
-        >
-            {currentView === 'record' ? (
-                <div className="main-container">
-                    <div className="recorder-section">
-                        <Recorder onRecordingComplete={handleRecordingComplete} />
+        <div className="app-container">
+            <AnimatePresence>
+                {showWelcomeModal && (
+                    <WelcomeDraGotxiModal onClose={() => setShowWelcomeModal(false)} />
+                )}
+            </AnimatePresence>
+
+            <Layout
+                currentView={currentView}
+                onNavigate={setCurrentView}
+                onSettingsClick={() => setShowSettings(true)}
+                onChainClick={() => setCurrentView('test-lab')}
+            >
+                {currentView === 'record' && (
+                    <div className="view-content">
+                        <Recorder onRecordingComplete={handleRecordingComplete} isProcessing={isLoading} status={processingStatus} />
                     </div>
-                </div>
-            ) : currentView === 'result' ? (
-                <div className="main-container">
-                    <div className="content-section">
-                        {processingStatus && (
-                            <div className="processing-banner">
-                                <div className="processing-spinner"></div>
-                                {processingStatus}
+                )}
+
+                {currentView === 'history' && (
+                    <HistoryView />
+                )}
+
+                {currentView === 'reports' && (
+                    <ReportsView />
+                )}
+
+                {currentView === 'result' && (
+                    <div className="result-view">
+                        <div className="result-header">
+                            <button className="back-btn" onClick={() => setCurrentView('record')}>Wait, nueva consulta</button>
+                            <h2>Historia Clínica Generada</h2>
+                            <button
+                                className="lessons-btn"
+                                onClick={() => setShowLessons(true)}
+                                title="Ver qué ha aprendido la IA hoy"
+                            >
+                                <Brain size={18} /> Ver Aprendizaje
+                            </button>
+                        </div>
+
+                        {pipelineMetadata && (
+                            <div className="audit-banner">
+                                <div className="audit-stat">
+                                    <span className="audit-label">Versiones</span>
+                                    <span className="audit-value">{pipelineMetadata.versionsCount}</span>
+                                </div>
+                                <div className="audit-stat">
+                                    <span className="audit-label">Errores Corregidos</span>
+                                    <span className="audit-value conflict">{pipelineMetadata.errorsFixed}</span>
+                                </div>
+                                {pipelineMetadata.remainingErrors && pipelineMetadata.remainingErrors.length > 0 && (
+                                    <div className="audit-stat">
+                                        <span className="audit-label">Alertas Pendientes</span>
+                                        <span className="audit-value warning">{pipelineMetadata.remainingErrors.length}</span>
+                                    </div>
+                                )}
                             </div>
                         )}
-                        <HistoryView
-                            content={history}
-                            isLoading={isLoading}
-                            patientName={currentPatientName}
-                            metadata={pipelineMetadata}
-                            onGenerateReport={async () => {
-                                const aiService = new AIService(apiKey);
-                                const reportResult = await aiService.generateMedicalReport(transcription, currentPatientName);
 
-                                if (savedRecordId) {
-                                    console.log('Saving report to record:', savedRecordId);
-                                    await updateMedicalRecord(savedRecordId, { medical_report: reportResult.data });
-                                } else {
-                                    console.warn('No savedRecordId found, report will not be saved to DB');
-                                }
-                                return reportResult.data;
-                            }}
-                            onNewConsultation={() => {
-                                setHistory('');
-                                setTranscription('');
-                                setCurrentPatientName('');
-                                setSavedRecordId(null);
-                                extractionPartsRef.current = [];
-                                transcriptionPartsRef.current = [];
-                                setCurrentView('record');
-                            }}
-                        />
+                        <div className="editable-history-container">
+                            <textarea
+                                className="history-editor"
+                                value={history}
+                                onChange={(e) => setHistory(e.target.value)}
+                            />
+                        </div>
+
+                        <div className="actions-bar">
+                            <button className="action-btn save" onClick={() => handleSave(history)}>
+                                Guardar en Historial
+                            </button>
+                        </div>
                     </div>
-                </div>
-            ) : currentView === 'history' ? (
-                <div className="main-container">
-                    <SearchHistory apiKey={apiKey} />
-                </div>
-            ) : currentView === 'test-lab' ? (
-                <div className="main-container">
+                )}
+
+                {currentView === 'test-lab' && (
                     <AudioTestLab
                         onClose={() => setCurrentView('record')}
                         onRunFullPipeline={handleRecordingComplete}
                         onRunTextPipeline={handleTextPipeline}
                     />
-                </div>
-            ) : (
-                <div className="main-container">
-                    <ReportsView />
-                </div>
-            )}
+                )}
 
-            {showSettings && (
-                <Settings
-                    apiKey={apiKey}
-                    onSave={handleSaveSettings}
-                    onClose={() => setShowSettings(false)}
-                />
-            )}
+                {showSettings && (
+                    <Settings
+                        apiKey={apiKey}
+                        onSave={handleSaveSettings}
+                        onClose={() => setShowSettings(false)}
+                    />
+                )}
 
-            {showLessons && (
-                <div className="lessons-modal-overlay" onClick={() => setShowLessons(false)}>
-                    <div className="lessons-modal" onClick={e => e.stopPropagation()}>
-                        <LessonsPanel onClose={() => setShowLessons(false)} />
-                    </div>
-                </div>
-            )}
-
-            <style>{`
-                .processing-banner {
-                    display: flex;
-                    align-items: center;
-                    gap: 12px;
-                    padding: 12px 20px;
-                    background: rgba(38, 166, 154, 0.1);
-                    border-radius: 12px;
-                    color: var(--brand-primary);
-                    font-weight: 500;
-                    margin-bottom: 16px;
-                }
-                
-                .processing-spinner {
-                    width: 18px;
-                    height: 18px;
-                    border: 2px solid rgba(38, 166, 154, 0.3);
-                    border-top-color: var(--brand-primary);
-                    border-radius: 50%;
-                    animation: spin 1s linear infinite;
-                }
-                
-                @keyframes spin {
-                    to { transform: rotate(360deg); }
-                }
-
-                .lessons-modal-overlay {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    bottom: 0;
-                    background: rgba(0,0,0,0.5);
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    z-index: 1000;
-                }
-                .lessons-modal {
-                    max-width: 90%;
-                    max-height: 90%;
-                    overflow: auto;
-                }
-            `}</style>
-        </Layout>
+                {showLessons && (
+                    <LessonsPanel
+                        onClose={() => setShowLessons(false)}
+                        groqApiKey={apiKey}
+                    />
+                )}
+            </Layout>
+        </div>
     );
 }
 

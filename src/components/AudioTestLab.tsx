@@ -1,5 +1,8 @@
+
 import React, { useState, useRef } from 'react';
-import { Mic, Upload, Square, Activity, FileAudio, FileText } from 'lucide-react';
+import { Mic, Upload, Square, Activity, FileAudio, FileText, Brain } from 'lucide-react';
+import { TestLogDetailModal } from './TestLogDetailModal';
+import { AnimatePresence } from 'framer-motion';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { normalizeAndChunkAudio } from '../utils/audioProcessing';
 
@@ -12,6 +15,7 @@ interface AudioTestLabProps {
 export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPipeline, onRunTextPipeline }) => {
     const [mode, setMode] = useState<'mic' | 'upload' | 'text' | 'history'>('mic');
     const [historyLogs, setHistoryLogs] = useState<any[]>([]);
+    const [selectedLog, setSelectedLog] = useState<any | null>(null);
     const [uploadChunks, setUploadChunks] = useState<Blob[]>([]);
     const [fileName, setFileName] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
@@ -224,7 +228,6 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                     </div>
                 ) : (
                     <div className="history-test-area">
-                        {/* History view content already added partially, fixing structure here */}
                         <div className="history-header">
                             <h3>Historial de Pruebas de Auditoría</h3>
                             <button className="clear-logs-btn" onClick={async () => {
@@ -239,26 +242,39 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                             <table className="logs-table">
                                 <thead>
                                     <tr>
-                                        <th>Fecha</th>
+                                        <th>Hora</th>
                                         <th>Prueba</th>
                                         <th>Ciclos</th>
-                                        <th>Errores Prev.</th>
-                                        <th>Modelo Gen</th>
+                                        <th>Errores</th>
+                                        <th>Modelo</th>
+                                        <th style={{ width: '40px' }} title="Memoria Activa"><Brain size={16} /></th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {historyLogs.map(log => (
-                                        <tr key={log.id} className="log-row">
+                                        <tr
+                                            key={log.id}
+                                            className="log-row"
+                                            onClick={() => setSelectedLog(log)}
+                                            style={{ cursor: 'pointer' }}
+                                        >
                                             <td>{new Date(log.created_at).toLocaleTimeString()}</td>
                                             <td title={log.test_name}>{log.test_name.replace('TEST_LAB_', '')}</td>
                                             <td><span className="badge-cycles">{log.metadata.versionsCount}</span></td>
                                             <td><span className="badge-errors">{log.metadata.errorsFixed}</span></td>
                                             <td><code className="model-code">{log.metadata.models.generation}</code></td>
+                                            <td>
+                                                {log.metadata.active_memory_used && (
+                                                    <span title="Usó Memoria Activa (Lecciones Aprendidas)" style={{ color: '#ca8a04' }}>
+                                                        <Brain size={16} fill="#fef08a" />
+                                                    </span>
+                                                )}
+                                            </td>
                                         </tr>
                                     ))}
                                     {historyLogs.length === 0 && (
                                         <tr>
-                                            <td colSpan={5} className="no-logs">No hay pruebas registradas aún.</td>
+                                            <td colSpan={6} className="no-logs">No hay pruebas registradas aún.</td>
                                         </tr>
                                     )}
                                 </tbody>
@@ -267,6 +283,15 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                     </div>
                 )}
             </div>
+
+            <AnimatePresence>
+                {selectedLog && (
+                    <TestLogDetailModal
+                        log={selectedLog}
+                        onClose={() => setSelectedLog(null)}
+                    />
+                )}
+            </AnimatePresence>
 
             <style>{`
                 .audio-lab-container {
