@@ -327,43 +327,43 @@ REGLAS CRÍTICAS (LEE CON ATENCIÓN):
 ═══════════════════════════════════════════════════════════
 
 1. SOLO INCLUYE LO QUE SE MENCIONA:
-   - Si una exploración NO se nombró (ej: Otoscopia, GRBAS), NO LA PONGAS.
+   - Si una exploración NO se nombró, NO LA PONGAS.
    - Si un antecedente NO se preguntó, NO LO PONGAS.
-   - Cada consulta es diferente. NO rellenes con "N/A" cosas no mencionadas.
 
 2. ANTECEDENTES:
    - Si se preguntó y el paciente NIEGA → "No"
    - Si se preguntó y HAY dato → el dato
    - Si NO se preguntó → No incluir esa línea
 
-3. EXPLORACIÓN:
-   - Solo incluye las exploraciones REALIZADAS y NOMBRADAS.
-   - Ejemplo: Si solo hiciste Rinoscopia y Estroboscopia, SOLO esas aparecen.
+3. FORMATO VISUAL (IMPORTANTE):
+   - Usa encabezados Markdown ## para secciones.
+   - Usa GUIONES (-) para cada campo. El CSS ocultará los puntos, pero necesito el guion para el salto de línea.
+   - Ejemplo:
+     - Alergias: No
+     - Tratamiento: No
 
-4. FORMATO:
-   - Usa encabezados Markdown ## para cada sección.
-   - Estilo telegráfico (frases cortas, sin verbos innecesarios).
-   - Plan: resumido, separado por comas.
-   - NO incluyas "¿Desea que le prepare también el informe médico?" en el texto.
-
-═══════════════════════════════════════════════════════════
-ESTRUCTURA (Adapta según los datos disponibles):
-═══════════════════════════════════════════════════════════
+4. ESTRUCTURA (Dinámica):
 
 ## ANTECEDENTES PERSONALES
-[Solo los campos que se preguntaron/mencionaron]
+- Alergias medicamentosas: [Dato/No]
+- Enfermedades crónicas: [Dato/No]
+- Intervenciones quirúrgicas: [Dato/No]
+- Tratamiento habitual: [Dato/No]
 
 ## ENFERMEDAD ACTUAL
-[Motivo de consulta y síntomas principales, estilo telegráfico]
+[Resumen telegráfico del motivo de consulta]
 
 ## EXPLORACIÓN
-[Solo las exploraciones realizadas. Ej: "Rinoscopia: mucosa inflamada, secreción clara."]
+[Usa guiones para cada ítem. SOLO lo realizado]
+- Cavidad oral: [Dato]
+- Rinoscopia: [Dato]
+- [Otros hallazgos con guion]
 
 ## IMPRESIÓN DIAGNÓSTICA
 1. [Diagnóstico principal]
 
 ## PLAN TERAPÉUTICO
-[Tratamiento resumido, separado por comas]
+[Tratamiento resumido]
 `;
 
         return this.callModel(
