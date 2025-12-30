@@ -1,19 +1,20 @@
 import React, { useState, useRef } from 'react';
 import { Mic, Upload, Square, Activity, FileAudio } from 'lucide-react';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
-import { normalizeAudio } from '../utils/audioProcessing';
+import { normalizeAndChunkAudio } from '../utils/audioProcessing';
 
 interface AudioTestLabProps {
     onClose: () => void;
-    onRunFullPipeline: (blob: Blob, patientName: string) => Promise<void>;
+    onRunFullPipeline: (blob: Blob, patientName: string, isPartialBatch?: boolean, batchIndex?: number) => Promise<void>;
 }
 
 export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPipeline }) => {
     const [mode, setMode] = useState<'mic' | 'upload'>('mic');
-    const [uploadBlob, setUploadBlob] = useState<Blob | null>(null);
+    const [uploadChunks, setUploadChunks] = useState<Blob[]>([]); // Store array of chunks
     const [fileName, setFileName] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [normalizationStatus, setNormalizationStatus] = useState('');
+    const [processingStep, setProcessingStep] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Use our actual hook to test REAL constraints
@@ -25,16 +26,16 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
         const file = event.target.files?.[0];
         if (file) {
             setFileName(file.name);
-            setNormalizationStatus('Normalizando volumen...');
+            setNormalizationStatus('Procesando y dividiendo audio...');
             setIsProcessing(true);
             try {
-                // Apply normalization immediately upon upload
-                const normalized = await normalizeAudio(file);
-                setUploadBlob(normalized);
-                setNormalizationStatus('✓ Normalización completada');
+                // Apply normalization and chunking
+                const chunks = await normalizeAndChunkAudio(file);
+                setUploadChunks(chunks);
+                setNormalizationStatus(`✓ Normalizado y dividido en ${chunks.length} partes`);
             } catch (e) {
                 console.error('Normalization failed:', e);
-                setUploadBlob(file); // Fallback to original
+                setUploadChunks([file]); // Fallback to original as single chunk
                 setNormalizationStatus('⚠ Fallo al normalizar (usando original)');
             } finally {
                 setIsProcessing(false);
@@ -42,12 +43,31 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
         }
     };
 
-    const handleRunSimulation = () => {
-        const blobToProcess = mode === 'mic' ? micBlob : uploadBlob;
-        if (!blobToProcess) return;
+    const handleRunSimulation = async () => {
+        const dummyName = `TEST_LAB_${new Date().toLocaleTimeString()}`;
 
-        // Use a dummy name for test
-        onRunFullPipeline(blobToProcess, `TEST_LAB_${new Date().toLocaleTimeString()}`);
+        if (mode === 'mic' && micBlob) {
+            await onRunFullPipeline(micBlob, dummyName, false, 0);
+        } else if (mode === 'upload' && uploadChunks.length > 0) {
+            setIsProcessing(true);
+            // Process chunks sequentially
+            for (let i = 0; i < uploadChunks.length; i++) {
+                const isLast = i === uploadChunks.length - 1;
+                const partNum = i + 1;
+                const total = uploadChunks.length;
+
+                setProcessingStep(`Enviando parte ${partNum} de ${total} al servidor...`);
+                console.log(`[AudioLab] Sending chunk ${partNum}/${total}`);
+
+                // If not last, it's a partial batch. If last, it's the final segment.
+                await onRunFullPipeline(uploadChunks[i], dummyName, !isLast, i);
+
+                // Small delay to prevent race conditions in state updates
+                if (!isLast) await new Promise(r => setTimeout(r, 500));
+            }
+            setProcessingStep('¡Proceso completado!');
+            setIsProcessing(false);
+        }
     };
 
     return (
@@ -128,12 +148,18 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                             </div>
                         )}
 
-                        {uploadBlob && !isProcessing && (
+                        {uploadChunks.length > 0 && (
                             <div className="playback-area">
-                                <h3>Audio Normalizado:</h3>
-                                <audio controls src={URL.createObjectURL(uploadBlob)} />
-                                <button className="run-pipeline-btn" onClick={handleRunSimulation}>
-                                    <Activity size={18} /> Procesar este audio
+                                <h3>Audio Normalizado (Parte 1/{uploadChunks.length}):</h3>
+                                <audio controls src={URL.createObjectURL(uploadChunks[0])} />
+                                <button
+                                    className="run-pipeline-btn"
+                                    onClick={handleRunSimulation}
+                                    disabled={isProcessing}
+                                    style={{ opacity: isProcessing ? 0.7 : 1 }}
+                                >
+                                    <Activity size={18} />
+                                    {isProcessing ? processingStep : `Procesar (${uploadChunks.length} partes)`}
                                 </button>
                             </div>
                         )}

@@ -191,6 +191,9 @@ function App() {
             // Reset on error too
             extractionPartsRef.current = [];
             transcriptionPartsRef.current = [];
+
+            // CRITICAL: Switch to result view to show the error
+            setCurrentView('result');
         } finally {
             setIsLoading(false);
         }
@@ -254,7 +257,7 @@ function App() {
                 <div className="main-container">
                     <AudioTestLab
                         onClose={() => setCurrentView('record')}
-                        onRunFullPipeline={(blob, name) => handleRecordingComplete(blob, name)}
+                        onRunFullPipeline={handleRecordingComplete}
                     />
                 </div>
             ) : (
