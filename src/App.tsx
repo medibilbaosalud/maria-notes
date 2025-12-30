@@ -7,7 +7,7 @@ import { SearchHistory } from './components/SearchHistory';
 import { ReportsView } from './components/ReportsView';
 import { AIService } from './services/ai';
 import { ExtractionResult } from './services/groq';
-import { saveMedicalRecord, updateMedicalRecord } from './services/storage';
+import { saveMedicalRecord, updateMedicalRecord, saveLabTestLog } from './services/storage';
 import { AudioTestLab } from './components/AudioTestLab';
 import './App.css';
 
@@ -170,19 +170,41 @@ function App() {
                 });
             }
 
-            // Save to Supabase
-            const savedData = await saveMedicalRecord({
-                patient_name: patientName || 'Paciente Sin Nombre',
-                consultation_type: hasMultipleParts ? 'Multi-part (merged)' : 'Single-part',
-                transcription: fullTranscription,
-                medical_history: historyResult.data,
-                original_medical_history: historyResult.data,
-                ai_model: historyResult.model
-            });
+            // Save to Supabase (only for regular consultations)
+            if (!patientName.startsWith('TEST_LAB_')) {
+                const savedData = await saveMedicalRecord({
+                    patient_name: patientName || 'Paciente Sin Nombre',
+                    consultation_type: hasMultipleParts ? 'Multi-part (merged)' : 'Single-part',
+                    transcription: fullTranscription,
+                    medical_history: historyResult.data,
+                    original_medical_history: historyResult.data,
+                    ai_model: historyResult.model
+                });
 
-            if (savedData && savedData[0]?.id) {
-                setSavedRecordId(savedData[0].id);
-                console.log('Record saved with ID:', savedData[0].id);
+                if (savedData && savedData[0]?.id) {
+                    setSavedRecordId(savedData[0].id);
+                    console.log('Record saved with ID:', savedData[0].id);
+                }
+            } else {
+                // Save to Lab Test Logs
+                await saveLabTestLog({
+                    test_name: patientName,
+                    input_type: 'audio',
+                    transcription: fullTranscription,
+                    medical_history: historyResult.data,
+                    metadata: {
+                        corrections: historyResult.corrections_applied || 0,
+                        models: {
+                            generation: historyResult.model,
+                            validation: 'Llama-4 / GPT-120B'
+                        },
+                        errorsFixed: (historyResult.validations || []).reduce((acc, v) => acc + (v.errors?.length || 0), 0),
+                        versionsCount: (historyResult.corrections_applied || 0) + 1,
+                        validationHistory: historyResult.validations?.flatMap(v => v.errors || []),
+                        remainingErrors: historyResult.remaining_errors
+                    }
+                });
+                console.log('[App] Lab test results saved to history');
             }
 
             // Reset batching state for next recording

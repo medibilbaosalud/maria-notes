@@ -10,7 +10,8 @@ interface AudioTestLabProps {
 }
 
 export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPipeline, onRunTextPipeline }) => {
-    const [mode, setMode] = useState<'mic' | 'upload' | 'text'>('mic');
+    const [mode, setMode] = useState<'mic' | 'upload' | 'text' | 'history'>('mic');
+    const [historyLogs, setHistoryLogs] = useState<any[]>([]);
     const [uploadChunks, setUploadChunks] = useState<Blob[]>([]);
     const [fileName, setFileName] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
@@ -23,6 +24,17 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
     const { isRecording, startRecording, stopRecording, audioBlob: micBlob, duration } = useAudioRecorder({
         batchIntervalMs: 0 // Disable batching for simple test
     });
+
+    React.useEffect(() => {
+        if (mode === 'history') {
+            const fetchLogs = async () => {
+                const { getLabTestLogs } = await import('../services/storage');
+                const logs = await getLabTestLogs();
+                setHistoryLogs(logs);
+            };
+            fetchLogs();
+        }
+    }, [mode]);
 
     const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -108,6 +120,12 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                 >
                     <FileText size={18} /> Pegar Transcripción
                 </button>
+                <button
+                    className={`tab ${mode === 'history' ? 'active' : ''}`}
+                    onClick={() => setMode('history')}
+                >
+                    <Activity size={18} /> Historial de Auditorías
+                </button>
             </div>
 
             <div className="lab-content">
@@ -159,13 +177,6 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                             />
                         </div>
 
-                        {fileName && (
-                            <div className="file-info">
-                                <p className="filename">{fileName}</p>
-                                <p className="status">{normalizationStatus}</p>
-                            </div>
-                        )}
-
                         {uploadChunks.length > 0 && (
                             <div className="playback-area">
                                 <h3>Audio Normalizado (Parte 1/{uploadChunks.length}):</h3>
@@ -182,7 +193,7 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                             </div>
                         )}
                     </div>
-                ) : (
+                ) : mode === 'text' ? (
                     <div className="text-test-area">
                         <div className="config-info">
                             <p><strong>Simulación Directa:</strong></p>
@@ -203,6 +214,49 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                             <Activity size={18} />
                             {isProcessing ? processingStep : 'Simular desde Texto'}
                         </button>
+                    </div>
+                ) : (
+                    <div className="history-test-area">
+                        {/* History view content already added partially, fixing structure here */}
+                        <div className="history-header">
+                            <h3>Historial de Pruebas de Auditoría</h3>
+                            <button className="clear-logs-btn" onClick={async () => {
+                                if (confirm('¿Borrar todo el historial de pruebas?')) {
+                                    const { clearLabTestLogs } = await import('../services/storage');
+                                    await clearLabTestLogs();
+                                    setHistoryLogs([]);
+                                }
+                            }}>Limpiar Historial</button>
+                        </div>
+                        <div className="logs-table-container">
+                            <table className="logs-table">
+                                <thead>
+                                    <tr>
+                                        <th>Fecha</th>
+                                        <th>Prueba</th>
+                                        <th>Ciclos</th>
+                                        <th>Errores Prev.</th>
+                                        <th>Modelo Gen</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {historyLogs.map(log => (
+                                        <tr key={log.id} className="log-row">
+                                            <td>{new Date(log.created_at).toLocaleTimeString()}</td>
+                                            <td title={log.test_name}>{log.test_name.replace('TEST_LAB_', '')}</td>
+                                            <td><span className="badge-cycles">{log.metadata.versionsCount}</span></td>
+                                            <td><span className="badge-errors">{log.metadata.errorsFixed}</span></td>
+                                            <td><code className="model-code">{log.metadata.models.generation}</code></td>
+                                        </tr>
+                                    ))}
+                                    {historyLogs.length === 0 && (
+                                        <tr>
+                                            <td colSpan={5} className="no-logs">No hay pruebas registradas aún.</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 )}
             </div>
@@ -327,6 +381,78 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                     border-top: 1px solid #e2e8f0;
                 }
                 audio { width: 100%; margin-bottom: 1rem; }
+                .history-test-area {
+                    margin-top: 1rem;
+                }
+                .history-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 1rem;
+                }
+                .clear-logs-btn {
+                    padding: 0.4rem 0.8rem;
+                    background: #fee2e2;
+                    color: #991b1b;
+                    border: 1px solid #fecaca;
+                    border-radius: 6px;
+                    font-size: 0.85rem;
+                    cursor: pointer;
+                }
+                .logs-table-container {
+                    background: #f8fafc;
+                    border-radius: 12px;
+                    border: 1px solid #e2e8f0;
+                    overflow: auto;
+                    max-height: 400px;
+                }
+                .logs-table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 0.85rem;
+                }
+                .logs-table th {
+                    text-align: left;
+                    padding: 0.75rem 1rem;
+                    background: #f1f5f9;
+                    color: #475569;
+                    font-weight: 600;
+                    position: sticky;
+                    top: 0;
+                }
+                .logs-table td {
+                    padding: 0.75rem 1rem;
+                    border-top: 1px solid #e2e8f0;
+                    color: #1e293b;
+                }
+                .log-row:hover { background: #f1f5f9; }
+                .badge-cycles {
+                    background: #e0f2fe;
+                    color: #0369a1;
+                    padding: 2px 6px;
+                    border-radius: 10px;
+                    font-weight: 600;
+                }
+                .badge-errors {
+                    background: #ecfdf5;
+                    color: #047857;
+                    padding: 2px 6px;
+                    border-radius: 10px;
+                    font-weight: 600;
+                }
+                .model-code {
+                    background: #f1f5f9;
+                    padding: 2px 4px;
+                    border-radius: 4px;
+                    font-family: monospace;
+                    font-size: 0.75rem;
+                }
+                .no-logs {
+                    text-align: center;
+                    padding: 2rem !important;
+                    color: #94a3b8;
+                    font-style: italic;
+                }
             `}</style>
         </div>
     );

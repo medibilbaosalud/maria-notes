@@ -1,4 +1,4 @@
-import { db, type MedicalRecord } from './db';
+import { db, type MedicalRecord, type LabTestLog } from './db';
 import { supabase } from './supabase';
 
 export type { MedicalRecord };
@@ -139,5 +139,33 @@ export const syncFromCloud = async (): Promise<number> => {
     } catch (error) {
         console.error('[Cloud Sync] Sync error:', error);
         return 0;
+    }
+};
+export const saveLabTestLog = async (log: Omit<LabTestLog, 'id' | 'created_at'>): Promise<void> => {
+    try {
+        const newLog: LabTestLog = {
+            ...log,
+            created_at: new Date().toISOString()
+        };
+        await db.lab_test_logs.add(newLog);
+    } catch (error) {
+        console.error('Error saving lab test log:', error);
+    }
+};
+
+export const getLabTestLogs = async (): Promise<LabTestLog[]> => {
+    try {
+        return await db.lab_test_logs.orderBy('created_at').reverse().toArray();
+    } catch (error) {
+        console.error('Error getting lab test logs:', error);
+        return [];
+    }
+};
+
+export const clearLabTestLogs = async (): Promise<void> => {
+    try {
+        await db.lab_test_logs.clear();
+    } catch (error) {
+        console.error('Error clearing lab test logs:', error);
     }
 };

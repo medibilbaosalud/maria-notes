@@ -320,6 +320,8 @@ ${previousErrors.filter(e => e.type === 'missing').length > 0 ? '- INCLUIR todos
         const prompt = `Actúa como Experto Redactor Clínico ORL.
 Tu objetivo es redactar una Historia Clínica FORMAL y LIMPIA basada en los datos extraídos.
 
+${errorFeedback}
+
 REGLAS DE FORMATO (ESTRICTO):
 1. CERO MARKDOWN DE FORMATO: No uses negritas (**texto**), ni cursivas, ni encabezados (##).
 2. TÍTULOS EN MAYÚSCULAS: Para separar secciones usa solo el nombre en mayúsculas (ej: ANTECEDENTES PERSONALES).
