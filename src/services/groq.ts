@@ -175,8 +175,25 @@ REGLAS DE EXTRACCIÓN:
 1. Si algo NO se menciona, el valor debe ser null (no inventar, no asumir)
 2. Extrae TEXTUALMENTE lo que dice el médico
 3. Para exploraciones, solo incluye las que el médico NOMBRA explícitamente
-4. Si el médico NIEGA algo explícitamente (ej: "No tiene alergias"), extráelo textualmente en lugar de null.
-5. Si hay ambigüedad o algo inaudible importante, USA EL CAMPO 'notas_calidad'.
+4. MANEJO DE NEGACIONES Y CONTRADICCIONES (Regla C):
+   - Si niega explícitamente: "NEGATIVO: Síntoma".
+   - Si hay contradicción temporal (ej: "No tiene fiebre ahora" pero "tuvo 38 ayer"): Extrae AMBOS.
+     Ej: "NEGATIVO: Fiebre actual; Positivo: Pico febril 38C ayer".
+
+5. ALTA INCERTIDUMBRE (Regla A):
+   - Si algo es inaudible o ambiguo, NO INVENTES.
+   - Usa: "dosis no especificada / inaudible; confirmar con receta".
+
+6. PLAN SIEMPRE PRESENTE (Regla D):
+   - Si hay una parte inaudible (ej: dosis), EXTRAE TODO LO DEMÁS.
+   - NO dejes el plan en null. Escribe "Plan + [Pendiente confirmar: detalle]".
+
+7. NORMALIZACIÓN CLÍNICA (Regla E):
+   - Normaliza marcas a principios activos (ej: "Eliquis" -> "Apixabán").
+   - Corrige errores fonéticos obvios (ej: "Pixaban" -> "Apixabán").
+   - NO añadas medicación "probable" si no se menciona explícitamente.
+
+8. Si hay ambigüedad o algo inaudible importante, USA EL CAMPO 'notas_calidad'.
 
 Devuelve un JSON con esta estructura exacta:
 
@@ -189,15 +206,14 @@ Devuelve un JSON con esta estructura exacta:
   },
   "enfermedad_actual": {
     "motivo_consulta": "texto breve del motivo",
-    "sintomas": ["array de síntomas mencionados"],
+    "sintomas": ["array de síntomas (positivos) y 'NEGATIVO: síntoma' (negativos)"],
     "evolucion": "duración/evolución si se menciona" | null
   },
   "exploraciones_realizadas": {
     "nombre_exploracion": "hallazgo textual" | null
   },
   "diagnostico": ["array de diagnósticos"] | null,
-  "diagnostico": ["array de diagnósticos"] | null,
-  "plan": "plan terapéutico mencionado" | null,
+  "plan": "plan terapéutico completo. Si falta dosis, pon [PENDIENTE]" | null,
   "notas_calidad": [
     { "tipo": "INAUDIBLE", "seccion": "plan", "descripcion": "No se entiende la dosis del medicamento X" }
   ]
@@ -308,28 +324,34 @@ ${JSON.stringify(extraction, null, 2)}
 FORMATO DE SALIDA:
 - Markdown estricto.
 - Usa Títulos (##) para las secciones principales.
-- Estilo: NARRATIVA MÉDICA PROFESIONAL. No uses listas con guiones salvo que sea imprescindible.
-- Agrupa la información en párrafos coherentes y legibles.
-- NO repitas las etiquetas de campo (ej: No digas "Enfermedad: Diabetes. Enfermedad: Hipertensión", di "Antecedentes de Diabetes Tipo 2 e Hipertensión").
+- Estilo: Narrativa profesional pero estructura clara.
+- IMPORTANTE: En "EXPLORACIÓN", separa claramente "General" de "Complementaria" si hay datos.
+- MANEJO DE NEGATIVOS: Si en la extracción ves "NEGATIVO: Síntoma", nárralo como "Niega síntoma" o "No refiere síntoma". NO lo pongas como si lo tuviera.
 
-PLANTILLA DE EJEMPLO (Adapta al contenido real):
+PLANTILLA DE ESTRUCTURA (Otorrinolaringología):
 
 ## ANTECEDENTES PERSONALES
-Paciente con alergias a [X]. Como antecedentes de interés destaca [Y]. No refiere intervenciones quirúrgicas previas.
+[Texto narrativo]
 
 ## ENFERMEDAD ACTUAL
-Acude por [Motivo], presentando síntomas de [Síntomas] desde hace [Tiempo]. Refiere [Detalles].
+[Narrativa detallada del motivo y síntomas]
 
-## EXPLORACIÓN
-A la exploración destaca: [Hallazgos].
-[Oídos]: [Estado]. [Cuello]: [Estado].
+## EXPLORACIÓN GENERAL
+**Orofaringe:** [Detalle]
+**Rinoscopia:** [Detalle]
+**Otoscopia:** [Detalle]
+**Cuello:** [Detalle]
+(Incluye solo las que tengan datos)
+
+## EXPLORACIÓN COMPLEMENTARIA
+**Fibroscopia/Estroboscopia:** [Detalle si existe]
+**Audiometría:** [Detalle si existe]
 
 ## IMPRESIÓN DIAGNÓSTICA
-Cuadro compatible con [Diagnóstico].
+[Diagnóstico principal y diferencial]
 
 ## PLAN TERAPÉUTICO
-Se pauta [Tratamiento].
-Se recomienda [Recomendaciones].
+[Pauta numerada o narrativa clara]
 
 Paciente: ${patientName || 'No especificado'}
 
