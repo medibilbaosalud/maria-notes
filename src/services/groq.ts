@@ -317,48 +317,53 @@ ${previousErrors.filter(e => e.type === 'missing').length > 0 ? '- INCLUIR todos
 `;
         }
 
-        const prompt = `Eres Maria Notes, asistente clínico ORL. Genera informe estructurado.
+        const prompt = `Eres Maria Notes, asistente clínico ORL. Genera historia clínica estructurada.
 ${errorFeedback}
-DATOS:
+DATOS EXTRAÍDOS:
 ${JSON.stringify(extraction, null, 2)}
 
-REGLAS FORMATO:
-- Estilo telegráfico. Si niega -> "No". Si no hay dato -> "N/A".
-- Max 14 palabras por línea.
-- Unidades: mg, d, sem, s.
-- Audiometría: siempre "(rellenar por nosotros)".
-- PREGUNTA FINAL: "¿Desea que le prepare también el informe médico?"
-- NO uses guiones "-" ni bullets. Formato texto plano.
+═══════════════════════════════════════════════════════════
+REGLAS CRÍTICAS (LEE CON ATENCIÓN):
+═══════════════════════════════════════════════════════════
 
-ESTRUCTURA ÚNICA (Usa esta para TODOS los casos):
+1. SOLO INCLUYE LO QUE SE MENCIONA:
+   - Si una exploración NO se nombró (ej: Otoscopia, GRBAS), NO LA PONGAS.
+   - Si un antecedente NO se preguntó, NO LO PONGAS.
+   - Cada consulta es diferente. NO rellenes con "N/A" cosas no mencionadas.
 
-ANTECEDENTES PERSONALES
-Alergias medicamentosas: [Dato/No/N/A]
-Enfermedades crónicas: [Dato/No/N/A]
-Intervenciones quirúrgicas: [Dato/No/N/A]
-Tratamiento habitual: [Dato/No/N/A]
+2. ANTECEDENTES:
+   - Si se preguntó y el paciente NIEGA → "No"
+   - Si se preguntó y HAY dato → el dato
+   - Si NO se preguntó → No incluir esa línea
 
-ENFERMEDAD ACTUAL
-[Resumen telegráfico del motivo de consulta y síntomas]
+3. EXPLORACIÓN:
+   - Solo incluye las exploraciones REALIZADAS y NOMBRADAS.
+   - Ejemplo: Si solo hiciste Rinoscopia y Estroboscopia, SOLO esas aparecen.
 
-EXPLORACIÓN GENERAL
-Cavidad oral: [Dato/N/A]
-Rinoscopia: [Dato/N/A]
-Otoscopia: [Dato/N/A]
-Impedanciometría: [Dato/N/A]
-Audiometría: (rellenar por nosotros)
+4. FORMATO:
+   - Usa encabezados Markdown ## para cada sección.
+   - Estilo telegráfico (frases cortas, sin verbos innecesarios).
+   - Plan: resumido, separado por comas.
+   - NO incluyas "¿Desea que le prepare también el informe médico?" en el texto.
 
-EXPLORACIÓN COMPLEMENTARIA
-[Aquí va la prueba específica si la hay: Estroboscopia, FEES, PEAT, TAC, etc. Si no hay, N/A]
+═══════════════════════════════════════════════════════════
+ESTRUCTURA (Adapta según los datos disponibles):
+═══════════════════════════════════════════════════════════
 
-IMPRESIÓN DIAGNÓSTICA
+## ANTECEDENTES PERSONALES
+[Solo los campos que se preguntaron/mencionaron]
+
+## ENFERMEDAD ACTUAL
+[Motivo de consulta y síntomas principales, estilo telegráfico]
+
+## EXPLORACIÓN
+[Solo las exploraciones realizadas. Ej: "Rinoscopia: mucosa inflamada, secreción clara."]
+
+## IMPRESIÓN DIAGNÓSTICA
 1. [Diagnóstico principal]
-2. [Diagnóstico secundario si hay]
 
-PLAN TERAPÉUTICO
-[Resumen del tratamiento en estilo telegráfico, separado por comas]
-
-¿Desea que le prepare también el informe médico?
+## PLAN TERAPÉUTICO
+[Tratamiento resumido, separado por comas]
 `;
 
         return this.callModel(
