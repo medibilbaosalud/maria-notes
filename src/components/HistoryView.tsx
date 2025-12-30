@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Copy, Check, FileText, Sparkles, FileOutput, X, Printer, Plus, AlertTriangle, Edit2 } from 'lucide-react';
+import { Copy, Check, FileText, Sparkles, FileOutput, X, Printer, Plus, AlertTriangle, Edit2, Brain, Wand2, ThumbsDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { MBSLogo } from './MBSLogo';
 import { AIAuditWidget } from './AIAuditWidget';
@@ -315,22 +315,57 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
             <div className="document-content markdown-body">
               {isEditing ? (
-                <textarea
-                  className="history-edit-textarea"
-                  value={editValue}
-                  onChange={(e) => setEditValue(e.target.value)}
-                  style={{
-                    width: '100%',
-                    minHeight: '400px',
-                    padding: '1rem',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '8px',
-                    fontFamily: 'inherit',
-                    fontSize: '1rem',
-                    lineHeight: '1.6',
-                    resize: 'vertical'
-                  }}
-                />
+                <>
+                  <textarea
+                    className="history-edit-textarea"
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    style={{
+                      width: '100%',
+                      minHeight: '400px',
+                      padding: '1rem',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '8px',
+                      fontFamily: 'inherit',
+                      fontSize: '1rem',
+                      lineHeight: '1.6',
+                      resize: 'vertical'
+                    }}
+                  />
+
+                  {/* AI Feedback Widget */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="ai-feedback-widget"
+                  >
+                    <div className="feedback-header">
+                      <div className="brain-icon-wrapper">
+                        <Brain size={20} />
+                      </div>
+                      <div className="feedback-title">
+                        <h4>Aprendizaje Activo en Curso</h4>
+                        <p>Sus ediciones entrenarán al modelo para la próxima vez.</p>
+                      </div>
+                    </div>
+
+                    <div className="feedback-content">
+                      <div className="improvement-preview">
+                        <Wand2 size={18} className="improvement-icon" />
+                        <span>
+                          <strong>Impacto:</strong> Al guardar, el sistema analizará la diferencia entre el borrador original y su versión final para ajustar el prompt de "Enfermedad Actual" y evitar errores similares.
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="feedback-actions">
+                      <button className="decline-btn" title="Rechazar este borrador por completo">
+                        <ThumbsDown size={16} />
+                        <span>Declinar Borrador</span>
+                      </button>
+                    </div>
+                  </motion.div>
+                </>
               ) : (
                 <ReactMarkdown>{historyText}</ReactMarkdown>
               )}
@@ -804,11 +839,12 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
         .modal-header h3 {
           margin: 0;
+          font-family: var(--font-display);
           color: var(--text-primary);
         }
-
+        
         .close-btn {
-          background: transparent;
+          background: none;
           border: none;
           cursor: pointer;
           color: var(--text-secondary);
