@@ -333,36 +333,44 @@ REGLAS CRÍTICAS DE REDACCIÓN:
 
 REGLAS DE FORMATO (ESTRICTO):
 1. TÍTULOS EN MAYÚSCULAS.
-2. SALTO DE LÍNEA OBLIGATORIO: Debe haber SIEMPRE una línea en blanco entre el título y el contenido.
-3. VIÑETAS OBLIGATORIAS: El contenido de las secciones (excepto Enfermedad Actual) DEBE empezar con un guion ("- ").
+2. SALTO DE LÍNEA OBLIGATORIO entre título y contenido.
+3. ESTILO TELEGRÁFICO: Frases breves, sin artículos ni prosa innecesaria. Unidades normalizadas (mg, días, sem).
 
-ESTRUCTURA DE SALIDA REQUERIDA (Supérstricta):
+ESTRUCTURA DE SALIDA REQUERIDA (Guía ORL):
 
 ANTECEDENTES PERSONALES
 
-- [Lista de antecedentes. IMPORTANTE: Si niega, escribe: "- Niega alergias..."]
+- Alergias medicamentosas: [Fármaco y reacción o "—" si no consta]
+- Enfermedades crónicas: [Diagnósticos o "—"]
+- Intervenciones quirúrgicas: [Cirugía + año o "—"]
+- Tratamiento habitual: [Fármaco, dosis, pauta o "—"]
 
 ENFERMEDAD ACTUAL
 
-[Narrativa técnica. DEBES INCLUIR:
-1. Motivo de consulta.
-2. Desencadenantes (ej: "tras infección viral").
-3. Estado previo.
-4. Evolución temporal.]
+[Resumen telegráfico: Motivo + tiempo evolución + síntomas clave + factores riesgo. 1-3 frases cortas.]
 
-EXPLORACIÓN
+EXPLORACIÓN GENERAL
 
-- [Lista hallazgos positivos. Ej: "- Fibrolaringoscopia: ..."]
+[Rellena SOLO si se menciona. Si no, en blanco.]
+- Cavidad oral: [Hallazgos]
+- Rinoscopia: [Hallazgos]
+- Otoscopia: [Hallazgos]
+- Impedanciometría: [Hallazgos]
+- Audiometría: [Rellenar por nosotros (DEJAR EN BLANCO)]
+
+EXPLORACIÓN COMPLEMENTARIA (Elige SOLO UNA, la más relevante)
+
+- [Nombre prueba (ej: Videonasofibroscopia)]: [Hallazgos concisos. No enumerar todo, solo lo relevante.]
 
 IMPRESIÓN DIAGNÓSTICA
 
-- [Diagnóstico principal]
+[1-3 diagnósticos ordenados por probabilidad. Sin abreviaturas raras.]
 
 PLAN TERAPÉUTICO
 
-- [Pauta 1]
+- [Pauta 1 (Telegáfica)]
 - [Pauta 2]
-- [Pauta 3]
+- [Pauta 3 . Separada por guiones SIEMPRE]
 
 DATOS DE ENTRADA:
 ${JSON.stringify(extraction, null, 2)}`;
