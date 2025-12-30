@@ -1,6 +1,4 @@
-
 import { supabase } from './supabase';
-import { GroqService } from './groq';
 
 // Initialize Groq specifically for memory operations (lighter model if possible)
 const MEMORY_MODEL = 'llama-3.1-70b-versatile'; // Good balance for summarization
