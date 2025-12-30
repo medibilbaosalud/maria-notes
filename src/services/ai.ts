@@ -20,7 +20,7 @@ export interface AIResultWithMetadata extends AIResult<string> {
 export class AIService {
     private groq: GroqService;
 
-    constructor(groqApiKey: string) {
+    constructor(groqApiKey: string | string[]) {
         this.groq = new GroqService(groqApiKey);
     }
 

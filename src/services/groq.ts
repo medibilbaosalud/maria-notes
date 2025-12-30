@@ -78,14 +78,44 @@ export interface PipelineResult {
 }
 
 export class GroqService {
-    private apiKey: string;
+    private apiKeys: string[];
 
-    constructor(apiKey: string) {
-        this.apiKey = apiKey;
+
+    constructor(apiKeyOrKeys: string | string[]) {
+        this.apiKeys = Array.isArray(apiKeyOrKeys) ? apiKeyOrKeys : [apiKeyOrKeys];
+        // Filter out empty keys just in case
+        this.apiKeys = this.apiKeys.filter(k => k && k.trim().length > 0);
+        if (this.apiKeys.length === 0) {
+            console.warn('[GroqService] No valid API keys provided');
+        }
     }
 
     private async delay(ms: number) {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // Generic Rotation Wrapper
+    private async executeWithFallback<T>(operation: (key: string) => Promise<T>): Promise<T> {
+        let lastError: any = null;
+
+        // Try each key in sequence
+        for (let i = 0; i < this.apiKeys.length; i++) {
+            const key = this.apiKeys[i];
+            try {
+                return await operation(key);
+            } catch (error: any) {
+                console.warn(`[GroqService] Key ${i + 1}/${this.apiKeys.length} failed:`, error.message || error);
+
+                // If it's a 401 (Unauthorized) or 429 (Rate Limit), proceed to next key.
+                // For other errors (like 500 or network), we might also want to retry, but let's be safe.
+                // Actually, generally try fallback for most API errors.
+                lastError = error;
+
+                // If this was the last key, throw
+                if (i === this.apiKeys.length - 1) break;
+            }
+        }
+        throw lastError || new Error('All API keys failed');
     }
 
     private async callModel(
@@ -94,77 +124,90 @@ export class GroqService {
         fallbacks: string[] = [],
         options: { temperature?: number; jsonMode?: boolean } = {}
     ): Promise<{ text: string; model: string }> {
-        const allModels = [model, ...fallbacks];
-        let lastError = null;
+        return this.executeWithFallback(async (apiKey) => {
+            const allModels = [model, ...fallbacks];
+            let innerError = null;
 
-        for (const modelName of allModels) {
-            try {
-                const body: any = {
-                    model: modelName,
-                    messages: [{ role: 'user', content: prompt }],
-                    temperature: options.temperature ?? 0.3,
-                    max_tokens: 8192,
-                };
+            for (const modelName of allModels) {
+                try {
+                    const body: any = {
+                        model: modelName,
+                        messages: [{ role: 'user', content: prompt }],
+                        temperature: options.temperature ?? 0.3,
+                        max_tokens: 8192,
+                    };
 
-                if (options.jsonMode) {
-                    body.response_format = { type: 'json_object' };
+                    if (options.jsonMode) {
+                        body.response_format = { type: 'json_object' };
+                    }
+
+                    const response = await fetch(`${GROQ_API_URL}/chat/completions`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${apiKey}`,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(body),
+                    });
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`API error: ${response.status} - ${errorText}`);
+                    }
+
+                    const data = await response.json();
+                    const content = data.choices[0]?.message?.content || '';
+                    return { text: content, model: modelName };
+                } catch (error: any) {
+                    console.warn(`[Groq] Model ${modelName} failed with current key:`, error.message);
+                    innerError = error;
+                    // Check if error is specifically about the KEY (401) or QUOTA (429)
+                    if (error.message.includes('401') || error.message.includes('429')) {
+                        // Propagate up to trigger key rotation
+                        throw error;
+                    }
+                    // Otherwise, try next model with SAME key
+                    await this.delay(500);
                 }
-
-                const response = await fetch(`${GROQ_API_URL}/chat/completions`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${this.apiKey}`,
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(body),
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`API error: ${response.status} - ${errorText}`);
-                }
-
-                const data = await response.json();
-                const content = data.choices[0]?.message?.content || '';
-                return { text: content, model: modelName };
-            } catch (error: any) {
-                console.warn(`[Groq] Failed with ${modelName}:`, error.message);
-                lastError = error;
-                await this.delay(error.message?.includes('429') ? 2000 : 500);
             }
-        }
-        throw lastError || new Error('All models failed');
+            throw innerError || new Error('All models failed');
+        });
     }
 
     async transcribeAudio(audioBlob: Blob): Promise<{ text: string; model: string }> {
-        const allModels = [MODELS.WHISPER, ...FALLBACK_MODELS.WHISPER];
-        let lastError = null;
+        return this.executeWithFallback(async (apiKey) => {
+            const allModels = [MODELS.WHISPER, ...FALLBACK_MODELS.WHISPER];
+            let innerError = null;
 
-        for (const modelName of allModels) {
-            try {
-                const formData = new FormData();
-                formData.append('file', audioBlob, 'audio.webm');
-                formData.append('model', modelName);
-                formData.append('language', 'es');
-                formData.append('response_format', 'text');
+            for (const modelName of allModels) {
+                try {
+                    const formData = new FormData();
+                    formData.append('file', audioBlob, 'audio.webm');
+                    formData.append('model', modelName);
+                    formData.append('language', 'es');
+                    formData.append('response_format', 'text');
 
-                const response = await fetch(`${GROQ_API_URL}/audio/transcriptions`, {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${this.apiKey}` },
-                    body: formData,
-                });
+                    const response = await fetch(`${GROQ_API_URL}/audio/transcriptions`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${apiKey}` },
+                        body: formData,
+                    });
 
-                if (!response.ok) throw new Error(`API error: ${response.status}`);
+                    if (!response.ok) throw new Error(`API error: ${response.status}`);
 
-                const text = await response.text();
-                return { text, model: modelName };
-            } catch (error: any) {
-                console.warn(`[Groq] Transcription failed with ${modelName}:`, error);
-                lastError = error;
-                await this.delay(error.message?.includes('429') ? 2000 : 500);
+                    const text = await response.text();
+                    return { text, model: modelName };
+                } catch (error: any) {
+                    console.warn(`[Groq] Whisper ${modelName} failed with current key:`, error);
+                    innerError = error;
+                    if (error.message.includes('401') || error.message.includes('429')) {
+                        throw error;
+                    }
+                    await this.delay(500);
+                }
             }
-        }
-        throw lastError || new Error('All Whisper models failed');
+            throw innerError || new Error('All Whisper models failed');
+        });
     }
 
     async extractMedicalData(transcription: string): Promise<{ data: ExtractionResult; model: string }> {
@@ -294,5 +337,11 @@ Responde JSON: { is_valid: boolean, errors: [{ type: 'hallucination' | 'missing'
             current = await this.mergeTwoExtractions(current, results[i]);
         }
         return current;
+    }
+
+    // Public generic chat method for external services (Memory, Feedback) to usage key rotation
+    async chat(prompt: string, model: string = MODELS.GENERATION, options: { jsonMode?: boolean } = {}): Promise<string> {
+        const result = await this.callModel(model, prompt, [], options);
+        return result.text;
     }
 }

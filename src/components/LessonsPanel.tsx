@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 interface LessonsPanelProps {
     onClose: () => void;
-    groqApiKey?: string;
+    groqApiKey?: string | string[];
 }
 
 export default function LessonsPanel({ onClose }: LessonsPanelProps) {

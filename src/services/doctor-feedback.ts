@@ -5,7 +5,6 @@
 
 import { supabase } from './supabase';
 
-const GROQ_API_URL = 'https://api.groq.com/openai/v1';
 const ANALYZER_MODEL = 'qwen/qwen3-32b';
 
 export interface ChangeDetected {
@@ -104,10 +103,14 @@ function parseSections(text: string): Record<string, string> {
 // AI ANALYZER: Enhanced for Content vs Format classification
 // ═══════════════════════════════════════════════════════════════
 
+import { GroqService } from './groq';
+
+// ... (keep interfaces)
+
 export async function analyzeChangesWithAI(
     _transcription: string,
     changes: ChangeDetected[],
-    groqApiKey: string
+    groqApiKey: string | string[]
 ): Promise<{ summary: string; category: ImprovementLesson['improvement_category']; isFormat: boolean }> {
 
     const changesDescription = changes.map(c =>
@@ -125,22 +128,9 @@ TAREA:
 Responde JSON: { "lesson": "...", "category": "...", "is_format": boolean }`;
 
     try {
-        const response = await fetch(`${GROQ_API_URL}/chat/completions`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${groqApiKey}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                model: ANALYZER_MODEL,
-                messages: [{ role: 'user', content: prompt }],
-                temperature: 0.1,
-                response_format: { type: 'json_object' }
-            }),
-        });
-
-        const data = await response.json();
-        const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+        const groq = new GroqService(groqApiKey);
+        const jsonText = await groq.chat(prompt, ANALYZER_MODEL, { jsonMode: true });
+        const parsed = JSON.parse(jsonText);
 
         return {
             summary: parsed.lesson || 'Corrección de estilo',
@@ -148,6 +138,7 @@ Responde JSON: { "lesson": "...", "category": "...", "is_format": boolean }`;
             isFormat: parsed.is_format ?? (parsed.category === 'formatting' || parsed.category === 'style')
         };
     } catch (e) {
+        console.error('Error analyzing changes:', e);
         return { summary: 'Ajuste de contenido', category: 'style', isFormat: true };
     }
 }
@@ -160,7 +151,7 @@ export async function processDoctorFeedback(
     transcription: string,
     aiHistory: string,
     doctorHistory: string,
-    groqApiKey: string,
+    groqApiKey: string | string[],
     recordId?: string
 ): Promise<ImprovementLesson | null> {
 

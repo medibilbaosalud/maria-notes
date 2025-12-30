@@ -5,11 +5,16 @@ import { searchMedicalRecords, MedicalRecord, deleteMedicalRecord as deleteFromS
 import { AIService } from '../services/ai';
 import ReactMarkdown from 'react-markdown';
 
+
 interface SearchHistoryProps {
   apiKey: string;
+  onLoadRecord?: (record: MedicalRecord) => void;
 }
 
-export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
+
+
+export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadRecord }) => {
+
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MedicalRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -220,9 +225,41 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
     }
   };
 
-  const handleSaveHistory = async () => {
-    if (!selectedRecord) return;
 
+  // Autosave State
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+
+  // Autosave Effect
+  useEffect(() => {
+    if (!isEditingHistory || !selectedRecord) return;
+
+    const timeoutId = setTimeout(async () => {
+      if (editedHistory !== selectedRecord.medical_history) {
+        setIsSaving(true);
+        try {
+          await updateInSupabase(selectedRecord.id!, { medical_history: editedHistory });
+          const updatedRecord = { ...selectedRecord, medical_history: editedHistory };
+          setSelectedRecord(updatedRecord);
+          setResults(prev => prev.map(r => r.id === selectedRecord.id ? updatedRecord : r));
+          setLastSaved(new Date());
+        } catch (error) {
+          console.error("Autosave failed:", error);
+        } finally {
+          setIsSaving(false);
+        }
+      }
+    }, 2000); // 2 second debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [editedHistory, isEditingHistory, selectedRecord]);
+
+  const handleSaveHistory = async () => {
+    // Manual save just triggers the update immediately if needed, 
+    // but the effect might have already run. 
+    // We'll keep it as a 'Force Save' button.
+    if (!selectedRecord) return;
+    setIsSaving(true);
     try {
       const updated = await updateInSupabase(selectedRecord.id!, { medical_history: editedHistory });
       if (updated && updated.length > 0) {
@@ -230,14 +267,18 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
         setSelectedRecord(updatedRecord);
         setResults(results.map(r => r.id === selectedRecord.id ? updatedRecord : r));
         setIsEditingHistory(false);
+        setLastSaved(new Date());
       } else {
         alert("No se pudo guardar los cambios.");
       }
     } catch (error) {
       console.error("Error saving history:", error);
       alert("Error al guardar la historia");
+    } finally {
+      setIsSaving(false);
     }
   };
+
 
   const handleSaveReport = async () => {
     if (!selectedRecord) return;
@@ -354,9 +395,14 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
               {results.map((record) => (
                 <motion.div
                   key={record.id}
+
                   className={`patient-card ${selectedRecord?.id === record.id ? 'active' : ''}`}
-                  onClick={() => setSelectedRecord(record)}
+                  onClick={() => {
+                    setSelectedRecord(record);
+                    if (onLoadRecord) onLoadRecord(record);
+                  }}
                   initial={{ opacity: 0, y: 10 }}
+
                   animate={{ opacity: 1, y: 0 }}
                   whileHover={{ y: -2, boxShadow: 'var(--shadow-md)' }}
                   transition={{ duration: 0.2 }}
@@ -458,6 +504,8 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey }) => {
                           <div className="document-header">
                             <span className="doc-label">Historia Médica</span>
                             <div className="doc-actions">
+                              {isSaving && <span style={{ fontSize: '0.8rem', color: '#64748b', marginRight: '1rem', alignSelf: 'center' }}>Guardando...</span>}
+                              {!isSaving && lastSaved && isEditingHistory && <span style={{ fontSize: '0.8rem', color: '#16a34a', marginRight: '1rem', alignSelf: 'center' }}>Guardado</span>}
                               {!isEditingHistory && (
                                 <>
                                   <button className="icon-btn copy-doc" onClick={() => handleCopy(history || '')} title="Copiar">
