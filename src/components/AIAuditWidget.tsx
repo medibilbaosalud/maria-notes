@@ -153,9 +153,8 @@ export const AIAuditWidget: React.FC<AIAuditWidgetProps> = ({
 
             <style>{`
                 .ai-audit-widget {
-                    position: absolute;
-                    top: 1rem;
-                    right: 1rem;
+                    position: relative;
+                    /* Removed absolute positioning to fit in flex container */
                     z-index: 20;
                 }
 

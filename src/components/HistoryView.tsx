@@ -232,53 +232,65 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <span>Historia Clínica</span>
               </div>
               <div className="doc-actions">
-                {!isEditing ? (
-                  <>
-                    {onNewConsultation && (
-                      <button
-                        className="action-button new-consultation"
-                        onClick={onNewConsultation}
-                      >
-                        <Plus size={18} />
-                        <span>Nueva Consulta</span>
-                      </button>
-                    )}
-                    <button
-                      className="action-button secondary"
-                      onClick={handleEditClick}
-                      title="Editar texto"
-                    >
-                      <Edit2 size={16} />
-                      <span>Editar</span>
-                    </button>
-                    <button
-                      className="action-button secondary"
-                      onClick={handleOpenReport}
-                      title="Generar Informe Médico Formal"
-                    >
-                      <FileOutput size={16} />
-                      <span>Informe</span>
-                    </button>
-                    <button
-                      className={`action-button copy-btn ${copied ? 'success' : ''}`}
-                      onClick={() => handleCopy(historyText)} // Keep historyText here as we copy what is shown
-                    >
-                      {copied ? <Check size={16} /> : <Copy size={16} />}
-                      <span>{copied ? 'Copiado' : 'Copiar'}</span>
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button className="action-button secondary" onClick={handleCancelEdit}>
-                      <X size={16} />
-                      <span>Cancelar</span>
-                    </button>
-                    <button className="action-button primary success" onClick={handleSaveEdit}>
-                      <Check size={16} />
-                      <span>Guardar</span>
-                    </button>
-                  </>
+                {metadata && (
+                  <AIAuditWidget
+                    corrections={metadata.corrections}
+                    models={metadata.models}
+                    errorsFixed={metadata.errorsFixed}
+                    versionsCount={metadata.versionsCount}
+                    validationLogs={metadata.validationHistory || metadata.remainingErrors}
+                  />
                 )}
+                <div className="action-buttons-group">
+
+                  {!isEditing ? (
+                    <>
+                      {onNewConsultation && (
+                        <button
+                          className="action-button new-consultation"
+                          onClick={onNewConsultation}
+                        >
+                          <Plus size={18} />
+                          <span>Nueva Consulta</span>
+                        </button>
+                      )}
+                      <button
+                        className="action-button secondary"
+                        onClick={handleEditClick}
+                        title="Editar texto"
+                      >
+                        <Edit2 size={16} />
+                        <span>Editar</span>
+                      </button>
+                      <button
+                        className="action-button secondary"
+                        onClick={handleOpenReport}
+                        title="Generar Informe Médico Formal"
+                      >
+                        <FileOutput size={16} />
+                        <span>Informe</span>
+                      </button>
+                      <button
+                        className={`action-button copy-btn ${copied ? 'success' : ''}`}
+                        onClick={() => handleCopy(historyText)} // Keep historyText here as we copy what is shown
+                      >
+                        {copied ? <Check size={16} /> : <Copy size={16} />}
+                        <span>{copied ? 'Copiado' : 'Copiar'}</span>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="action-button secondary" onClick={handleCancelEdit}>
+                        <X size={16} />
+                        <span>Cancelar</span>
+                      </button>
+                      <button className="action-button primary success" onClick={handleSaveEdit}>
+                        <Check size={16} />
+                        <span>Guardar</span>
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -322,16 +334,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               </div>
             )}
 
-            {/* AI Audit Widget - Absolute Positioned */}
-            {metadata && (
-              <AIAuditWidget
-                corrections={metadata.corrections}
-                models={metadata.models}
-                errorsFixed={metadata.errorsFixed}
-                versionsCount={metadata.versionsCount}
-                validationLogs={metadata.validationHistory || metadata.remainingErrors}
-              />
-            )}
+
           </motion.div>
         </div>
 
@@ -471,7 +474,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
         .doc-actions {
           display: flex;
-          gap: 0.75rem;
+          align-items: center;
+          gap: 1rem;
+        }
+
+        .action-buttons-group {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
         }
 
         .action-button {

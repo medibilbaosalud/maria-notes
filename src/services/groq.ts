@@ -317,54 +317,34 @@ ${previousErrors.filter(e => e.type === 'missing').length > 0 ? '- INCLUIR todos
 `;
         }
 
-        const prompt = `Eres Maria Notes, asistente clínico ORL. Genera historia clínica estructurada.
-${errorFeedback}
-DATOS EXTRAÍDOS:
-${JSON.stringify(extraction, null, 2)}
+        const prompt = `Actúa como Experto Redactor Clínico ORL.
+Tu objetivo es redactar una Historia Clínica FORMAL y LIMPIA basada en los datos extraídos.
 
-═══════════════════════════════════════════════════════════
-REGLAS CRÍTICAS (LEE CON ATENCIÓN):
-═══════════════════════════════════════════════════════════
+REGLAS DE FORMATO (ESTRICTO):
+1. CERO MARKDOWN DE FORMATO: No uses negritas (**texto**), ni cursivas, ni encabezados (##).
+2. TÍTULOS EN MAYÚSCULAS: Para separar secciones usa solo el nombre en mayúsculas (ej: ANTECEDENTES PERSONALES).
+3. ESTILO "FORMULARIO": Usa guiones (-) para listar hallazgos.
+4. COHERENCIA: Si un dato no existe en el JSON, NO LO INVENTES. Omite la línea.
 
-1. SOLO INCLUYE LO QUE SE MENCIONA:
-   - Si una exploración NO se nombró, NO LA PONGAS.
-   - Si un antecedente NO se preguntó, NO LO PONGAS.
+ESTRUCTURA DE SALIDA:
 
-2. ANTECEDENTES:
-   - Si se preguntó y el paciente NIEGA → "No"
-   - Si se preguntó y HAY dato → el dato
-   - Si NO se preguntó → No incluir esa línea
+ANTECEDENTES PERSONALES
+- [Lista de antecedentes o "Niega alergias/enfermedades" si indica negación]
 
-3. FORMATO VISUAL (IMPORTANTE):
-   - Usa encabezados Markdown ## para secciones.
-   - Usa GUIONES (-) para cada campo. El CSS ocultará los puntos, pero necesito el guion para el salto de línea.
-   - Ejemplo:
-     - Alergias: No
-     - Tratamiento: No
+ENFERMEDAD ACTUAL
+[Narrativa técnica y concisa. CERO palabras de relleno.]
 
-4. ESTRUCTURA (Dinámica):
+EXPLORACIÓN
+[IMPORTANTE: Lista SOLO los hallazgos positivos o relevantes del JSON. Si el JSON tiene datos, PONLOS. Si no hay nada, omite la sección.]
 
-## ANTECEDENTES PERSONALES
-- Alergias medicamentosas: [Dato/No]
-- Enfermedades crónicas: [Dato/No]
-- Intervenciones quirúrgicas: [Dato/No]
-- Tratamiento habitual: [Dato/No]
+IMPRESIÓN DIAGNÓSTICA
+[Diagnóstico principal]
 
-## ENFERMEDAD ACTUAL
-[Resumen telegráfico del motivo de consulta]
+PLAN TERAPÉUTICO
+- [Lista de pautas]
 
-## EXPLORACIÓN
-[Usa guiones para cada ítem. SOLO lo realizado]
-- Cavidad oral: [Dato]
-- Rinoscopia: [Dato]
-- [Otros hallazgos con guion]
-
-## IMPRESIÓN DIAGNÓSTICA
-1. [Diagnóstico principal]
-
-## PLAN TERAPÉUTICO
-[Tratamiento resumido]
-`;
+DATOS DE ENTRADA:
+${JSON.stringify(extraction, null, 2)}`;
 
         return this.callModel(
             MODELS.GENERATION,
