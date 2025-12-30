@@ -15,6 +15,17 @@ export interface ChangeDetected {
     type: 'added' | 'removed' | 'modified';
 }
 
+export async function getLessonsFromDB(): Promise<ImprovementLesson[]> {
+    if (!supabase) return [];
+    const { data, error } = await supabase
+        .from('ai_improvement_lessons')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50);
+    if (error) throw error;
+    return data || [];
+}
+
 export interface ImprovementLesson {
     id?: string;
     created_at?: string;
@@ -94,7 +105,7 @@ function parseSections(text: string): Record<string, string> {
 // ═══════════════════════════════════════════════════════════════
 
 export async function analyzeChangesWithAI(
-    transcription: string,
+    _transcription: string,
     changes: ChangeDetected[],
     groqApiKey: string
 ): Promise<{ summary: string; category: ImprovementLesson['improvement_category']; isFormat: boolean }> {

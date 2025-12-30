@@ -86,6 +86,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   content,
   isLoading,
   patientName,
+  transcription,
+  apiKey,
   onGenerateReport,
   onNewConsultation,
   onContentChange,
@@ -111,12 +113,12 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
   const handleSaveEdit = () => {
     // TRIGGER LEARNING: If content changed, analyze why
-    if (editValue !== historyText && props.transcription && props.apiKey) {
+    if (editValue !== historyText && transcription && apiKey) {
       processDoctorFeedback(
-        props.transcription,
+        transcription,
         historyText, // Original AI version
         editValue,   // Doctor's edited version
-        props.apiKey
+        apiKey
       ).then(lesson => {
         if (lesson) {
           console.log('[HistoryView] Aprendizaje registrado:', lesson.improvement_category);

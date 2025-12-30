@@ -42,7 +42,7 @@ export class MemoryService {
 
             // Format daily lessons for the prompt
             const formattedDailyParams = dailyLessons.map((l, i) => {
-                const isTwoX = l.status === 'active'; // Just a marker
+                const _isTwoX = l.status === 'active'; // Just a marker
                 return `- [NUEVA LECCIÓN ${i + 1}]: ${l.lesson_summary}`;
             }).join('\n');
 
@@ -97,7 +97,7 @@ export class MemoryService {
             const memoryId = globalData?.id;
 
             // 3. LLM Consolidation Task
-            const groq = new GroqService(groqApiKey); // Temporary instance
+            const _groq = new GroqService(groqApiKey); // Temporary instance
             const prompt = `Actúa como SISTEMA DE MEMORIA A LARGO PLAZO para un Asistente Médico.
 Tu tarea es CONSOLIDAR nuevas lecciones aprendidas en el conocimiento global existente.
 

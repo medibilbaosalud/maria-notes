@@ -4,8 +4,6 @@ import { Layout } from './components/Layout';
 import { Recorder } from './components/Recorder';
 import { HistoryView } from './components/HistoryView';
 import { Settings } from './components/Settings';
-import { SearchHistory } from './components/SearchHistory';
-import { ReportsView } from './components/ReportsView';
 import { AIService } from './services/ai';
 import { ExtractionResult } from './services/groq';
 import { saveMedicalRecord, updateMedicalRecord, saveLabTestLog } from './services/storage';
@@ -312,9 +310,11 @@ function App() {
             if (result.active_memory_used) {
                 await saveLabTestLog({
                     test_name: patientName,
-                    result: 'success',
-                    duration_ms: 0, // Untracked here
+                    input_type: 'text',
+                    transcription: text,
+                    medical_history: result.data,
                     metadata: {
+                        corrections: result.corrections_applied || 0,
                         models: { generation: result.model, validation: 'mixed' },
                         versionsCount: (result.corrections_applied || 0) + 1,
                         errorsFixed: 0,
@@ -373,12 +373,19 @@ function App() {
             >
                 {currentView === 'record' && (
                     <div className="view-content">
-                        <Recorder onRecordingComplete={handleRecordingComplete} isProcessing={isLoading} status={processingStatus} />
+                        <Recorder onRecordingComplete={handleRecordingComplete} />
                     </div>
                 )}
 
                 {currentView === 'history' && (
-                    <HistoryView />
+                    <HistoryView
+                        content={history}
+                        isLoading={isLoading}
+                        transcription={transcription}
+                        apiKey={apiKey}
+                        onContentChange={handleSave}
+                        onNewConsultation={() => setCurrentView('record')}
+                    />
                 )}
 
                 {currentView === 'reports' && (

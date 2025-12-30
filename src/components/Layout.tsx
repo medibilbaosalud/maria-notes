@@ -8,8 +8,8 @@ interface LayoutProps {
   children: React.ReactNode;
   onOpenSettings: () => void;
   onOpenLessons?: () => void;
-  currentView: 'record' | 'history' | 'reports' | 'test-lab'; // Added test-lab
-  onNavigate: (view: 'record' | 'history' | 'reports' | 'test-lab') => void;
+  currentView: 'record' | 'history' | 'reports' | 'test-lab' | 'result';
+  onNavigate: (view: 'record' | 'history' | 'reports' | 'test-lab' | 'result') => void;
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, onOpenLessons, currentView, onNavigate }) => {
