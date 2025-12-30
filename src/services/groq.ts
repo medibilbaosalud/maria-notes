@@ -319,7 +319,6 @@ ${previousErrors.filter(e => e.type === 'missing').length > 0 ? '- INCLUIR todos
 
         const prompt = `Actúa como Experto Redactor Clínico ORL (Otorrinolaringólogo).
 Tu objetivo es redactar una Historia Clínica FORMAL, TÉCNICA y LIMPIA.
-
 ${errorFeedback}
 
 REGLAS CRÍTICAS DE REDACCIÓN:
@@ -333,24 +332,34 @@ REGLAS CRÍTICAS DE REDACCIÓN:
 3. IMPRESIÓN DIAGNÓSTICA: Si no está explícita, DEDÚCELA de la exploración y síntomas y redáctala como "Juicio Clínico sugerido". NUNCA expliques que falta información.
 
 REGLAS DE FORMATO (ESTRICTO):
-1. TÍTULOS EN MAYÚSCULAS y separados del contenido por un salto de línea.
-2. FORMATO DE LISTA (Viñetas): Usa guiones (-) para listar hallazgos y pasos del tratamiento.
+1. TÍTULOS EN MAYÚSCULAS.
+2. SALTO DE LÍNEA OBLIGATORIO: Debe haber SIEMPRE una línea en blanco entre el título y el contenido.
+3. VIÑETAS OBLIGATORIAS: El contenido de las secciones (excepto Enfermedad Actual) DEBE empezar con un guion ("- ").
 
-ESTRUCTURA DE SALIDA REQUERIDA:
+ESTRUCTURA DE SALIDA REQUERIDA (Supérstricta):
 
 ANTECEDENTES PERSONALES
-- [Lista de antecedentes o "Sin antecedentes de interés"]
+
+- [Lista de antecedentes. IMPORTANTE: Si niega, escribe: "- Niega alergias..."]
 
 ENFERMEDAD ACTUAL
-[Narrativa técnica y concisa. Cero relleno.]
+
+[Narrativa técnica. DEBES INCLUIR:
+1. Motivo de consulta.
+2. Desencadenantes (ej: "tras infección viral").
+3. Estado previo.
+4. Evolución temporal.]
 
 EXPLORACIÓN
-- [Lista SOLO los hallazgos positivos traducidos a lenguaje técnico. Ej: "Fibrolaringoscopia: xxxx"]
+
+- [Lista hallazgos positivos. Ej: "- Fibrolaringoscopia: ..."]
 
 IMPRESIÓN DIAGNÓSTICA
-[Diagnóstico principal o Juicio Clínico deducido]
+
+- [Diagnóstico principal]
 
 PLAN TERAPÉUTICO
+
 - [Pauta 1]
 - [Pauta 2]
 - [Pauta 3]
