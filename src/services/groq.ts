@@ -156,7 +156,9 @@ export class GroqService {
                     }
 
                     const data = await response.json();
+                    console.log('[Groq DEBUG] Full API response:', JSON.stringify(data, null, 2));
                     const content = data.choices[0]?.message?.content || '';
+                    console.log('[Groq DEBUG] Extracted content length:', content.length);
                     return { text: content, model: modelName };
                 } catch (error: any) {
                     console.warn(`[Groq] Model ${modelName} failed with current key:`, error.message);
