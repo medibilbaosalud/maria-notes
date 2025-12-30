@@ -1,3 +1,4 @@
+
 // Doctor Feedback Learning Service
 // Detects changes between AI-generated history and doctor's edited version
 // Analyzes changes using Qwen3-32b and stores lessons in Supabase
@@ -5,7 +6,7 @@
 import { supabase } from './supabase';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1';
-const ANALYZER_MODEL = 'qwen/qwen3-32b'; // Lightweight model for analysis
+const ANALYZER_MODEL = 'qwen/qwen3-32b';
 
 export interface ChangeDetected {
     section: string;
@@ -21,8 +22,14 @@ export interface ImprovementLesson {
     ai_generated_history: string;
     doctor_edited_history: string;
     changes_detected: ChangeDetected[];
-    lesson_summary?: string;
-    improvement_category?: 'formatting' | 'terminology' | 'missing_data' | 'hallucination' | 'style';
+    lesson_summary: string;
+    improvement_category: 'formatting' | 'terminology' | 'missing_data' | 'hallucination' | 'style';
+    status: 'active' | 'rejected' | 'learning';
+    is_format: boolean;
+    recurrence_count: number;
+    doctor_comment?: string;
+    last_seen_at?: string;
+    consolidated?: boolean;
     doctor_id?: string;
     record_id?: string;
 }
@@ -34,13 +41,9 @@ export interface ImprovementLesson {
 export function detectChanges(aiHistory: string, doctorHistory: string): ChangeDetected[] {
     const changes: ChangeDetected[] = [];
 
-    // Split into sections by uppercase headers
-    const sectionRegex = /^([A-ZÁÉÍÓÚÑ\s]+)$/gm;
-
     const aiSections = parseSections(aiHistory);
     const doctorSections = parseSections(doctorHistory);
 
-    // Compare each section
     const allSectionNames = new Set([...Object.keys(aiSections), ...Object.keys(doctorSections)]);
 
     for (const section of allSectionNames) {
@@ -68,9 +71,7 @@ function parseSections(text: string): Record<string, string> {
     let currentContent: string[] = [];
 
     for (const line of lines) {
-        // Check if line is an uppercase header (at least 3 uppercase letters)
         if (/^[A-ZÁÉÍÓÚÑ\s]{3,}$/.test(line.trim()) && line.trim().length > 2) {
-            // Save previous section
             if (currentContent.length > 0) {
                 sections[currentSection] = currentContent.join('\n');
             }
@@ -81,7 +82,6 @@ function parseSections(text: string): Record<string, string> {
         }
     }
 
-    // Save last section
     if (currentContent.length > 0) {
         sections[currentSection] = currentContent.join('\n');
     }
@@ -90,35 +90,28 @@ function parseSections(text: string): Record<string, string> {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// AI ANALYZER: Use Qwen3-32b to interpret why changes were made
+// AI ANALYZER: Enhanced for Content vs Format classification
 // ═══════════════════════════════════════════════════════════════
 
 export async function analyzeChangesWithAI(
     transcription: string,
     changes: ChangeDetected[],
     groqApiKey: string
-): Promise<{ summary: string; category: ImprovementLesson['improvement_category'] }> {
-
-    if (changes.length === 0) {
-        return { summary: 'No changes detected', category: 'style' };
-    }
+): Promise<{ summary: string; category: ImprovementLesson['improvement_category']; isFormat: boolean }> {
 
     const changesDescription = changes.map(c =>
-        `Sección: ${c.section}\nOriginal (IA): ${c.original.substring(0, 200)}...\nEditado (Doctor): ${c.edited.substring(0, 200)}...`
+        `Sección: ${c.section}\nOriginal: ${c.original.substring(0, 150)}...\nEditado: ${c.edited.substring(0, 150)}...`
     ).join('\n\n');
 
-    const prompt = `Eres un analista de calidad de historias clínicas.
-El médico ha corregido la historia generada por IA. Analiza los cambios y explica:
-1. ¿Qué tipo de error cometió la IA? (formatting, terminology, missing_data, hallucination, style)
-2. ¿Qué lección debe aprender el sistema para no repetir este error?
-
-TRANSCRIPCIÓN ORIGINAL:
-${transcription.substring(0, 500)}...
-
-CAMBIOS DETECTADOS:
+    const prompt = `Analiza estas correcciones médicas:
 ${changesDescription}
 
-Responde en JSON: { "category": "...", "lesson": "..." }`;
+TAREA:
+1. Resume la lección en una frase técnica (ej: "Usar 'Niega' en lugar de 'No refiere'").
+2. Clasifica en categoría: 'formatting', 'terminology', 'missing_data', 'hallucination', 'style'.
+3. Indica si es un cambio de FORMATO/ESTILO (true) o de CONTENIDO MÉDICO (false).
+
+Responde JSON: { "lesson": "...", "category": "...", "is_format": boolean }`;
 
     try {
         const response = await fetch(`${GROQ_API_URL}/chat/completions`, {
@@ -130,81 +123,26 @@ Responde en JSON: { "category": "...", "lesson": "..." }`;
             body: JSON.stringify({
                 model: ANALYZER_MODEL,
                 messages: [{ role: 'user', content: prompt }],
-                temperature: 0.3,
-                max_tokens: 500,
+                temperature: 0.1,
+                response_format: { type: 'json_object' }
             }),
         });
 
         const data = await response.json();
-        const content = data.choices?.[0]?.message?.content || '';
+        const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
 
-        // Parse JSON response
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            const parsed = JSON.parse(jsonMatch[0]);
-            return {
-                summary: parsed.lesson || 'No lesson extracted',
-                category: parsed.category || 'style',
-            };
-        }
-
-        return { summary: content, category: 'style' };
-    } catch (error) {
-        console.error('[DoctorFeedback] Error analyzing changes:', error);
-        return { summary: 'Error analyzing changes', category: 'style' };
+        return {
+            summary: parsed.lesson || 'Corrección de estilo',
+            category: (parsed.category || 'style') as ImprovementLesson['improvement_category'],
+            isFormat: parsed.is_format ?? (parsed.category === 'formatting' || parsed.category === 'style')
+        };
+    } catch (e) {
+        return { summary: 'Ajuste de contenido', category: 'style', isFormat: true };
     }
 }
 
 // ═══════════════════════════════════════════════════════════════
-// DATABASE: Save and retrieve lessons from Supabase
-// ═══════════════════════════════════════════════════════════════
-
-export async function saveLessonToDB(lesson: Omit<ImprovementLesson, 'id' | 'created_at'>): Promise<void> {
-    if (!supabase) {
-        console.error('[DoctorFeedback] Supabase not initialized');
-        return;
-    }
-    try {
-        const { error } = await supabase.from('ai_improvement_lessons').insert([{
-            original_transcription: lesson.original_transcription,
-            ai_generated_history: lesson.ai_generated_history,
-            doctor_edited_history: lesson.doctor_edited_history,
-            changes_detected: lesson.changes_detected,
-            lesson_summary: lesson.lesson_summary,
-            improvement_category: lesson.improvement_category,
-            doctor_id: lesson.doctor_id,
-            record_id: lesson.record_id,
-        }]);
-
-        if (error) throw error;
-        console.log('[DoctorFeedback] Lesson saved to database');
-    } catch (error) {
-        console.error('[DoctorFeedback] Error saving lesson:', error);
-    }
-}
-
-export async function getLessonsFromDB(): Promise<ImprovementLesson[]> {
-    if (!supabase) {
-        console.error('[DoctorFeedback] Supabase not initialized');
-        return [];
-    }
-    try {
-        const { data, error } = await supabase
-            .from('ai_improvement_lessons')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(50);
-
-        if (error) throw error;
-        return data || [];
-    } catch (error) {
-        console.error('[DoctorFeedback] Error fetching lessons:', error);
-        return [];
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// MAIN FLOW: Process doctor's save action
+// MAIN FLOW: Process doctor's save action with 2x Rule
 // ═══════════════════════════════════════════════════════════════
 
 export async function processDoctorFeedback(
@@ -215,20 +153,49 @@ export async function processDoctorFeedback(
     recordId?: string
 ): Promise<ImprovementLesson | null> {
 
-    // 1. Detect changes
+    if (!supabase) return null;
+
     const changes = detectChanges(aiHistory, doctorHistory);
+    if (changes.length === 0) return null;
 
-    if (changes.length === 0) {
-        console.log('[DoctorFeedback] No changes detected, skipping analysis');
-        return null;
-    }
-
-    console.log(`[DoctorFeedback] Detected ${changes.length} changes, analyzing...`);
-
-    // 2. Analyze with AI
     const analysis = await analyzeChangesWithAI(transcription, changes, groqApiKey);
 
-    // 3. Build lesson object
+    // ─────────────────────────────────────────────────────────────
+    // SMART LOGIC: 2x Rule & Classification
+    // ─────────────────────────────────────────────────────────────
+    let status: 'active' | 'learning' = 'learning';
+    let recurrenceCount = 1;
+
+    if (!analysis.isFormat) {
+        // CONTENT priority: Mark active immediately
+        status = 'active';
+    } else {
+        // FORMAT caution: Search for similarity in 'learning' or 'active'
+        const { data: similarLessons } = await supabase
+            .from('ai_improvement_lessons')
+            .select('*')
+            .eq('is_format', true)
+            .neq('status', 'rejected')
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+        // Simple string similarity or fuzzy check (here we'll use a basic inclusion check or just rely on categorization)
+        // For a more robust production app, we would use embeddings.
+        const similar = similarLessons?.find(l =>
+            l.lesson_summary.toLowerCase().includes(analysis.summary.toLowerCase().split(' ')[0]) ||
+            analysis.summary.toLowerCase().includes(l.lesson_summary.toLowerCase().split(' ')[0])
+        );
+
+        if (similar) {
+            recurrenceCount = (similar.recurrence_count || 1) + 1;
+            // Promote to active if 2nd occurrence
+            if (recurrenceCount >= 2) status = 'active';
+
+            // Optional: Update the existing one instead of creating a new one to keep DB clean
+            // But usually we keep history. Let's create a new one for audit trail.
+        }
+    }
+
     const lesson: Omit<ImprovementLesson, 'id' | 'created_at'> = {
         original_transcription: transcription,
         ai_generated_history: aiHistory,
@@ -236,40 +203,18 @@ export async function processDoctorFeedback(
         changes_detected: changes,
         lesson_summary: analysis.summary,
         improvement_category: analysis.category,
+        is_format: analysis.isFormat,
+        status,
+        recurrence_count: recurrenceCount,
         record_id: recordId,
+        last_seen_at: new Date().toISOString()
     };
 
-    // 4. Save to database
-    await saveLessonToDB(lesson);
-
+    await supabase.from('ai_improvement_lessons').insert([lesson]);
     return lesson as ImprovementLesson;
 }
 
 export async function getRelevantLessonsForPrompt(): Promise<string> {
-    if (!supabase) return '';
-
-    try {
-        // Fetch last 10 lessons
-        const { data, error } = await supabase
-            .from('ai_improvement_lessons')
-            .select('lesson_summary, improvement_category')
-            .order('created_at', { ascending: false })
-            .limit(10);
-
-        if (error || !data) return '';
-
-        // Filter valid lessons (length > 5) and take top 5
-        const validLessons = data
-            .filter(l => l.lesson_summary && l.lesson_summary.length > 5)
-            .slice(0, 5);
-
-        if (validLessons.length === 0) return '';
-
-        return validLessons
-            .map(l => `- [PREFERENCIA APRENDIDA]: ${l.lesson_summary}`)
-            .join('\n');
-    } catch (error) {
-        console.error('[DoctorFeedback] Error fetching lessons for prompt:', error);
-        return '';
-    }
+    // Note: Migration to MemoryService complete. This is kept for compatibility if needed.
+    return '';
 }

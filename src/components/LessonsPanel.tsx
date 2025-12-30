@@ -1,15 +1,29 @@
+
 import { useState, useEffect } from 'react';
-import { BookOpen, AlertTriangle, CheckCircle, Lightbulb, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
-import { getLessonsFromDB, ImprovementLesson } from '../services/doctor-feedback';
+import {
+    BookOpen, AlertTriangle, CheckCircle, Lightbulb,
+    RefreshCw, ChevronDown, ChevronUp, Trash2, Edit3,
+    MessageSquare, Check, X, Info, Sparkles
+} from 'lucide-react';
+import { getLessonsFromDB, ImprovementLesson, supabase } from '../services/doctor-feedback';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface LessonsPanelProps {
     onClose: () => void;
+    groqApiKey?: string;
 }
 
 export default function LessonsPanel({ onClose }: LessonsPanelProps) {
     const [lessons, setLessons] = useState<ImprovementLesson[]>([]);
     const [loading, setLoading] = useState(true);
     const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [activeTab, setActiveTab] = useState<'active' | 'learning' | 'rejected'>('active');
+
+    // Edit states
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editValue, setEditValue] = useState('');
+    const [commentingId, setCommentingId] = useState<string | null>(null);
+    const [commentValue, setCommentValue] = useState('');
 
     useEffect(() => {
         loadLessons();
@@ -18,8 +32,47 @@ export default function LessonsPanel({ onClose }: LessonsPanelProps) {
     const loadLessons = async () => {
         setLoading(true);
         const data = await getLessonsFromDB();
+        // Since we updated the schema, we might need to handle legacy data or just filter
         setLessons(data);
         setLoading(false);
+    };
+
+    const handleUpdateStatus = async (id: string, status: 'active' | 'rejected' | 'learning') => {
+        if (!supabase) return;
+        const { error } = await supabase
+            .from('ai_improvement_lessons')
+            .update({ status })
+            .eq('id', id);
+
+        if (!error) {
+            setLessons(lessons.map(l => l.id === id ? { ...l, status } : l));
+        }
+    };
+
+    const handleSaveEdit = async (id: string) => {
+        if (!supabase) return;
+        const { error } = await supabase
+            .from('ai_improvement_lessons')
+            .update({ lesson_summary: editValue })
+            .eq('id', id);
+
+        if (!error) {
+            setLessons(lessons.map(l => l.id === id ? { ...l, lesson_summary: editValue } : l));
+            setEditingId(null);
+        }
+    };
+
+    const handleSaveComment = async (id: string) => {
+        if (!supabase) return;
+        const { error } = await supabase
+            .from('ai_improvement_lessons')
+            .update({ doctor_comment: commentValue })
+            .eq('id', id);
+
+        if (!error) {
+            setLessons(lessons.map(l => l.id === id ? { ...l, doctor_comment: commentValue } : l));
+            setCommentingId(null);
+        }
     };
 
     const getCategoryIcon = (category?: string) => {
@@ -27,288 +80,506 @@ export default function LessonsPanel({ onClose }: LessonsPanelProps) {
             case 'hallucination': return <AlertTriangle size={16} className="text-red-500" />;
             case 'missing_data': return <AlertTriangle size={16} className="text-orange-500" />;
             case 'terminology': return <BookOpen size={16} className="text-blue-500" />;
-            case 'formatting': return <CheckCircle size={16} className="text-green-500" />;
-            default: return <Lightbulb size={16} className="text-yellow-500" />;
+            case 'formatting': return <CheckCircle size={16} className="text-emerald-500" />;
+            default: return <Lightbulb size={16} className="text-amber-500" />;
         }
     };
 
-    const getCategoryLabel = (category?: string) => {
-        const labels: Record<string, string> = {
-            hallucination: 'Alucinación',
-            missing_data: 'Datos Faltantes',
-            terminology: 'Terminología',
-            formatting: 'Formato',
-            style: 'Estilo',
-        };
-        return labels[category || 'style'] || 'Otro';
-    };
+    const filteredLessons = lessons.filter(l => {
+        if (activeTab === 'active') return l.status === 'active';
+        if (activeTab === 'learning') return l.status === 'learning' || !l.status; // fallback for legacy
+        if (activeTab === 'rejected') return l.status === 'rejected';
+        return false;
+    });
 
     return (
-        <div className="lessons-panel">
-            <div className="lessons-header">
-                <h2><Lightbulb size={24} /> Lecciones Aprendidas</h2>
-                <div className="header-actions">
-                    <button onClick={loadLessons} className="refresh-btn">
-                        <RefreshCw size={16} /> Actualizar
+        <div className="lessons-container">
+            <div className="lessons-panel-modern">
+                <div className="lessons-header-modern">
+                    <div className="header-title">
+                        <div className="icon-pulse">
+                            <Sparkles size={20} />
+                        </div>
+                        <div>
+                            <h2>Panel de Aprendizaje</h2>
+                            <p className="dra-greeting">Hola, Dra. Gotxi. Aquí vive la memoria de tu asistente.</p>
+                        </div>
+                    </div>
+                    <div className="header-actions">
+                        <button onClick={loadLessons} className="btn-icon" title="Sincronizar">
+                            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                        </button>
+                        <button onClick={onClose} className="btn-close">✕</button>
+                    </div>
+                </div>
+
+                <div className="tabs-bar">
+                    <button
+                        className={`tab-item ${activeTab === 'active' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('active')}
+                    >
+                        <CheckCircle size={16} /> Activas
+                        <span className="count-badge">{lessons.filter(l => l.status === 'active').length}</span>
                     </button>
-                    <button onClick={onClose} className="close-btn">✕</button>
+                    <button
+                        className={`tab-item ${activeTab === 'learning' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('learning')}
+                    >
+                        <Info size={16} /> En Aprendizaje
+                        <span className="count-badge warning">{lessons.filter(l => !l.status || l.status === 'learning').length}</span>
+                    </button>
+                    <button
+                        className={`tab-item ${activeTab === 'rejected' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('rejected')}
+                    >
+                        <Trash2 size={16} /> Rechazadas
+                    </button>
                 </div>
-            </div>
 
-            <div className="lessons-stats">
-                <div className="stat">
-                    <span className="stat-value">{lessons.length}</span>
-                    <span className="stat-label">Total Lecciones</span>
-                </div>
-                <div className="stat">
-                    <span className="stat-value">{lessons.filter(l => l.improvement_category === 'hallucination').length}</span>
-                    <span className="stat-label">Alucinaciones</span>
-                </div>
-                <div className="stat">
-                    <span className="stat-value">{lessons.filter(l => l.improvement_category === 'terminology').length}</span>
-                    <span className="stat-label">Terminología</span>
-                </div>
-            </div>
-
-            {loading ? (
-                <div className="loading-state">Cargando lecciones...</div>
-            ) : lessons.length === 0 ? (
-                <div className="empty-state">
-                    <Lightbulb size={48} />
-                    <p>No hay lecciones aún.</p>
-                    <span>Las lecciones se crearán automáticamente cuando edites y guardes una historia clínica.</span>
-                </div>
-            ) : (
-                <div className="lessons-list">
-                    {lessons.map((lesson) => (
-                        <div key={lesson.id} className="lesson-card">
-                            <div
-                                className="lesson-header"
-                                onClick={() => setExpandedId(expandedId === lesson.id ? null : lesson.id!)}
-                            >
-                                <div className="lesson-meta">
-                                    {getCategoryIcon(lesson.improvement_category)}
-                                    <span className="category-badge">{getCategoryLabel(lesson.improvement_category)}</span>
-                                    <span className="lesson-date">
-                                        {new Date(lesson.created_at!).toLocaleDateString('es-ES', {
-                                            day: 'numeric',
-                                            month: 'short',
-                                            hour: '2-digit',
-                                            minute: '2-digit'
-                                        })}
-                                    </span>
-                                </div>
-                                <div className="lesson-summary">
-                                    {lesson.lesson_summary?.substring(0, 100)}...
-                                </div>
-                                {expandedId === lesson.id ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-                            </div>
-
-                            {expandedId === lesson.id && (
-                                <div className="lesson-details">
-                                    <div className="detail-section">
-                                        <h4>Resumen de la Lección</h4>
-                                        <p>{lesson.lesson_summary}</p>
-                                    </div>
-
-                                    <div className="detail-section">
-                                        <h4>Cambios Detectados ({lesson.changes_detected?.length || 0})</h4>
-                                        {lesson.changes_detected?.map((change, idx) => (
-                                            <div key={idx} className="change-item">
-                                                <span className={`change-type ${change.type}`}>{change.type}</span>
-                                                <strong>{change.section}</strong>
-                                                <div className="change-diff">
-                                                    <div className="original">
-                                                        <span>IA:</span> {change.original.substring(0, 150)}...
+                <div className="lessons-content">
+                    {loading ? (
+                        <div className="loading-state-modern">
+                            <div className="spinner"></div>
+                            <p>Consultando memoria...</p>
+                        </div>
+                    ) : filteredLessons.length === 0 ? (
+                        <div className="empty-state-modern">
+                            <img src="https://illustrations.popsy.co/gray/brainstorming.svg" alt="Empty" width="200" />
+                            <h3>No hay reglas en esta sección</h3>
+                            <p>Tu asistente aprende de cada corrección que haces.</p>
+                        </div>
+                    ) : (
+                        <div className="lessons-scroll">
+                            <AnimatePresence>
+                                {filteredLessons.map((lesson) => (
+                                    <motion.div
+                                        key={lesson.id}
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        className={`lesson-card-modern ${expandedId === lesson.id ? 'expanded' : ''}`}
+                                    >
+                                        <div className="card-main" onClick={() => setExpandedId(expandedId === lesson.id ? null : lesson.id!)}>
+                                            <div className="card-top">
+                                                <div className="category-tag">
+                                                    {getCategoryIcon(lesson.improvement_category)}
+                                                    <span>{lesson.improvement_category}</span>
+                                                </div>
+                                                {lesson.recurrence_count > 1 && (
+                                                    <div className="recurrence-badge">
+                                                        Visto {lesson.recurrence_count}x
                                                     </div>
-                                                    <div className="edited">
-                                                        <span>Doctor:</span> {change.edited.substring(0, 150)}...
-                                                    </div>
+                                                )}
+                                                <span className="lesson-date-modern">
+                                                    {new Date(lesson.created_at!).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+                                                </span>
+                                            </div>
+
+                                            {editingId === lesson.id ? (
+                                                <div className="edit-zone" onClick={e => e.stopPropagation()}>
+                                                    <input
+                                                        value={editValue}
+                                                        onChange={e => setEditValue(e.target.value)}
+                                                        autoFocus
+                                                    />
+                                                    <button className="btn-save" onClick={() => handleSaveEdit(lesson.id!)}><Check size={16} /></button>
+                                                    <button className="btn-cancel" onClick={() => setEditingId(null)}><X size={16} /></button>
+                                                </div>
+                                            ) : (
+                                                <div className="lesson-text">
+                                                    {lesson.lesson_summary}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="card-actions-modern">
+                                            <div className="main-actions">
+                                                <button onClick={() => { setEditingId(lesson.id!); setEditValue(lesson.lesson_summary); }} className="action-link">
+                                                    <Edit3 size={14} /> Editar
+                                                </button>
+                                                <button onClick={() => { setCommentingId(lesson.id!); setCommentValue(lesson.doctor_comment || ''); }} className="action-link">
+                                                    <MessageSquare size={14} /> Nota
+                                                </button>
+                                            </div>
+                                            <div className="status-actions">
+                                                {activeTab !== 'rejected' && (
+                                                    <button onClick={() => handleUpdateStatus(lesson.id!, 'rejected')} className="btn-veto" title="Veto (Rechazar)">
+                                                        <Trash2 size={16} /> Rechazar
+                                                    </button>
+                                                )}
+                                                {activeTab === 'rejected' && (
+                                                    <button onClick={() => handleUpdateStatus(lesson.id!, 'active')} className="btn-restore">
+                                                        Restaurar
+                                                    </button>
+                                                )}
+                                                {activeTab === 'learning' && (
+                                                    <button onClick={() => handleUpdateStatus(lesson.id!, 'active')} className="btn-approve">
+                                                        Aprobar Manual
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {commentingId === lesson.id && (
+                                            <div className="comment-overlay">
+                                                <textarea
+                                                    placeholder="Añade una nota personal (no visible para la IA)..."
+                                                    value={commentValue}
+                                                    onChange={e => setCommentValue(e.target.value)}
+                                                />
+                                                <div className="comment-btns">
+                                                    <button onClick={() => handleSaveComment(lesson.id!)}>Guardar Nota</button>
+                                                    <button className="cancel" onClick={() => setCommentingId(null)}>Cerrar</button>
                                                 </div>
                                             </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
+                                        )}
+
+                                        {lesson.doctor_comment && !commentingId && (
+                                            <div className="doctor-note-bubble">
+                                                <MessageSquare size={12} />
+                                                <span>Mi nota: {lesson.doctor_comment}</span>
+                                            </div>
+                                        )}
+                                    </motion.div>
+                                ))}
+                            </AnimatePresence>
                         </div>
-                    ))}
+                    )}
                 </div>
-            )}
+            </div>
 
             <style>{`
-                .lessons-panel {
-                    background: white;
-                    border-radius: 16px;
-                    box-shadow: 0 4px 24px rgba(0,0,0,0.15);
-                    max-width: 800px;
-                    margin: 0 auto;
-                    overflow: hidden;
+                .lessons-container {
+                    position: fixed;
+                    inset: 0;
+                    background: rgba(15, 23, 42, 0.4);
+                    backdrop-filter: blur(8px);
+                    z-index: 1000;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 2rem;
                 }
-                .lessons-header {
+                .lessons-panel-modern {
+                    background: #ffffff;
+                    width: 100%;
+                    max-width: 650px;
+                    border-radius: 24px;
+                    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+                    display: flex;
+                    flex-direction: column;
+                    max-height: 85vh;
+                    overflow: hidden;
+                    border: 1px solid rgba(226, 232, 240, 0.8);
+                }
+                .lessons-header-modern {
+                    padding: 1.5rem 2rem;
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    padding: 1.5rem;
-                    background: linear-gradient(135deg, #667eea, #764ba2);
-                    color: white;
+                    background: linear-gradient(to right, #f8fafc, #ffffff);
+                    border-bottom: 1px solid #f1f5f9;
                 }
-                .lessons-header h2 {
+                .header-title {
                     display: flex;
+                    gap: 1rem;
                     align-items: center;
-                    gap: 0.5rem;
+                }
+                .icon-pulse {
+                    background: #f0fdf4;
+                    color: #22c55e;
+                    padding: 10px;
+                    border-radius: 12px;
+                    box-shadow: 0 0 0 4px #f0fdf4;
+                }
+                .header-title h2 {
                     margin: 0;
                     font-size: 1.25rem;
+                    color: #0f172a;
+                    font-weight: 700;
+                }
+                .dra-greeting {
+                    margin: 2px 0 0;
+                    font-size: 0.85rem;
+                    color: #64748b;
                 }
                 .header-actions {
                     display: flex;
                     gap: 0.5rem;
                 }
-                .refresh-btn, .close-btn {
-                    background: rgba(255,255,255,0.2);
+                .btn-icon {
+                    background: none;
                     border: none;
-                    color: white;
-                    padding: 0.5rem 0.75rem;
+                    color: #94a3b8;
+                    cursor: pointer;
+                    padding: 8px;
                     border-radius: 8px;
+                    transition: all 0.2s;
+                }
+                .btn-icon:hover {
+                    background: #f1f5f9;
+                    color: #475569;
+                }
+                .btn-close {
+                    background: #f1f5f9;
+                    border: none;
+                    color: #64748b;
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    font-weight: 700;
+                }
+                .tabs-bar {
+                    display: flex;
+                    padding: 0 2rem;
+                    background: #f8fafc;
+                    border-bottom: 1px solid #f1f5f9;
+                    gap: 1.5rem;
+                }
+                .tab-item {
+                    background: none;
+                    border: none;
+                    padding: 1rem 0;
+                    font-size: 0.9rem;
+                    font-weight: 600;
+                    color: #94a3b8;
                     cursor: pointer;
                     display: flex;
                     align-items: center;
-                    gap: 0.25rem;
-                }
-                .refresh-btn:hover, .close-btn:hover {
-                    background: rgba(255,255,255,0.3);
-                }
-                .lessons-stats {
-                    display: flex;
-                    justify-content: space-around;
-                    padding: 1rem;
-                    background: #f8fafc;
-                    border-bottom: 1px solid #e2e8f0;
-                }
-                .stat {
-                    text-align: center;
-                }
-                .stat-value {
-                    display: block;
-                    font-size: 1.5rem;
-                    font-weight: 700;
-                    color: #1e293b;
-                }
-                .stat-label {
-                    font-size: 0.75rem;
-                    color: #64748b;
-                }
-                .loading-state, .empty-state {
-                    padding: 3rem;
-                    text-align: center;
-                    color: #64748b;
-                }
-                .empty-state svg {
-                    opacity: 0.3;
-                    margin-bottom: 1rem;
-                }
-                .lessons-list {
-                    max-height: 500px;
-                    overflow-y: auto;
-                }
-                .lesson-card {
-                    border-bottom: 1px solid #e2e8f0;
-                }
-                .lesson-header {
-                    padding: 1rem 1.5rem;
-                    cursor: pointer;
-                    display: flex;
-                    flex-direction: column;
                     gap: 0.5rem;
                     position: relative;
                 }
-                .lesson-header:hover {
-                    background: #f8fafc;
+                .tab-item.active {
+                    color: #0f766e;
                 }
-                .lesson-header > svg {
+                .tab-item.active::after {
+                    content: '';
                     position: absolute;
-                    right: 1rem;
-                    top: 50%;
-                    transform: translateY(-50%);
-                    color: #94a3b8;
+                    bottom: 0;
+                    left: 0;
+                    right: 0;
+                    height: 2px;
+                    background: #0f172a;
+                    border-radius: 2px 2px 0 0;
                 }
-                .lesson-meta {
+                .count-badge {
+                    background: #e2e8f0;
+                    color: #475569;
+                    padding: 1px 6px;
+                    border-radius: 6px;
+                    font-size: 0.7rem;
+                    font-weight: 700;
+                }
+                .count-badge.warning {
+                    background: #fef3c7;
+                    color: #92400e;
+                }
+                .lessons-scroll {
+                    padding: 1.5rem 2rem;
+                    overflow-y: auto;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 1rem;
+                }
+                .lesson-card-modern {
+                    background: #ffffff;
+                    border: 1px solid #f1f5f9;
+                    border-radius: 16px;
+                    transition: all 0.2s;
+                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+                }
+                .lesson-card-modern:hover {
+                    border-color: #e2e8f0;
+                    transform: translateY(-2px);
+                    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+                }
+                .card-main {
+                    padding: 1.25rem;
+                    cursor: pointer;
+                }
+                .card-top {
                     display: flex;
                     align-items: center;
-                    gap: 0.5rem;
+                    gap: 0.75rem;
+                    margin-bottom: 0.75rem;
                 }
-                .category-badge {
-                    background: #f1f5f9;
-                    padding: 0.25rem 0.5rem;
-                    border-radius: 4px;
-                    font-size: 0.75rem;
-                    font-weight: 600;
+                .category-tag {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    background: #f8fafc;
+                    padding: 4px 10px;
+                    border-radius: 8px;
+                    font-size: 0.7rem;
+                    font-weight: 700;
                     color: #475569;
+                    text-transform: uppercase;
+                    letter-spacing: 0.025em;
                 }
-                .lesson-date {
+                .recurrence-badge {
+                    background: #eff6ff;
+                    color: #2563eb;
+                    font-size: 0.7rem;
+                    font-weight: 700;
+                    padding: 4px 8px;
+                    border-radius: 6px;
+                }
+                .lesson-date-modern {
+                    margin-left: auto;
                     font-size: 0.75rem;
                     color: #94a3b8;
-                    margin-left: auto;
-                    padding-right: 2rem;
                 }
-                .lesson-summary {
-                    font-size: 0.9rem;
-                    color: #334155;
+                .lesson-text {
+                    font-size: 0.95rem;
+                    color: #1e293b;
+                    line-height: 1.5;
+                    font-weight: 500;
                 }
-                .lesson-details {
-                    padding: 1rem 1.5rem;
+                .card-actions-modern {
+                    padding: 0.75rem 1.25rem;
+                    background: #f8fafc;
+                    border-top: 1px solid #f1f5f9;
+                    border-radius: 0 0 16px 16px;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+                .main-actions {
+                    display: flex;
+                    gap: 1rem;
+                }
+                .action-link {
+                    background: none;
+                    border: none;
+                    color: #64748b;
+                    font-size: 0.8rem;
+                    font-weight: 600;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    gap: 4px;
+                    padding: 0;
+                }
+                .action-link:hover {
+                    color: #1e293b;
+                }
+                .status-actions {
+                    display: flex;
+                    gap: 0.5rem;
+                }
+                .btn-veto {
+                    background: #fff1f2;
+                    color: #e11d48;
+                    border: none;
+                    padding: 6px 12px;
+                    border-radius: 8px;
+                    font-size: 0.75rem;
+                    font-weight: 700;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    gap: 4px;
+                }
+                .btn-veto:hover {
+                    background: #ffe4e6;
+                }
+                .btn-approve {
+                    background: #f0fdf4;
+                    color: #16a34a;
+                    border: none;
+                    padding: 6px 12px;
+                    border-radius: 8px;
+                    font-size: 0.75rem;
+                    font-weight: 700;
+                    cursor: pointer;
+                }
+                .doctor-note-bubble {
+                    margin: 10px 20px 20px;
+                    background: #fefce8;
+                    border: 1px solid #fef08a;
+                    padding: 8px 12px;
+                    border-radius: 12px;
+                    font-size: 0.8rem;
+                    color: #854d0e;
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 8px;
+                }
+                .edit-zone {
+                    display: flex;
+                    gap: 0.5rem;
+                    width: 100%;
+                }
+                .edit-zone input {
+                    flex: 1;
+                    border: 2px solid #0f172a;
+                    border-radius: 8px;
+                    padding: 6px 10px;
+                    font-size: 0.95rem;
+                }
+                .btn-save { background: #0f172a; color: white; border: none; border-radius: 8px; width: 32px; cursor: pointer; }
+                .btn-cancel { background: #f1f5f9; border: none; border-radius: 8px; width: 32px; cursor: pointer; }
+
+                .comment-overlay {
+                    padding: 1.25rem;
                     background: #f8fafc;
                     border-top: 1px solid #e2e8f0;
                 }
-                .detail-section {
-                    margin-bottom: 1rem;
-                }
-                .detail-section h4 {
-                    font-size: 0.85rem;
-                    color: #64748b;
-                    margin-bottom: 0.5rem;
-                }
-                .detail-section p {
-                    margin: 0;
-                    color: #1e293b;
-                }
-                .change-item {
-                    background: white;
-                    padding: 0.75rem;
-                    border-radius: 8px;
-                    margin-bottom: 0.5rem;
+                .comment-overlay textarea {
+                    width: 100%;
+                    height: 80px;
+                    border-radius: 12px;
                     border: 1px solid #e2e8f0;
+                    padding: 10px;
+                    font-size: 0.9rem;
+                    resize: none;
+                    margin-bottom: 10px;
                 }
-                .change-type {
-                    display: inline-block;
-                    padding: 0.125rem 0.375rem;
-                    border-radius: 4px;
-                    font-size: 0.7rem;
+                .comment-btns {
+                    display: flex;
+                    gap: 0.5rem;
+                }
+                .comment-btns button {
+                    background: #0f172a;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 8px;
+                    font-size: 0.85rem;
                     font-weight: 600;
-                    margin-right: 0.5rem;
+                    cursor: pointer;
                 }
-                .change-type.added { background: #dcfce7; color: #166534; }
-                .change-type.removed { background: #fee2e2; color: #991b1b; }
-                .change-type.modified { background: #fef3c7; color: #92400e; }
-                .change-diff {
-                    margin-top: 0.5rem;
-                    font-size: 0.8rem;
+                .comment-btns button.cancel {
+                    background: none;
+                    color: #64748b;
                 }
-                .original, .edited {
-                    padding: 0.375rem 0.5rem;
-                    border-radius: 4px;
-                    margin-bottom: 0.25rem;
+
+                .loading-state-modern {
+                    text-align: center;
+                    padding: 4rem 0;
                 }
-                .original {
-                    background: #fee2e2;
-                    color: #991b1b;
+                .spinner {
+                    width: 40px;
+                    height: 40px;
+                    border: 4px solid #f1f5f9;
+                    border-top-color: #0f172a;
+                    border-radius: 50%;
+                    margin: 0 auto 1.5rem;
+                    animation: spin 1s linear infinite;
                 }
-                .edited {
-                    background: #dcfce7;
-                    color: #166534;
+                @keyframes spin { to { transform: rotate(360deg); } }
+
+                .empty-state-modern {
+                    text-align: center;
+                    padding: 3rem 0;
                 }
-                .original span, .edited span {
-                    font-weight: 600;
-                    margin-right: 0.5rem;
+                .empty-state-modern h3 {
+                    margin: 1.5rem 0 0.5rem;
+                    color: #0f172a;
+                }
+                .empty-state-modern p {
+                    color: #64748b;
+                    margin: 0;
                 }
             `}</style>
         </div>
