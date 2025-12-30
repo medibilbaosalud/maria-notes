@@ -7,20 +7,20 @@ import { MemoryService } from './memory';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1';
 
-// Model assignments (STABLE - using proven Groq models)
+// Model assignments (PRIMARY: gpt-oss-120b with robust fallbacks)
 const MODELS = {
-    EXTRACTION: 'llama-3.3-70b-versatile',
-    GENERATION: 'llama-3.3-70b-versatile',
-    VALIDATOR_A: 'llama-3.3-70b-versatile',
+    EXTRACTION: 'openai/gpt-oss-120b',
+    GENERATION: 'openai/gpt-oss-120b',
+    VALIDATOR_A: 'openai/gpt-oss-120b',
     VALIDATOR_B: 'qwen/qwen3-32b',
     WHISPER: 'whisper-large-v3-turbo',
 };
 
-// Fallback models if primary fails
+// Fallback models if primary fails (ordered by priority)
 const FALLBACK_MODELS = {
-    EXTRACTION: ['openai/gpt-oss-20b', 'llama-3.3-70b-versatile'],
-    GENERATION: ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile'],
-    VALIDATOR: ['qwen/qwen3-32b', 'llama-3.3-70b-versatile'],
+    EXTRACTION: ['llama-3.3-70b-versatile', 'qwen/qwen3-32b', 'openai/gpt-oss-20b'],
+    GENERATION: ['llama-3.3-70b-versatile', 'qwen/qwen3-32b', 'openai/gpt-oss-20b'],
+    VALIDATOR: ['llama-3.3-70b-versatile', 'qwen/qwen3-32b'],
     WHISPER: ['whisper-large-v3'],
 };
 
