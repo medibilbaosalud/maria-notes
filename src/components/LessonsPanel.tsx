@@ -5,7 +5,8 @@ import {
     RefreshCw, ChevronDown, ChevronUp, Trash2, Edit3,
     MessageSquare, Check, X, Info, Sparkles
 } from 'lucide-react';
-import { getLessonsFromDB, ImprovementLesson, supabase } from '../services/doctor-feedback';
+import { getLessonsFromDB, ImprovementLesson } from '../services/doctor-feedback';
+import { supabase } from '../services/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface LessonsPanelProps {
