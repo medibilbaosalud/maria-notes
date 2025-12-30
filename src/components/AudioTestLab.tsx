@@ -1,20 +1,22 @@
 import React, { useState, useRef } from 'react';
-import { Mic, Upload, Square, Activity, FileAudio } from 'lucide-react';
+import { Mic, Upload, Square, Activity, FileAudio, FileText } from 'lucide-react';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { normalizeAndChunkAudio } from '../utils/audioProcessing';
 
 interface AudioTestLabProps {
     onClose: () => void;
     onRunFullPipeline: (blob: Blob, patientName: string, isPartialBatch?: boolean, batchIndex?: number) => Promise<void>;
+    onRunTextPipeline: (text: string, patientName: string) => Promise<void>;
 }
 
-export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPipeline }) => {
-    const [mode, setMode] = useState<'mic' | 'upload'>('mic');
-    const [uploadChunks, setUploadChunks] = useState<Blob[]>([]); // Store array of chunks
+export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPipeline, onRunTextPipeline }) => {
+    const [mode, setMode] = useState<'mic' | 'upload' | 'text'>('mic');
+    const [uploadChunks, setUploadChunks] = useState<Blob[]>([]);
     const [fileName, setFileName] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [normalizationStatus, setNormalizationStatus] = useState('');
     const [processingStep, setProcessingStep] = useState('');
+    const [manualText, setManualText] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Use our actual hook to test REAL constraints
@@ -46,26 +48,36 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
     const handleRunSimulation = async () => {
         const dummyName = `TEST_LAB_${new Date().toLocaleTimeString()}`;
 
-        if (mode === 'mic' && micBlob) {
-            await onRunFullPipeline(micBlob, dummyName, false, 0);
-        } else if (mode === 'upload' && uploadChunks.length > 0) {
-            setIsProcessing(true);
-            // Process chunks sequentially
-            for (let i = 0; i < uploadChunks.length; i++) {
-                const isLast = i === uploadChunks.length - 1;
-                const partNum = i + 1;
-                const total = uploadChunks.length;
+        setIsProcessing(true);
+        try {
+            if (mode === 'mic' && micBlob) {
+                await onRunFullPipeline(micBlob, dummyName, false, 0);
+            } else if (mode === 'upload' && uploadChunks.length > 0) {
+                // Process chunks sequentially
+                for (let i = 0; i < uploadChunks.length; i++) {
+                    const isLast = i === uploadChunks.length - 1;
+                    const partNum = i + 1;
+                    const total = uploadChunks.length;
 
-                setProcessingStep(`Enviando parte ${partNum} de ${total} al servidor...`);
-                console.log(`[AudioLab] Sending chunk ${partNum}/${total}`);
+                    setProcessingStep(`Enviando parte ${partNum} de ${total} al servidor...`);
+                    console.log(`[AudioLab] Sending chunk ${partNum}/${total}`);
 
-                // If not last, it's a partial batch. If last, it's the final segment.
-                await onRunFullPipeline(uploadChunks[i], dummyName, !isLast, i);
+                    // If not last, it's a partial batch. If last, it's the final segment.
+                    await onRunFullPipeline(uploadChunks[i], dummyName, !isLast, i);
 
-                // Small delay to prevent race conditions in state updates
-                if (!isLast) await new Promise(r => setTimeout(r, 500));
+                    // Small delay to prevent race conditions in state updates
+                    if (!isLast) await new Promise(r => setTimeout(r, 500));
+                }
+                setProcessingStep('¡Proceso completado!');
+            } else if (mode === 'text' && manualText.trim()) {
+                setProcessingStep('Procesando texto manual...');
+                await onRunTextPipeline(manualText, dummyName);
+                setProcessingStep('¡Proceso completado!');
             }
-            setProcessingStep('¡Proceso completado!');
+        } catch (error) {
+            console.error(error);
+            setProcessingStep('Error durante la simulación');
+        } finally {
             setIsProcessing(false);
         }
     };
@@ -89,6 +101,12 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                     onClick={() => setMode('upload')}
                 >
                     <Upload size={18} /> Subir Archivo
+                </button>
+                <button
+                    className={`tab ${mode === 'text' ? 'active' : ''}`}
+                    onClick={() => setMode('text')}
+                >
+                    <FileText size={18} /> Pegar Transcripción
                 </button>
             </div>
 
@@ -120,13 +138,13 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                             <div className="playback-area">
                                 <h3>Audio Capturado:</h3>
                                 <audio controls src={URL.createObjectURL(micBlob)} />
-                                <button className="run-pipeline-btn" onClick={handleRunSimulation}>
-                                    <Activity size={18} /> Procesar este audio
+                                <button className="run-pipeline-btn" onClick={handleRunSimulation} disabled={isProcessing}>
+                                    <Activity size={18} /> {isProcessing ? 'Procesando...' : 'Procesar Audio'}
                                 </button>
                             </div>
                         )}
                     </div>
-                ) : (
+                ) : mode === 'upload' ? (
                     <div className="upload-test-area">
                         <div className="upload-box" onClick={() => fileInputRef.current?.click()}>
                             <FileAudio size={48} className="upload-icon" />
@@ -164,6 +182,28 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                             </div>
                         )}
                     </div>
+                ) : (
+                    <div className="text-test-area">
+                        <div className="config-info">
+                            <p><strong>Simulación Directa:</strong></p>
+                            <p style={{ fontSize: '0.9rem', color: '#64748b' }}>Pega aquí una transcripción real para probar la extracción y generación sin esperar a Whisper.</p>
+                        </div>
+                        <textarea
+                            className="text-input"
+                            value={manualText}
+                            onChange={(e) => setManualText(e.target.value)}
+                            placeholder="Pega aquí la transcripción..."
+                            rows={10}
+                        />
+                        <button
+                            className="run-pipeline-btn"
+                            onClick={handleRunSimulation}
+                            disabled={!manualText.trim() || isProcessing}
+                        >
+                            <Activity size={18} />
+                            {isProcessing ? processingStep : 'Simular desde Texto'}
+                        </button>
+                    </div>
                 )}
             </div>
 
@@ -197,6 +237,7 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                     margin-bottom: 2rem;
                     border-bottom: 1px solid #e2e8f0;
                     padding-bottom: 1rem;
+                    overflow-x: auto;
                 }
                 .tab {
                     display: flex;
@@ -209,6 +250,7 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                     font-weight: 500;
                     cursor: pointer;
                     border-radius: 8px;
+                    white-space: nowrap;
                 }
                 .tab.active {
                     background: #f0fdfa;
@@ -252,6 +294,17 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                 .upload-icon { color: #64748b; margin-bottom: 1rem; }
                 .subtext { font-size: 0.85rem; color: #94a3b8; display: block; margin-top: 0.5rem; }
                 
+                .text-input {
+                    width: 100%;
+                    padding: 1rem;
+                    border: 1px solid #e2e8f0;
+                    border-radius: 12px;
+                    margin-bottom: 1rem;
+                    font-family: 'Inter', sans-serif;
+                    resize: vertical;
+                }
+                .text-input:focus { outline: 2px solid #0f766e; border-color: transparent; }
+
                 .run-pipeline-btn {
                     width: 100%;
                     margin-top: 1rem;
@@ -266,6 +319,7 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                     justify-content: center;
                     gap: 0.5rem;
                 }
+                .run-pipeline-btn:disabled { background: #94a3b8; cursor: not-allowed; }
                 
                 .playback-area {
                     margin-top: 1.5rem;

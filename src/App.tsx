@@ -199,6 +199,65 @@ function App() {
         }
     };
 
+    // ════════════════════════════════════════════════════════════════
+    // NEW: Text-only pipeline for testing templates
+    // ════════════════════════════════════════════════════════════════
+    const handleTextPipeline = async (text: string, patientName: string) => {
+        if (!apiKey) {
+            alert('Please configure your API Key first.');
+            return;
+        }
+
+        console.log('[App] Starting Text Simulation...');
+        setIsLoading(true);
+        setHistory('');
+        setSavedRecordId(null);
+        setCurrentView('result');
+        setCurrentPatientName(patientName);
+        setTranscription(text);
+
+        try {
+            const aiService = new AIService(apiKey);
+            setProcessingStatus('Generando historia desde texto manual...');
+
+            // Bypass transcription, go straight to generation (Extraction -> Gen -> Validation)
+            const historyResult = await aiService.generateMedicalHistory(text, patientName);
+
+            setHistory(historyResult.data);
+            setProcessingStatus('');
+
+            if (historyResult.validations) {
+                setPipelineMetadata({
+                    corrections: historyResult.corrections_applied || 0,
+                    models: {
+                        generation: historyResult.model,
+                        validation: 'Llama-4 / GPT-120B'
+                    },
+                    errorsFixed: historyResult.validations.reduce((acc, v) => acc + (v.errors?.length || 0), 0),
+                    versionsCount: (historyResult.corrections_applied || 0) + 1,
+                    remainingErrors: historyResult.remaining_errors
+                });
+            }
+
+            // Save as special "Text Simulation" record
+            await saveMedicalRecord({
+                patient_name: patientName,
+                consultation_type: 'Text Simulation',
+                transcription: text,
+                medical_history: historyResult.data,
+                original_medical_history: historyResult.data,
+                ai_model: historyResult.model
+            });
+
+        } catch (error: any) {
+            console.error('Text pipeline error:', error);
+            setHistory(`Error: ${error.message}`);
+        } finally {
+            setIsLoading(false);
+            setProcessingStatus('');
+        }
+    };
+
     return (
         <Layout
             onOpenSettings={() => setShowSettings(true)}
@@ -258,6 +317,7 @@ function App() {
                     <AudioTestLab
                         onClose={() => setCurrentView('record')}
                         onRunFullPipeline={handleRecordingComplete}
+                        onRunTextPipeline={handleTextPipeline}
                     />
                 </div>
             ) : (

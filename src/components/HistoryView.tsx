@@ -807,12 +807,19 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         }
 
         .markdown-body ul {
-            padding-left: 1.5rem;
+            list-style-type: none; /* Removed bullets for clean "Form" look */
+            padding-left: 0;       /* Align with headers */
             margin-bottom: 1rem;
         }
 
         .markdown-body li {
-            margin-bottom: 0.25rem;
+            margin-bottom: 0.5rem;
+            border-bottom: 1px dashed #f1f5f9; /* Subtle separator line */
+            padding-bottom: 0.25rem;
+        }
+        
+        .markdown-body li:last-child {
+            border-bottom: none;
         }
 
         .markdown-body strong {
