@@ -12,14 +12,14 @@ const MODELS = {
     EXTRACTION: 'openai/gpt-oss-120b',
     GENERATION: 'openai/gpt-oss-120b',
     VALIDATOR_A: 'openai/gpt-oss-120b',
-    VALIDATOR_B: 'qwen/qwen3-32b',
+    VALIDATOR_B: 'meta-llama/llama-4-maverick-17b-128e-instruct', // Using Maverick for diversity
     WHISPER: 'whisper-large-v3-turbo',
 };
 
 // Fallback models if primary fails (ordered by priority)
 const FALLBACK_MODELS = {
-    EXTRACTION: ['llama-3.3-70b-versatile', 'qwen/qwen3-32b', 'openai/gpt-oss-20b'],
-    GENERATION: ['llama-3.3-70b-versatile', 'qwen/qwen3-32b', 'openai/gpt-oss-20b'],
+    EXTRACTION: ['llama-3.3-70b-versatile', 'meta-llama/llama-4-maverick-17b-128e-instruct', 'qwen/qwen3-32b'],
+    GENERATION: ['llama-3.3-70b-versatile', 'meta-llama/llama-4-maverick-17b-128e-instruct', 'qwen/qwen3-32b'],
     VALIDATOR: ['llama-3.3-70b-versatile', 'qwen/qwen3-32b'],
     WHISPER: ['whisper-large-v3'],
 };
