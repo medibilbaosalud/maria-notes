@@ -773,6 +773,52 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         @keyframes spin {
           to { transform: rotate(360deg); }
         }
+
+        /* Markdown Styles for Medical Report */
+        .markdown-body {
+            color: #334155;
+            line-height: 1.7;
+            font-size: 1rem;
+        }
+
+        .markdown-body h2 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #0f766e; /* Teal-700 */
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 0.25rem;
+        }
+
+        .markdown-body h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #475569;
+            margin-top: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .markdown-body p {
+            margin-bottom: 1rem;
+            text-align: justify;
+        }
+
+        .markdown-body ul {
+            padding-left: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .markdown-body li {
+            margin-bottom: 0.25rem;
+        }
+
+        .markdown-body strong {
+            color: #1e293b;
+            font-weight: 600;
+        }
       `}</style>
     </div>
   );

@@ -306,29 +306,34 @@ DATOS EXTRAÍDOS (la única fuente de verdad):
 ${JSON.stringify(extraction, null, 2)}
 
 FORMATO DE SALIDA:
-- Rótulos en MAYÚSCULAS
-- Estilo telegráfico (máx 14 palabras/línea)
-- Omitir secciones sin datos
+- Markdown estricto.
+- Usa Títulos (##) para las secciones principales.
+- Estilo: NARRATIVA MÉDICA PROFESIONAL. No uses listas con guiones salvo que sea imprescindible.
+- Agrupa la información en párrafos coherentes y legibles.
+- NO repitas las etiquetas de campo (ej: No digas "Enfermedad: Diabetes. Enfermedad: Hipertensión", di "Antecedentes de Diabetes Tipo 2 e Hipertensión").
 
-PLANTILLA:
-ANTECEDENTES PERSONALES
-[Solo si hay datos en antecedentes]
+PLANTILLA DE EJEMPLO (Adapta al contenido real):
 
-ENFERMEDAD ACTUAL
-[Motivo y síntomas]
+## ANTECEDENTES PERSONALES
+Paciente con alergias a [X]. Como antecedentes de interés destaca [Y]. No refiere intervenciones quirúrgicas previas.
 
-EXPLORACIÓN
-[Solo las exploraciones que aparecen en exploraciones_realizadas]
+## ENFERMEDAD ACTUAL
+Acude por [Motivo], presentando síntomas de [Síntomas] desde hace [Tiempo]. Refiere [Detalles].
 
-IMPRESIÓN DIAGNÓSTICA
-[Solo si hay diagnóstico]
+## EXPLORACIÓN
+A la exploración destaca: [Hallazgos].
+[Oídos]: [Estado]. [Cuello]: [Estado].
 
-PLAN TERAPÉUTICO
-[Solo si hay plan]
+## IMPRESIÓN DIAGNÓSTICA
+Cuadro compatible con [Diagnóstico].
+
+## PLAN TERAPÉUTICO
+Se pauta [Tratamiento].
+Se recomienda [Recomendaciones].
 
 Paciente: ${patientName || 'No especificado'}
 
-Empieza DIRECTAMENTE con el contenido, sin saludos ni explicaciones.`;
+Empieza DIRECTAMENTE con el contenido Markdown.`;
 
         return this.callModel(
             MODELS.GENERATION,
