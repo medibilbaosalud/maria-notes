@@ -1,8 +1,8 @@
 
 import React from 'react';
 import { LabTestLog } from '../services/db';
-import { X, CheckCircle, AlertTriangle, Cpu, Activity, Brain } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { X, CheckCircle, Cpu, Activity, Brain } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 interface TestLogDetailModalProps {
     log: LabTestLog;

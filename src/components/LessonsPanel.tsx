@@ -173,6 +173,9 @@ export default function LessonsPanel({ onClose }: LessonsPanelProps) {
                                                 <span className="lesson-date-modern">
                                                     {new Date(lesson.created_at!).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
                                                 </span>
+                                                <div style={{ marginLeft: '10px', display: 'flex', alignItems: 'center' }}>
+                                                    {expandedId === lesson.id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                                                </div>
                                             </div>
 
                                             {editingId === lesson.id ? (

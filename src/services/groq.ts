@@ -227,7 +227,20 @@ ${JSON.stringify(extraction, null, 2)}`;
     }
 
     async validateOutput(generatedHistory: string, extraction: ExtractionResult, originalTranscription: string): Promise<{ validations: ValidationResult[]; consensus: ValidationError[] }> {
-        const prompt = `Valida historia clínica vs extracción. Responde JSON: { is_valid, errors: [{ type, field, reason }] }`;
+        const prompt = `Valida la siguiente Historia Clínica GENERADA basándote en la EXTRACCIÓN de datos y la TRANSCRIPCIÓN original.
+        
+TRANSCRIPCIÓN ORIGINAL:
+${originalTranscription.substring(0, 5000)}...
+
+EXTRACCIÓN ESTRUCTURADA:
+${JSON.stringify(extraction)}
+
+HISTORIA GENERADA:
+${generatedHistory}
+
+TAREA:
+Identifica ALUCINACIONES (datos inventados no presentes en la fuente) o DATOS FALTANTES críticos.
+Responde JSON: { is_valid: boolean, errors: [{ type: 'hallucination' | 'missing' | 'inconsistency', field: string, reason: string }] }`;
         const result = await this.callModel(MODELS.VALIDATOR_A, prompt, FALLBACK_MODELS.VALIDATOR, { jsonMode: true });
 
         try {
