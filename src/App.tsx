@@ -10,7 +10,7 @@ import { Settings } from './components/Settings';
 import { AIService } from './services/ai';
 import { ReportsView } from './components/ReportsView';
 import { ExtractionResult } from './services/groq';
-import { saveMedicalRecord, updateMedicalRecord, saveLabTestLog } from './services/storage';
+import { saveLabTestLog } from './services/storage';
 import { AudioTestLab } from './components/AudioTestLab';
 import LessonsPanel from './components/LessonsPanel';
 import { MemoryService } from './services/memory';
@@ -129,7 +129,7 @@ function App() {
     const [currentPatientName, setCurrentPatientName] = useState<string>('');
     const [_processingStatus, setProcessingStatus] = useState<string>('');
     const [currentView, setCurrentView] = useState<'record' | 'history' | 'reports' | 'result' | 'test-lab'>('record');
-    const [savedRecordId, setSavedRecordId] = useState<string | number | null>(null);
+
     const [pipelineMetadata, setPipelineMetadata] = useState<{
         corrections: number;
         models: { generation: string; validation: string };
@@ -277,7 +277,7 @@ function App() {
                 remainingErrors: result.remaining_errors,
                 validationHistory: result.validations?.flatMap(v => v.errors)
             });
-            setSavedRecordId(null);
+
 
             // 5. Cleanup Batch State
             extractionPartsRef.current = [];
@@ -375,7 +375,7 @@ function App() {
                             setHistory(record.medical_history);
                             setTranscription(record.transcription || '');
                             setCurrentPatientName(record.patient_name);
-                            if (record.id) setSavedRecordId(record.id);
+
                             // Set metadata if relevant, though legacy records might lack it
                             setCurrentView('result');
                         }}
