@@ -177,6 +177,13 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                             />
                         </div>
 
+                        {fileName && (
+                            <div className="file-info">
+                                <p className="filename">{fileName}</p>
+                                <p className="status">{normalizationStatus}</p>
+                            </div>
+                        )}
+
                         {uploadChunks.length > 0 && (
                             <div className="playback-area">
                                 <h3>Audio Normalizado (Parte 1/{uploadChunks.length}):</h3>
