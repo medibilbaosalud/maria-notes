@@ -1,17 +1,18 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Settings, Mic, FileText, FileBarChart, FlaskConical } from 'lucide-react';
+import { Settings, Mic, FileText, FileBarChart, FlaskConical, Lightbulb } from 'lucide-react';
 import { MBSLogo } from './MBSLogo';
 import '../design-system.css';
 
 interface LayoutProps {
   children: React.ReactNode;
   onOpenSettings: () => void;
+  onOpenLessons?: () => void;
   currentView: 'record' | 'history' | 'reports' | 'test-lab'; // Added test-lab
   onNavigate: (view: 'record' | 'history' | 'reports' | 'test-lab') => void;
 }
 
-export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, currentView, onNavigate }) => {
+export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, onOpenLessons, currentView, onNavigate }) => {
   return (
     <div className="app-layout">
       <motion.aside
@@ -61,6 +62,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, curren
         </nav>
 
         <div className="sidebar-footer">
+          {onOpenLessons && (
+            <button className="settings-btn lessons-btn" onClick={onOpenLessons}>
+              <Lightbulb size={20} />
+              <span>Lecciones IA</span>
+            </button>
+          )}
           <button className="settings-btn" onClick={onOpenSettings}>
             <Settings size={20} />
             <span>Configuración</span>

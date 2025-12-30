@@ -5,11 +5,14 @@ import { Copy, Check, FileText, Sparkles, FileOutput, X, Printer, Plus, AlertTri
 import ReactMarkdown from 'react-markdown';
 import { MBSLogo } from './MBSLogo';
 import { AIAuditWidget } from './AIAuditWidget';
+import { processDoctorFeedback } from '../services/doctor-feedback';
 
 interface HistoryViewProps {
   content: string;
   isLoading: boolean;
   patientName?: string;
+  transcription?: string; // Needed for learning context
+  apiKey?: string; // Needed for Qwen3 analysis call
   onGenerateReport?: () => Promise<string>;
   onNewConsultation?: () => void;
   onContentChange?: (newContent: string) => void;
@@ -107,6 +110,20 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   };
 
   const handleSaveEdit = () => {
+    // TRIGGER LEARNING: If content changed, analyze why
+    if (editValue !== historyText && props.transcription && props.apiKey) {
+      processDoctorFeedback(
+        props.transcription,
+        historyText, // Original AI version
+        editValue,   // Doctor's edited version
+        props.apiKey
+      ).then(lesson => {
+        if (lesson) {
+          console.log('[HistoryView] Aprendizaje registrado:', lesson.improvement_category);
+        }
+      });
+    }
+
     if (onContentChange) {
       const fullContent = editValue + (mariaNotes ? '\n---MARIA_NOTES---\n' + mariaNotes : '');
       onContentChange(fullContent);

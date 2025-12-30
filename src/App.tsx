@@ -9,6 +9,7 @@ import { AIService } from './services/ai';
 import { ExtractionResult } from './services/groq';
 import { saveMedicalRecord, updateMedicalRecord, saveLabTestLog } from './services/storage';
 import { AudioTestLab } from './components/AudioTestLab';
+import LessonsPanel from './components/LessonsPanel';
 import './App.css';
 
 // API Key from environment variable
@@ -32,6 +33,7 @@ function App() {
         remainingErrors?: { type: string; field: string; reason: string }[];
         validationHistory?: { type: string; field: string; reason: string }[];
     } | undefined>(undefined);
+    const [showLessons, setShowLessons] = useState(false);
 
     // ════════════════════════════════════════════════════════════════
     // BATCHING STATE: Store partial extractions for long consultations
@@ -361,6 +363,14 @@ function App() {
                 />
             )}
 
+            {showLessons && (
+                <div className="lessons-modal-overlay" onClick={() => setShowLessons(false)}>
+                    <div className="lessons-modal" onClick={e => e.stopPropagation()}>
+                        <LessonsPanel onClose={() => setShowLessons(false)} />
+                    </div>
+                </div>
+            )}
+
             <style>{`
                 .processing-banner {
                     display: flex;
@@ -385,6 +395,24 @@ function App() {
                 
                 @keyframes spin {
                     to { transform: rotate(360deg); }
+                }
+
+                .lessons-modal-overlay {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: rgba(0,0,0,0.5);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 1000;
+                }
+                .lessons-modal {
+                    max-width: 90%;
+                    max-height: 90%;
+                    overflow: auto;
                 }
             `}</style>
         </Layout>
