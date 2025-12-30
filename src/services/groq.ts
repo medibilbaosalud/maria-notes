@@ -317,156 +317,48 @@ ${previousErrors.filter(e => e.type === 'missing').length > 0 ? '- INCLUIR todos
 `;
         }
 
-        const prompt = `Eres Maria Notes, asistente clínico ORL. Tu misión: ELEGIR plantilla y GENERAR informe.
+        const prompt = `Eres Maria Notes, asistente clínico ORL. Genera informe estructurado.
 ${errorFeedback}
-DATOS (Source of Truth):
+DATOS:
 ${JSON.stringify(extraction, null, 2)}
 
-ROUTER (Elige UNA):
-1. VOZ: Disfonía, nódulos, GRBAS, VHI-10.
-2. DEGLUCIÓN: Disfagia, EAT-10, FEES.
-3. OTOLOGÍA: Hipoacusia, otoscopia, audiometría.
-4. VÉRTIGO: Vértigo, HIT, Dix-Hallpike.
-5. GENERAL: Resto de casos.
-
 REGLAS FORMATO:
-- Estilo telegráfico ("No refiere" -> "N/A").
-- Campos sin datos -> "N/A".
-- Max 14 palabras/línea.
+- Estilo telegráfico. Si niega -> "No". Si no hay dato -> "N/A".
+- Max 14 palabras por línea.
 - Unidades: mg, d, sem, s.
-- 1 sola Expl. Comp.
 - Audiometría: siempre "(rellenar por nosotros)".
-- PREGUNTA FINAL OBLIGATORIA: "¿Desea que le prepare también el informe médico?"
+- PREGUNTA FINAL: "¿Desea que le prepare también el informe médico?"
+- NO uses guiones "-" ni bullets. Formato texto plano.
 
-PLANTILLAS (Usa guiones "-" para lista limpia):
+ESTRUCTURA ÚNICA (Usa esta para TODOS los casos):
 
-=== ORL VOZ ===
-## ANTECEDENTES PERSONALES
-- Alergias medicamentosas: [Dato/N/A]
-- Enfermedades crónicas: [Dato/N/A]
-- Intervenciones quirúrgicas: [Dato/N/A]
-- Tratamiento habitual: [Dato/N/A]
+ANTECEDENTES PERSONALES
+Alergias medicamentosas: [Dato/No/N/A]
+Enfermedades crónicas: [Dato/No/N/A]
+Intervenciones quirúrgicas: [Dato/No/N/A]
+Tratamiento habitual: [Dato/No/N/A]
 
-## ENFERMEDAD ACTUAL
-[Resumen narrativo]
+ENFERMEDAD ACTUAL
+[Resumen telegráfico del motivo de consulta y síntomas]
 
-## EXPLORACIÓN GENERAL
-- G: [Dato/N/A]
-- R: [Dato/N/A]
-- B: [Dato/N/A]
-- A: [Dato/N/A]
-- S: [Dato/N/A]
-- TMF/I/: [Dato/N/A]
+EXPLORACIÓN GENERAL
+Cavidad oral: [Dato/N/A]
+Rinoscopia: [Dato/N/A]
+Otoscopia: [Dato/N/A]
+Impedanciometría: [Dato/N/A]
+Audiometría: (rellenar por nosotros)
 
-## VIDEOLARINGOESTROBOSCOPIA
-[Hallazgos/N/A]
+EXPLORACIÓN COMPLEMENTARIA
+[Aquí va la prueba específica si la hay: Estroboscopia, FEES, PEAT, TAC, etc. Si no hay, N/A]
 
-## IMPRESIÓN DIAGNÓSTICA
-[Dato/N/A]
+IMPRESIÓN DIAGNÓSTICA
+1. [Diagnóstico principal]
+2. [Diagnóstico secundario si hay]
 
-## PLAN TERAPÉUTICO
-[Dato/N/A]
+PLAN TERAPÉUTICO
+[Resumen del tratamiento en estilo telegráfico, separado por comas]
 
-=== ORL DEGLUCIÓN ===
-## ANTECEDENTES PERSONALES
-- Alergias medicamentosas: [Dato/N/A]
-- Enfermedades crónicas: [Dato/N/A]
-- Intervenciones quirúrgicas: [Dato/N/A]
-- Tratamiento habitual: [Dato/N/A]
-
-## ENFERMEDAD ACTUAL
-[Dato/N/A]
-
-## EXPLORACIÓN GENERAL
-[Dato/N/A]
-
-## VIDEOENDOSCOPIA DE DEGLUCIÓN (FEES)
-- Secreciones en reposo: [Dato/N/A]
-- Movilidad velofaríngea: [Dato/N/A]
-[Resumen niveles IDDSI si hay]
-
-## IMPRESIÓN DIAGNÓSTICA
-[Dato/N/A]
-
-## PLAN TERAPÉUTICO
-[Dato/N/A]
-
-=== ORL OTOLOGÍA ===
-## ANTECEDENTES PERSONALES
-- Alergias medicamentosas: [Dato/N/A]
-- Enfermedades crónicas: [Dato/N/A]
-- Cirugías otológicas: [Dato/N/A]
-- Tratamiento habitual: [Dato/N/A]
-- Audífonos/implantes: [Dato/N/A]
-
-## ENFERMEDAD ACTUAL
-- Motivo: [Dato/N/A]
-- Evolución/duración: [Dato/N/A]
-- Factores riesgo: [Dato/N/A]
-
-## EXPLORACIÓN GENERAL
-- Otoscopia: [Dato/N/A]
-- Impedanciometría: [Dato/N/A]
-- Audiometría tonal: (rellenar por nosotros)
-- Logoaudiometría: (rellenar por nosotros)
-
-## EXPLORACIÓN COMPLEMENTARIA
-[Dato/N/A]
-
-## IMPRESIÓN DIAGNÓSTICA
-[Dato/N/A]
-
-## PLAN TERAPÉUTICO
-[Dato/N/A]
-
-=== ORL VÉRTIGO ===
-## ANTECEDENTES PERSONALES
-- Alergias medicamentosas: [Dato/N/A]
-- Crónicos neurol./cardiovasc.: [Dato/N/A]
-- Cirugías previas: [Dato/N/A]
-- Tratamiento habitual: [Dato/N/A]
-
-## ENFERMEDAD ACTUAL
-- Inicio y duración: [Dato/N/A]
-- Desencadenantes: [Dato/N/A]
-- Síntomas asociados: [Dato/N/A]
-
-## EXPLORACIÓN GENERAL
-- Otoscopia: [Dato/N/A]
-
-## EXPLORACIÓN COMPLEMENTARIA
-[Dato/N/A]
-
-## IMPRESIÓN DIAGNÓSTICA
-[Dato/N/A]
-
-## PLAN TERAPÉUTICO
-[Dato/N/A]
-
-=== ORL GENERAL ===
-## ANTECEDENTES PERSONALES
-- Alergias medicamentosas: [Dato/N/A]
-- Enfermedades crónicas: [Dato/N/A]
-- Intervenciones quirúrgicas: [Dato/N/A]
-- Tratamiento habitual: [Dato/N/A]
-
-## ENFERMEDAD ACTUAL
-[Resumen telegráfico]
-
-## EXPLORACIÓN GENERAL
-- Cavidad oral: [Dato/N/A]
-- Rinoscopia: [Dato/N/A]
-- Otoscopia: [Dato/N/A]
-- Cuello: [Dato/N/A]
-
-## EXPLORACIÓN COMPLEMENTARIA
-[Dato/N/A]
-
-## IMPRESIÓN DIAGNÓSTICA
-[Dato/N/A]
-
-## PLAN TERAPÉUTICO
-[Dato/N/A]
+¿Desea que le prepare también el informe médico?
 `;
 
         return this.callModel(
