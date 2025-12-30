@@ -317,33 +317,43 @@ ${previousErrors.filter(e => e.type === 'missing').length > 0 ? '- INCLUIR todos
 `;
         }
 
-        const prompt = `Actúa como Experto Redactor Clínico ORL.
-Tu objetivo es redactar una Historia Clínica FORMAL y LIMPIA basada en los datos extraídos.
+        const prompt = `Actúa como Experto Redactor Clínico ORL (Otorrinolaringólogo).
+Tu objetivo es redactar una Historia Clínica FORMAL, TÉCNICA y LIMPIA.
 
 ${errorFeedback}
 
-REGLAS DE FORMATO (ESTRICTO):
-1. CERO MARKDOWN DE FORMATO: No uses negritas (**texto**), ni cursivas, ni encabezados (##).
-2. TÍTULOS EN MAYÚSCULAS: Para separar secciones usa solo el nombre en mayúsculas (ej: ANTECEDENTES PERSONALES).
-3. ESTILO "FORMULARIO": Usa guiones (-) para listar hallazgos.
-4. COHERENCIA: Si un dato no existe en el JSON, NO LO INVENTES. Omite la línea.
+REGLAS CRÍTICAS DE REDACCIÓN:
+1. NUNCA DIGAS "Según la transcripción" o "No se proporciona...". SI NO HAY DATOS, OMITE LA SECCIÓN.
+2. TRADUCE COLOQUIALISMOS A TÉRMINOS TÉCNICOS:
+   - "Tubito por la nariz" -> "Fibrolaringoscopia" o "Nasofibrolaringoscopia".
+   - "Campana" -> "Audiometría".
+   - "Ruido" -> "Acúfeno" o "Tinnitus".
+   - "Moco en el oído" -> "Otitis serosa" u "Otitis media secretora".
 
-ESTRUCTURA DE SALIDA:
+3. IMPRESIÓN DIAGNÓSTICA: Si no está explícita, DEDÚCELA de la exploración y síntomas y redáctala como "Juicio Clínico sugerido". NUNCA expliques que falta información.
+
+REGLAS DE FORMATO (ESTRICTO):
+1. TÍTULOS EN MAYÚSCULAS y separados del contenido por un salto de línea.
+2. FORMATO DE LISTA (Viñetas): Usa guiones (-) para listar hallazgos y pasos del tratamiento.
+
+ESTRUCTURA DE SALIDA REQUERIDA:
 
 ANTECEDENTES PERSONALES
-- [Lista de antecedentes o "Niega alergias/enfermedades" si indica negación]
+- [Lista de antecedentes o "Sin antecedentes de interés"]
 
 ENFERMEDAD ACTUAL
-[Narrativa técnica y concisa. CERO palabras de relleno.]
+[Narrativa técnica y concisa. Cero relleno.]
 
 EXPLORACIÓN
-[IMPORTANTE: Lista SOLO los hallazgos positivos o relevantes del JSON. Si el JSON tiene datos, PONLOS. Si no hay nada, omite la sección.]
+- [Lista SOLO los hallazgos positivos traducidos a lenguaje técnico. Ej: "Fibrolaringoscopia: xxxx"]
 
 IMPRESIÓN DIAGNÓSTICA
-[Diagnóstico principal]
+[Diagnóstico principal o Juicio Clínico deducido]
 
 PLAN TERAPÉUTICO
-- [Lista de pautas]
+- [Pauta 1]
+- [Pauta 2]
+- [Pauta 3]
 
 DATOS DE ENTRADA:
 ${JSON.stringify(extraction, null, 2)}`;
