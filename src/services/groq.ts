@@ -3,21 +3,21 @@
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1';
 
-// Model assignments (research-based, quality-first)
+// Model assignments (OPTIMIZED for speed while maintaining quality)
 const MODELS = {
-    EXTRACTION: 'openai/gpt-oss-120b',           // Best reasoning, chain-of-thought
-    GENERATION: 'openai/gpt-oss-120b',           // Consistent with extraction, high quality
+    EXTRACTION: 'openai/gpt-oss-120b',           // Best reasoning, chain-of-thought (quality critical)
+    GENERATION: 'meta-llama/llama-4-maverick-17b-128e-instruct', // Fast generation, good instruction following
     VALIDATOR_A: 'openai/gpt-oss-120b',          // Logical consistency check
     VALIDATOR_B: 'meta-llama/llama-4-maverick-17b-128e-instruct', // 100% error detection accuracy
-    WHISPER: 'whisper-large-v3',                 // Best transcription quality
+    WHISPER: 'whisper-large-v3-turbo',           // Faster transcription (~40% speed boost)
 };
 
 // Fallback models if primary fails
 const FALLBACK_MODELS = {
     EXTRACTION: ['openai/gpt-oss-20b', 'llama-3.3-70b-versatile'],
-    GENERATION: ['llama-3.3-70b-versatile', 'qwen/qwen3-32b'],
+    GENERATION: ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile'], // GPT-120B as fallback for quality
     VALIDATOR: ['qwen/qwen3-32b', 'llama-3.3-70b-versatile'],
-    WHISPER: ['whisper-large-v3-turbo'],
+    WHISPER: ['whisper-large-v3'],               // Full quality as fallback
 };
 
 export interface ExtractionResult {
@@ -37,6 +37,11 @@ export interface ExtractionResult {
     };
     diagnostico: string[] | null;
     plan: string | null;
+    notas_calidad?: {
+        tipo: 'INAUDIBLE' | 'AMBIGUO';
+        seccion: string;
+        descripcion: string
+    }[];
 }
 
 export interface ValidationError {
@@ -171,7 +176,7 @@ REGLAS DE EXTRACCIÓN:
 2. Extrae TEXTUALMENTE lo que dice el médico
 3. Para exploraciones, solo incluye las que el médico NOMBRA explícitamente
 4. Si el médico NIEGA algo explícitamente (ej: "No tiene alergias"), extráelo textualmente en lugar de null.
-5. Si hay ambigüedad, pon null
+5. Si hay ambigüedad o algo inaudible importante, USA EL CAMPO 'notas_calidad'.
 
 Devuelve un JSON con esta estructura exacta:
 
@@ -191,7 +196,11 @@ Devuelve un JSON con esta estructura exacta:
     "nombre_exploracion": "hallazgo textual" | null
   },
   "diagnostico": ["array de diagnósticos"] | null,
-  "plan": "plan terapéutico mencionado" | null
+  "diagnostico": ["array de diagnósticos"] | null,
+  "plan": "plan terapéutico mencionado" | null,
+  "notas_calidad": [
+    { "tipo": "INAUDIBLE", "seccion": "plan", "descripcion": "No se entiende la dosis del medicamento X" }
+  ]
 }
 
 IMPORTANTE:
@@ -625,5 +634,101 @@ TRANSCRIPCIÓN:
 ${transcription}`;
 
         return this.callModel(MODELS.GENERATION, prompt, FALLBACK_MODELS.GENERATION, { temperature: 0.4 });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // PHASE 4: SKEPTICAL MERGER (Multi-Batch Support)
+    // ═══════════════════════════════════════════════════════════════
+
+    private async mergeTwoExtractions(
+        partA: ExtractionResult,
+        partB: ExtractionResult
+    ): Promise<ExtractionResult> {
+        console.log('[Merger] Merging two parts...');
+
+        const prompt = `Eres un "Skeptical Merger" (Fusionador Escéptico) de datos médicos.
+Tu tarea es unificar DOS fragmentos de extracción de datos de la MISMA consulta médica (Parte A y Parte B) en un único JSON consolidado.
+
+REGLAS DE FUSIÓN:
+1. ACUMULACIÓN: Combina síntomas, antecedentes y exploraciones mencionados en ambas partes.
+2. RESOLUCIÓN DE CONFLICTOS:
+   - Si Parte A dice "No alergias" y Parte B dice "Alérgico a Penicilina" -> GANA Parte B (el hallazgo positivo suele ser posterior o más detallado).
+   - Si hay contradicción directa inexplicable, conserva ambos datos con una nota [Conflicto: ...]
+3. DEDUPLICACIÓN: Elimina duplicados exactos en arrays.
+4. COHERENCIA TEMPORAL: La Parte B ocurrió DESPUÉS de la Parte A. La evolución en Parte B es la más reciente.
+5. CALIDAD: Acumula las 'notas_calidad' de ambas partes. Si la Parte B resuelve una duda de la Parte A (ej: aclara algo inaudible), elimina la nota correspondiente.
+
+INPUT PARTE A (Inicio):
+${JSON.stringify(partA, null, 2)}
+
+INPUT PARTE B (Continuación):
+${JSON.stringify(partB, null, 2)}
+
+Genera el JSON consolidado final.`;
+
+        const result = await this.callModel(
+            MODELS.EXTRACTION, // Use the smart model for merging
+            prompt,
+            FALLBACK_MODELS.EXTRACTION,
+            { temperature: 0.1, jsonMode: true }
+        );
+
+        try {
+            return JSON.parse(result.text) as ExtractionResult;
+        } catch (e) {
+            console.error('[Merger] Failed to parse merge result. Fallback to concatenation strategy.');
+            // Fallback: Naive merge
+            return {
+                antecedentes: {
+                    alergias: [...(partA.antecedentes.alergias || []), ...(partB.antecedentes.alergias || [])],
+                    enfermedades_cronicas: [...(partA.antecedentes.enfermedades_cronicas || []), ...(partB.antecedentes.enfermedades_cronicas || [])],
+                    cirugias: [...(partA.antecedentes.cirugias || []), ...(partB.antecedentes.cirugias || [])],
+                    tratamiento_habitual: [...(partA.antecedentes.tratamiento_habitual || []), ...(partB.antecedentes.tratamiento_habitual || [])]
+                },
+                enfermedad_actual: {
+                    motivo_consulta: `${partA.enfermedad_actual.motivo_consulta} | ${partB.enfermedad_actual.motivo_consulta}`,
+                    sintomas: [...partA.enfermedad_actual.sintomas, ...partB.enfermedad_actual.sintomas],
+                    evolucion: `${partA.enfermedad_actual.evolucion || ''} -> ${partB.enfermedad_actual.evolucion || ''}`
+                },
+                exploraciones_realizadas: { ...partA.exploraciones_realizadas, ...partB.exploraciones_realizadas },
+                diagnostico: [...(partA.diagnostico || []), ...(partB.diagnostico || [])],
+                plan: partB.plan || partA.plan // Prefer newest plan
+            };
+        }
+    }
+
+    async mergeMultipleExtractions(results: ExtractionResult[]): Promise<ExtractionResult> {
+        if (results.length === 0) throw new Error('No extractions to merge');
+        if (results.length === 1) return results[0];
+
+        // Parallel Tree Merge: [A, B, C, D] -> [Merge(A,B), Merge(C,D)] in parallel -> Merge results
+        // This reduces O(n) sequential calls to O(log n) parallel rounds
+        console.log(`[Merger] Starting parallel merge of ${results.length} parts`);
+
+        let current = [...results];
+        let round = 1;
+
+        while (current.length > 1) {
+            const pairs: Promise<ExtractionResult>[] = [];
+            const nextRound: ExtractionResult[] = [];
+
+            for (let i = 0; i < current.length; i += 2) {
+                if (i + 1 < current.length) {
+                    // Merge pair in parallel
+                    pairs.push(this.mergeTwoExtractions(current[i], current[i + 1]));
+                } else {
+                    // Odd one out, carry forward
+                    nextRound.push(current[i]);
+                }
+            }
+
+            console.log(`[Merger] Round ${round}: Merging ${pairs.length} pairs in parallel`);
+            const merged = await Promise.all(pairs);
+            current = [...merged, ...nextRound];
+            round++;
+        }
+
+        console.log(`[Merger] Complete in ${round - 1} rounds`);
+        return current[0];
     }
 }

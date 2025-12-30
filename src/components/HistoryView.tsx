@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Copy, Check, FileText, Sparkles, FileOutput, X, Printer, Plus } from 'lucide-react';
+import { Copy, Check, FileText, Sparkles, FileOutput, X, Printer, Plus, AlertTriangle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { MBSLogo } from './MBSLogo';
+import { AIAuditWidget } from './AIAuditWidget';
 
 interface HistoryViewProps {
   content: string;
@@ -11,6 +12,13 @@ interface HistoryViewProps {
   patientName?: string;
   onGenerateReport?: () => Promise<string>;
   onNewConsultation?: () => void;
+  metadata?: {
+    corrections: number;
+    models: { generation: string; validation: string };
+    errorsFixed: number;
+    versionsCount: number;
+    remainingErrors?: { type: string; field: string; reason: string }[];
+  };
 }
 
 const LoadingMessages = () => {
@@ -74,7 +82,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   isLoading,
   patientName,
   onGenerateReport,
-  onNewConsultation
+  onNewConsultation,
+  metadata
 }) => {
   // ... (existing state)
   const [copied, setCopied] = useState(false);
@@ -228,6 +237,33 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             <div className="document-content markdown-body">
               <ReactMarkdown>{historyText}</ReactMarkdown>
             </div>
+
+            {/* Remaining Errors Warning */}
+            {metadata?.remainingErrors && metadata.remainingErrors.length > 0 && (
+              <div className="remaining-errors-warning">
+                <div className="warning-header">
+                  <AlertTriangle size={18} />
+                  <span>Posibles inconsistencias detectadas</span>
+                </div>
+                <ul className="error-list">
+                  {metadata.remainingErrors.map((err, i) => (
+                    <li key={i}>
+                      <strong>{err.field}:</strong> {err.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* AI Audit Widget - Absolute Positioned */}
+            {metadata && (
+              <AIAuditWidget
+                corrections={metadata.corrections}
+                models={metadata.models}
+                errorsFixed={metadata.errorsFixed}
+                versionsCount={metadata.versionsCount}
+              />
+            )}
           </motion.div>
         </div>
 
@@ -334,12 +370,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           top: 0;
         }
 
-        .document-card {
+  .document-card {
           background: white;
           border-radius: 16px;
           box-shadow: var(--shadow-md);
           /* overflow: hidden; Removed to prevent clipping */
           border: 1px solid var(--glass-border);
+          position: relative;
         }
 
         .document-header {
@@ -455,7 +492,40 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         .markdown-body p { margin-bottom: 1em; }
         .markdown-body ul { padding-left: 1.5em; margin-bottom: 1em; }
 
-        /* Maria Notes Styles */
+        /* Remaining Errors Warning */
+        .remaining-errors-warning {
+          margin: 1.5rem 2rem;
+          padding: 1rem 1.5rem;
+          background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+          border: 1px solid #fca5a5;
+          border-left: 4px solid #ef4444;
+          border-radius: 12px;
+        }
+
+        .remaining-errors-warning .warning-header {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          color: #dc2626;
+          font-weight: 600;
+          font-size: 0.95rem;
+          margin-bottom: 0.75rem;
+        }
+
+        .remaining-errors-warning .error-list {
+          margin: 0;
+          padding-left: 1.5rem;
+          font-size: 0.9rem;
+          color: #991b1b;
+        }
+
+        .remaining-errors-warning .error-list li {
+          margin-bottom: 0.5rem;
+        }
+
+        .remaining-errors-warning .error-list li strong {
+          color: #b91c1c;
+        }
         .maria-notes-card {
           background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
           border-radius: 16px;

@@ -1,18 +1,45 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
-import { Mic, Square, Stethoscope } from 'lucide-react';
+import { Mic, Square, Stethoscope, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { MBSLogo } from './MBSLogo';
 import heroImage from '../assets/maria_notes_hero.png';
 
 interface RecorderProps {
-  onRecordingComplete: (blob: Blob, patientName: string) => void;
+  onRecordingComplete: (blob: Blob, patientName: string, isPartialBatch?: boolean, batchIndex?: number) => void;
 }
 
 export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
-  const { isRecording, duration, startRecording, stopRecording, audioBlob } = useAudioRecorder();
   const [patientName, setPatientName] = useState('');
+  const [processedBatches, setProcessedBatches] = useState<number[]>([]);
+  const patientNameRef = useRef(patientName);
+
+  // Keep ref in sync with state for use in callbacks
+  useEffect(() => {
+    patientNameRef.current = patientName;
+  }, [patientName]);
+
+  // Callback for when a batch is ready (every 35 mins)
+  const handleBatchReady = (blob: Blob, batchIndex: number) => {
+    console.log(`[RecorderUI] Batch ${batchIndex} ready (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
+    setProcessedBatches(prev => [...prev, batchIndex]);
+    // Send to parent for background processing (isPartialBatch = true)
+    onRecordingComplete(blob, patientNameRef.current, true, batchIndex);
+  };
+
+  const {
+    isRecording,
+    duration,
+    batchCount,
+    startRecording,
+    stopRecording,
+    audioBlob
+  } = useAudioRecorder({
+    onBatchReady: handleBatchReady,
+    batchIntervalMs: 35 * 60 * 1000 // 35 minutes
+    // batchIntervalMs: 20 * 1000 // DEBUG: 20 seconds for testing
+  });
 
   // Guard to prevent infinite loops if parent re-renders
   const lastSubmittedBlob = useRef<Blob | null>(null);
@@ -20,9 +47,13 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
   useEffect(() => {
     if (audioBlob && audioBlob !== lastSubmittedBlob.current) {
       lastSubmittedBlob.current = audioBlob;
-      onRecordingComplete(audioBlob, patientName);
+      // This is the FINAL segment after user presses Stop (isPartialBatch = false)
+      console.log(`[RecorderUI] Final segment ready (${(audioBlob.size / 1024 / 1024).toFixed(2)} MB)`);
+      onRecordingComplete(audioBlob, patientName, false, batchCount);
+      // Reset for next recording
+      setProcessedBatches([]);
     }
-  }, [audioBlob, onRecordingComplete, patientName]);
+  }, [audioBlob, onRecordingComplete, patientName, batchCount]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -104,6 +135,21 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
         >
           {formatTime(duration)}
         </motion.div>
+
+        {/* Batch Processing Indicator */}
+        <AnimatePresence>
+          {processedBatches.length > 0 && (
+            <motion.div
+              className="batch-indicator"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+            >
+              <CheckCircle size={14} />
+              <span>{processedBatches.length} parte{processedBatches.length > 1 ? 's' : ''} procesada{processedBatches.length > 1 ? 's' : ''}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <div className="controls-area">
@@ -231,7 +277,7 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
           padding: 0.75rem 1rem 0.75rem 2.5rem;
           border-radius: 8px;
           border: none;
-          background: #F1F5F9; /* Lighter gray background */
+          background: #F1F5F9;
           color: var(--text-primary);
           font-size: 0.95rem;
           transition: all 0.2s;
@@ -248,7 +294,7 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
         .visualization-area {
           position: relative;
           width: 260px;
-          height: 220px;
+          height: 240px;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -286,6 +332,20 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
           font-variant-numeric: tabular-nums;
           z-index: 2;
           letter-spacing: -1px;
+        }
+
+        .batch-indicator {
+          position: absolute;
+          bottom: 0;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 12px;
+          background: rgba(38, 166, 154, 0.1);
+          border-radius: 20px;
+          color: var(--brand-primary);
+          font-size: 0.8rem;
+          font-weight: 600;
         }
 
         .pulse-ring {

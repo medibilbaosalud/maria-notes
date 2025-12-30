@@ -1,14 +1,14 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Settings, Mic, FileText, FileBarChart } from 'lucide-react';
+import { Settings, Mic, FileText, FileBarChart, FlaskConical } from 'lucide-react';
 import { MBSLogo } from './MBSLogo';
 import '../design-system.css';
 
 interface LayoutProps {
   children: React.ReactNode;
   onOpenSettings: () => void;
-  currentView: 'record' | 'history' | 'reports';
-  onNavigate: (view: 'record' | 'history' | 'reports') => void;
+  currentView: 'record' | 'history' | 'reports' | 'test-lab'; // Added test-lab
+  onNavigate: (view: 'record' | 'history' | 'reports' | 'test-lab') => void;
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, currentView, onNavigate }) => {
@@ -51,6 +51,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, curren
             label="Informes"
             isActive={currentView === 'reports'}
             onClick={() => onNavigate('reports')}
+          />
+          <NavItem
+            icon={<FlaskConical size={20} />} // Lab icon
+            label="Zona Test"
+            isActive={currentView === 'test-lab'}
+            onClick={() => onNavigate('test-lab')}
           />
         </nav>
 
