@@ -30,6 +30,7 @@ function App() {
         errorsFixed: number;
         versionsCount: number;
         remainingErrors?: { type: string; field: string; reason: string }[];
+        validationHistory?: { type: string; field: string; reason: string }[];
     } | undefined>(undefined);
 
     // ════════════════════════════════════════════════════════════════
@@ -153,15 +154,19 @@ function App() {
 
             // Map metadata for UI
             if (historyResult.validations) {
+                // Flatten all errors from all validation rounds to show what was fixed
+                const allFixedErrors = historyResult.validations.flatMap(v => v.errors || []);
+
                 setPipelineMetadata({
                     corrections: historyResult.corrections_applied || 0,
                     models: {
                         generation: historyResult.model,
                         validation: 'Llama-4 / GPT-120B'
                     },
-                    errorsFixed: historyResult.validations.reduce((acc, v) => acc + (v.errors?.length || 0), 0),
+                    errorsFixed: allFixedErrors.length,
                     versionsCount: (historyResult.corrections_applied || 0) + 1,
-                    remainingErrors: historyResult.remaining_errors
+                    remainingErrors: historyResult.remaining_errors,
+                    validationHistory: allFixedErrors // New field for detailed log
                 });
             }
 

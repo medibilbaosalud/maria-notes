@@ -10,15 +10,18 @@ interface AIAuditWidgetProps {
     };
     errorsFixed: number;
     versionsCount: number;
+    validationLogs?: { field: string; reason: string; type: string }[];
 }
 
 export const AIAuditWidget: React.FC<AIAuditWidgetProps> = ({
     corrections,
     models,
     errorsFixed,
-    versionsCount
+    versionsCount,
+    validationLogs
 }) => {
     const [isHovered, setIsHovered] = useState(false);
+    const [expanded, setExpanded] = useState(false);
 
     // Determine status and color
     let status: 'perfect' | 'corrected' | 'error' = 'perfect';
@@ -63,6 +66,7 @@ export const AIAuditWidget: React.FC<AIAuditWidgetProps> = ({
             className="ai-audit-widget"
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
+            onClick={() => setExpanded(!expanded)}
         >
             <motion.div
                 className="audit-badge"
@@ -80,9 +84,9 @@ export const AIAuditWidget: React.FC<AIAuditWidgetProps> = ({
             </motion.div>
 
             <AnimatePresence>
-                {isHovered && (
+                {(isHovered || expanded) && (
                     <motion.div
-                        className="audit-tooltip"
+                        className={`audit-tooltip ${expanded ? 'expanded' : ''}`}
                         initial={{ opacity: 0, y: 5, scale: 0.95 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 5, scale: 0.95 }}
@@ -90,7 +94,7 @@ export const AIAuditWidget: React.FC<AIAuditWidgetProps> = ({
                     >
                         <div className="tooltip-header">
                             <h4>Auditoría IA</h4>
-                            <span className="version-tag">Humanity Grade v2</span>
+                            <span className="version-tag">Humanity Grade v3</span>
                         </div>
 
                         <div className="tooltip-content">
@@ -106,6 +110,23 @@ export const AIAuditWidget: React.FC<AIAuditWidgetProps> = ({
                             </div>
 
                             <div className="divider"></div>
+
+                            {/* Detailed Validation Logs */}
+                            {validationLogs && validationLogs.length > 0 && (
+                                <div className="validation-logs">
+                                    <p className="section-title">Errores Corregidos:</p>
+                                    <ul className="logs-list">
+                                        {validationLogs.map((log, i) => (
+                                            <li key={i} className="log-item">
+                                                <ShieldCheck size={10} className="log-icon" />
+                                                <span className="log-field">{log.field}:</span>
+                                                <span className="log-reason">{log.reason}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                    <div className="divider"></div>
+                                </div>
+                            )}
 
                             <div className="models-section">
                                 <p className="section-title">Modelos Activos:</p>
@@ -135,7 +156,46 @@ export const AIAuditWidget: React.FC<AIAuditWidgetProps> = ({
                     position: absolute;
                     top: 1rem;
                     right: 1rem;
-                    z-index: 10;
+                    z-index: 20;
+                }
+
+                .audit-tooltip.expanded {
+                    width: 320px;
+                    z-index: 30;
+                }
+
+                .logs-list {
+                    list-style: none;
+                    padding: 0;
+                    margin: 0 0 10px 0;
+                    max-height: 150px;
+                    overflow-y: auto;
+                }
+
+                .log-item {
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 6px;
+                    font-size: 0.75rem;
+                    color: #059669;
+                    background: #ecfdf5;
+                    padding: 4px 6px;
+                    border-radius: 4px;
+                    margin-bottom: 4px;
+                }
+
+                .log-icon {
+                    margin-top: 3px;
+                    flex-shrink: 0;
+                }
+
+                .log-field {
+                    font-weight: 700;
+                    color: #047857;
+                }
+
+                .log-reason {
+                    color: #065f46;
                 }
 
                 .audit-badge {
@@ -162,15 +222,14 @@ export const AIAuditWidget: React.FC<AIAuditWidgetProps> = ({
                     top: 100%;
                     right: 0;
                     margin-top: 8px;
-                    width: 260px;
-                    background: rgba(255, 255, 255, 0.95);
+                    width: 280px;
+                    background: rgba(255, 255, 255, 0.98);
                     backdrop-filter: blur(12px);
                     border-radius: 12px;
                     border: 1px solid rgba(255, 255, 255, 0.5);
                     box-shadow: 
-                        0 4px 6px -1px rgba(0, 0, 0, 0.1),
-                        0 2px 4px -1px rgba(0, 0, 0, 0.06),
-                        0 0 0 1px rgba(0, 0, 0, 0.05);
+                        0 10px 15px -3px rgba(0, 0, 0, 0.1),
+                        0 4px 6px -2px rgba(0, 0, 0, 0.05);
                     overflow: hidden;
                     font-family: var(--font-sans);
                 }

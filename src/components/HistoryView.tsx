@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Copy, Check, FileText, Sparkles, FileOutput, X, Printer, Plus, AlertTriangle } from 'lucide-react';
+import { Copy, Check, FileText, Sparkles, FileOutput, X, Printer, Plus, AlertTriangle, Edit2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { MBSLogo } from './MBSLogo';
 import { AIAuditWidget } from './AIAuditWidget';
@@ -12,12 +12,14 @@ interface HistoryViewProps {
   patientName?: string;
   onGenerateReport?: () => Promise<string>;
   onNewConsultation?: () => void;
+  onContentChange?: (newContent: string) => void;
   metadata?: {
     corrections: number;
     models: { generation: string; validation: string };
     errorsFixed: number;
     versionsCount: number;
     remainingErrors?: { type: string; field: string; reason: string }[];
+    validationHistory?: { type: string; field: string; reason: string }[];
   };
 }
 
@@ -83,16 +85,39 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   patientName,
   onGenerateReport,
   onNewConsultation,
+  onContentChange,
   metadata
 }) => {
   // ... (existing state)
   const [copied, setCopied] = useState(false);
+
+  // Edit Mode State
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportContent, setReportContent] = useState('');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
   // Split content into History and Maria Notes
   const [historyText, mariaNotes] = content ? content.split('---MARIA_NOTES---') : ['', ''];
+
+  const handleEditClick = () => {
+    setEditValue(historyText);
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = () => {
+    if (onContentChange) {
+      const fullContent = editValue + (mariaNotes ? '\n---MARIA_NOTES---\n' + mariaNotes : '');
+      onContentChange(fullContent);
+    }
+    setIsEditing(false);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditValue('');
+  };
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text.trim());
@@ -207,35 +232,77 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <span>Historia Clínica</span>
               </div>
               <div className="doc-actions">
-                {onNewConsultation && (
-                  <button
-                    className="action-button new-consultation"
-                    onClick={onNewConsultation}
-                  >
-                    <Plus size={18} />
-                    <span>Nueva Consulta</span>
-                  </button>
+                {!isEditing ? (
+                  <>
+                    {onNewConsultation && (
+                      <button
+                        className="action-button new-consultation"
+                        onClick={onNewConsultation}
+                      >
+                        <Plus size={18} />
+                        <span>Nueva Consulta</span>
+                      </button>
+                    )}
+                    <button
+                      className="action-button secondary"
+                      onClick={handleEditClick}
+                      title="Editar texto"
+                    >
+                      <Edit2 size={16} />
+                      <span>Editar</span>
+                    </button>
+                    <button
+                      className="action-button secondary"
+                      onClick={handleOpenReport}
+                      title="Generar Informe Médico Formal"
+                    >
+                      <FileOutput size={16} />
+                      <span>Informe</span>
+                    </button>
+                    <button
+                      className={`action-button copy-btn ${copied ? 'success' : ''}`}
+                      onClick={() => handleCopy(historyText)} // Keep historyText here as we copy what is shown
+                    >
+                      {copied ? <Check size={16} /> : <Copy size={16} />}
+                      <span>{copied ? 'Copiado' : 'Copiar'}</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="action-button secondary" onClick={handleCancelEdit}>
+                      <X size={16} />
+                      <span>Cancelar</span>
+                    </button>
+                    <button className="action-button primary success" onClick={handleSaveEdit}>
+                      <Check size={16} />
+                      <span>Guardar</span>
+                    </button>
+                  </>
                 )}
-                <button
-                  className="action-button secondary"
-                  onClick={handleOpenReport}
-                  title="Generar Informe Médico Formal"
-                >
-                  <FileOutput size={16} />
-                  <span>Informe</span>
-                </button>
-                <button
-                  className={`action-button copy-btn ${copied ? 'success' : ''}`}
-                  onClick={() => handleCopy(historyText)}
-                >
-                  {copied ? <Check size={16} /> : <Copy size={16} />}
-                  <span>{copied ? 'Copiado' : 'Copiar'}</span>
-                </button>
               </div>
             </div>
 
             <div className="document-content markdown-body">
-              <ReactMarkdown>{historyText}</ReactMarkdown>
+              {isEditing ? (
+                <textarea
+                  className="history-edit-textarea"
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  style={{
+                    width: '100%',
+                    minHeight: '400px',
+                    padding: '1rem',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '8px',
+                    fontFamily: 'inherit',
+                    fontSize: '1rem',
+                    lineHeight: '1.6',
+                    resize: 'vertical'
+                  }}
+                />
+              ) : (
+                <ReactMarkdown>{historyText}</ReactMarkdown>
+              )}
             </div>
 
             {/* Remaining Errors Warning */}
@@ -262,6 +329,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 models={metadata.models}
                 errorsFixed={metadata.errorsFixed}
                 versionsCount={metadata.versionsCount}
+                validationLogs={metadata.validationHistory || metadata.remainingErrors}
               />
             )}
           </motion.div>
