@@ -14,7 +14,8 @@ import { AudioTestLab } from './components/AudioTestLab';
 import LessonsPanel from './components/LessonsPanel';
 import { MemoryService } from './services/memory';
 import './App.css';
-import { Brain, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { Brain, ShieldCheck, Sparkles, X, Edit2, Check, FileText } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // API Key from environment variable
@@ -139,6 +140,7 @@ function App() {
     } | undefined>(undefined);
     const [showLessons, setShowLessons] = useState(false);
     const [showWelcomeModal, setShowWelcomeModal] = useState(false);
+    const [isEditingResult, setIsEditingResult] = useState(false);
 
     // ════════════════════════════════════════════════════════════════
     // BATCHING STATE: Store partial extractions for long consultations
@@ -423,35 +425,87 @@ function App() {
                             </button>
                         </div>
 
+
+                        {/* Audit Badge - Floating in Corner */}
                         {pipelineMetadata && (
-                            <div className="audit-banner">
-                                <div className="audit-stat">
-                                    <span className="audit-label">Versiones</span>
-                                    <span className="audit-value">{pipelineMetadata.versionsCount}</span>
+                            <div className="audit-corner-badge" title="Información de Auditoría IA">
+                                <div className="badge-header">
+                                    <ShieldCheck size={16} className="text-emerald-600" />
+                                    <span className="badge-stat">v{pipelineMetadata.versionsCount}</span>
                                 </div>
-                                <div className="audit-stat">
-                                    <span className="audit-label">Errores Corregidos</span>
-                                    <span className="audit-value conflict">{pipelineMetadata.errorsFixed}</span>
-                                </div>
-                                {pipelineMetadata.remainingErrors && pipelineMetadata.remainingErrors.length > 0 && (
-                                    <div className="audit-stat">
-                                        <span className="audit-label">Alertas Pendientes</span>
-                                        <span className="audit-value warning">{pipelineMetadata.remainingErrors.length}</span>
+                                <div className="badge-details">
+                                    <div className="detail-row">
+                                        <span>Correcciones:</span>
+                                        <strong>{pipelineMetadata.errorsFixed}</strong>
                                     </div>
-                                )}
+                                    <div className="detail-row">
+                                        <span>Modelo:</span>
+                                        <strong>{pipelineMetadata.models?.generation?.split('/').pop()}</strong>
+                                    </div>
+                                    {pipelineMetadata.remainingErrors && pipelineMetadata.remainingErrors.length > 0 && (
+                                        <div className="detail-warnings">
+                                            <strong>{pipelineMetadata.remainingErrors.length} Alertas Pendientes</strong>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
 
-                        <div className="editable-history-container">
-                            <textarea
-                                className="history-editor"
-                                value={history}
-                                onChange={(e) => setHistory(e.target.value)}
-                            />
+                        <div className="result-document-wrapper">
+                            <div className="paper-document interactive">
+                                <div className="document-header">
+                                    <div className="doc-title-row">
+                                        <FileText size={20} className="text-slate-400" />
+                                        <span className="doc-label">Historia Clínica Generada</span>
+                                    </div>
+                                    <div className="doc-actions">
+                                        <button
+                                            className={`icon-btn ${isEditingResult ? 'active' : ''}`}
+                                            onClick={() => setIsEditingResult(!isEditingResult)}
+                                            title={isEditingResult ? "Ver vista previa" : "Editar documento"}
+                                        >
+                                            {isEditingResult ? <Check size={18} /> : <Edit2 size={18} />}
+                                            <span>{isEditingResult ? 'Finalizar Edición' : 'Editar'}</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {isEditingResult ? (
+                                    <textarea
+                                        className="history-editor"
+                                        value={history}
+                                        onChange={(e) => setHistory(e.target.value)}
+                                        placeholder="Escribe la historia clínica aquí..."
+                                    />
+                                ) : (
+                                    <div className="document-content markdown-body">
+                                        <ReactMarkdown>{history || '*Esperando contenido...*'}</ReactMarkdown>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Quality Alerts Section (User Request) */}
+                            {pipelineMetadata?.remainingErrors && pipelineMetadata.remainingErrors.length > 0 && (
+                                <div className="quality-alerts-panel">
+                                    <div className="panel-header">
+                                        <Sparkles size={16} className="text-amber-500" />
+                                        <h3>Sugerencias de Mejora</h3>
+                                    </div>
+                                    <div className="alerts-list">
+                                        {pipelineMetadata.remainingErrors.map((err, idx) => (
+                                            <div key={idx} className="alert-item">
+                                                <span className="alert-field">{err.field}:</span>
+                                                <span className="alert-reason">{err.reason}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
-                        <div className="actions-bar">
+                        <div className="actions-bar sticky-bottom">
                             <button className="action-btn save" onClick={() => handleSave(history)}>
+                                <Check size={18} />
                                 Guardar en Historial
                             </button>
                         </div>
