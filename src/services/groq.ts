@@ -6,12 +6,12 @@ import { MemoryService } from './memory';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1';
 
-// Model assignments (OPTIMIZED for speed while maintaining quality)
+// Model assignments (STABLE - using proven Groq models)
 const MODELS = {
-    EXTRACTION: 'openai/gpt-oss-120b',
-    GENERATION: 'meta-llama/llama-4-maverick-17b-128e-instruct',
-    VALIDATOR_A: 'openai/gpt-oss-120b',
-    VALIDATOR_B: 'meta-llama/llama-4-maverick-17b-128e-instruct',
+    EXTRACTION: 'llama-3.3-70b-versatile',
+    GENERATION: 'llama-3.3-70b-versatile',
+    VALIDATOR_A: 'llama-3.3-70b-versatile',
+    VALIDATOR_B: 'qwen/qwen3-32b',
     WHISPER: 'whisper-large-v3-turbo',
 };
 
