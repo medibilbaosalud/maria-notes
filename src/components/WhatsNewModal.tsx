@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertTriangle, FileText, Brain, ChevronRight, Check, ShieldCheck, Layers, Cpu } from 'lucide-react';
+import { X, AlertTriangle, Brain, ChevronRight, Check, ShieldCheck, Layers, Cpu, Scale, MessageSquare, BarChart2, Clock } from 'lucide-react';
 import './WhatsNewModal.css';
 
 interface WhatsNewModalProps {
@@ -44,10 +44,80 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
 
     const features = [
         {
+            icon: BarChart2,
+            color: '#10b981',
+            title: "1. Impacto en Cifras",
+            description: "Hemos medido el rendimiento del nuevo sistema comparado con la versión anterior. Los resultados son drásticos: una reducción masiva en errores y una capacidad de memoria triplicada.",
+            visual: (
+                <div className="mock-stats-grid">
+                    <div className="stat-card">
+                        <span className="stat-label">Alucinaciones</span>
+                        <div className="stat-value-group">
+                            <span className="stat-old">30%</span>
+                            <span className="stat-new">0.1%</span>
+                        </div>
+                        <span className="stat-change positive">-99.7% Errores</span>
+                    </div>
+                    <div className="stat-card highlight">
+                        <span className="stat-label">Memoria Contex.</span>
+                        <div className="stat-value-group">
+                            <span className="stat-old">15m</span>
+                            <span className="stat-new">60m+</span>
+                        </div>
+                        <span className="stat-change positive">4x Duración</span>
+                    </div>
+                    <div className="stat-card">
+                        <span className="stat-label">Precisión Datos</span>
+                        <div className="stat-value-group">
+                            <span className="stat-old">~75%</span>
+                            <span className="stat-new">98%</span>
+                        </div>
+                    </div>
+                    <div className="stat-card">
+                        <span className="stat-label">Tasa Rechazo</span>
+                        <div className="stat-value-group">
+                            <span className="stat-old">Alta</span>
+                            <span className="stat-new">Baja</span>
+                        </div>
+                    </div>
+                </div>
+            )
+        },
+        {
+            icon: Brain,
+            color: '#ec4899',
+            title: "2. Machine Learning Profundo",
+            description: "Codex ha introducido un ciclo de sueño para la IA. 1) Durante el día, aprende correcciones rápidas (Memoria Corta). 2) Por la noche, mientras 'duerme', consolida esas lecciones en reglas globales (Memoria Largo Plazo), igual que el cerebro humano.",
+            visual: (
+                <div className="mock-memory-arch">
+                    <div className="memory-layer short">
+                        <div className="memory-icon"><Brain size={20} color="#f59e0b" /></div>
+                        <div className="memory-details">
+                            <div className="memory-title">Memoria de Sesión (Día)</div>
+                            <div className="memory-desc">Aprende al momento: "Ah, hoy prefieres 'mm/hg' en minúsculas".</div>
+                        </div>
+                    </div>
+
+                    <div className="memory-arrow">
+                        <Clock size={16} />
+                        <span>Consolidación Nocturna</span>
+                    </div>
+
+                    <div className="memory-layer long">
+                        <div className="memory-icon"><Brain size={20} color="#8b5cf6" /></div>
+                        <div className="memory-details">
+                            <div className="memory-title">Reglas Maestras (Noche)</div>
+                            <div className="memory-desc">Generaliza: "La Dra. siempre usa minúsculas para unidades de presión".</div>
+                        </div>
+                    </div>
+                </div>
+            )
+        },
+        {
             icon: Layers,
             color: '#3b82f6',
-            title: "Arquitectura Multi-Fase",
-            description: "Hemos reemplazado la transcripción simple por un proceso de 4 fases: 1) Escucha, 2) Extrae datos puros, 3) Reconstruye la historia y 4) Verifica lógica. Esto permite consultas de +1 hora sin perder el hilo.",
+            title: "3. La Nueva Arquitectura",
+            description: "Antes, una sola IA intentaba hacerlo todo (audio, texto, resumen) y se saturaba. Ahora, hemos dividido el trabajo en 4 especialistas: Escucha perfecta, Extracción quirúgica, Redacción clínica y Verificación. Divide y vencerás.",
             visual: (
                 <div className="mock-pipeline-ui">
                     <div className="pipeline-step step-1">
@@ -64,22 +134,41 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                         <div className="step-dot"></div>
                         <span>Redacción</span>
                     </div>
-                    {/* Active phase visual */}
+                </div>
+            )
+        },
+        {
+            icon: Scale,
+            color: '#64748b',
+            title: "4. Comparativa Técnica",
+            description: "ANTES: Usábamos 'Llama-8b', un modelo pequeño y rápido pero olvidadizo. AHORA: Usamos 'Orquestación'. Combinamos Llama para velocidad con modelos gigantes (GPT-120b) para pensar. Es como cambiar un becario por un equipo de consultores.",
+            visual: (
+                <div className="mock-comparison-ui">
+                    <div className="comparison-col before">
+                        <div className="comparison-title">Antes</div>
+                        <div className="comparison-icon">🛵</div>
+                        <div className="comparison-desc">Modelo Único (Llama)<br />Rápido pero simple<br />Se pierde fácil</div>
+                    </div>
+                    <div className="comparison-col after">
+                        <div className="comparison-title">Ahora</div>
+                        <div className="comparison-icon">🚀</div>
+                        <div className="comparison-desc">Enjambre de IAs<br />Potencia Industrial<br />Razonamiento Profundo</div>
+                    </div>
                 </div>
             )
         },
         {
             icon: Cpu,
             color: '#6366f1',
-            title: "Orquestación de Modelos",
-            description: "El sistema ya no depende de una sola IA. Actúa como un director de orquesta, eligiendo el 'cerebro' ideal para cada tarea: Modelos rápidos para escribir, y modelos de alto razonamiento (como GPT-OSS-120b) para el análisis clínico.",
+            title: "5. Orquestación Inteligente",
+            description: "¿Cómo funciona la magia? El sistema asigna tareas. ¿Transcripción simple? Usa el modelo veloz. ¿Duda médica compleja? Despierta al modelo gigante. Así logramos precisión máxima sin perder velocidad.",
             visual: (
                 <div className="mock-models-ui">
                     <div className="model-card">
                         <div className="model-icon speed">⚡</div>
                         <div className="model-info">
                             <span className="model-name">Flash Model</span>
-                            <span className="model-task">Transcripción</span>
+                            <span className="model-task">Rutina Diaria</span>
                         </div>
                     </div>
                     <div className="connector-line"></div>
@@ -87,16 +176,25 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                         <div className="model-icon brain">🧠</div>
                         <div className="model-info">
                             <span className="model-name">Reasoning Engine</span>
-                            <span className="model-task">Diagnóstico</span>
+                            <span className="model-task">Casos Complejos</span>
                         </div>
                     </div>
-                    <div className="connector-line"></div>
-                    <div className="model-card">
-                        <div className="model-icon shield">🛡️</div>
-                        <div className="model-info">
-                            <span className="model-name">Guard Model</span>
-                            <span className="model-task">Validación</span>
-                        </div>
+                </div>
+            )
+        },
+        {
+            icon: MessageSquare,
+            color: '#8b5cf6',
+            title: "6. Comprensión Semántica",
+            description: "Adiós a las correcciones tontas. El sistema antiguo marcaba error si decías 'cefalea' y él escribía 'dolor de cabeza'. El nuevo sistema entiende que significan lo mismo y respeta el contexto clínico.",
+            visual: (
+                <div className="mock-semantic-ui">
+                    <div className="chat-bubble doc">"Refiere cefalea tensional..."</div>
+                    <div className="chat-bubble ai">IA: Escribe "Dolor de cabeza tipo tensión" <Check size={14} /></div>
+                    <div className="semantic-match">
+                        <span className="match-text">Validación Semántica: OK</span>
+                        <span className="icon-equals">≈</span>
+                        <Check size={16} color="#10b981" />
                     </div>
                 </div>
             )
@@ -104,15 +202,15 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
         {
             icon: ShieldCheck,
             color: '#10b981',
-            title: "Protección y Validación",
-            description: "Incorporamos un 'Abogado del Diablo'. Una segunda IA revisa cada historia buscando datos inventados (alucinaciones) y contradicciones antes de que tú la veas. Es tu escudo de seguridad.",
+            title: "7. Seguridad 'Abogado del Diablo'",
+            description: "Para tu tranquilidad, hemos integrado un sistema de validación adversarial. UNA IA escribe la historia, y OTRA IA intenta atacarla buscando fallos. Solo si sobrevive al ataque, te la mostramos.",
             visual: (
                 <div className="mock-shield-ui">
                     <div className="shield-icon-large">
                         <ShieldCheck size={64} color="#10b981" />
                     </div>
                     <div className="shield-status">
-                        <Check size={16} /> 0 Alucinaciones detectadas
+                        <Check size={16} /> 0 Alucinaciones (Garantizado)
                     </div>
                 </div>
             )
@@ -120,58 +218,20 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
         {
             icon: AlertTriangle,
             color: '#f59e0b',
-            title: "Semáforo de Confianza",
-            description: "Si la IA escucha algo confuso (ruido de fondo, murmullo), no lo adivina. Lo marca en amarillo y te pregunta. Tú decides: 'Confirmar' o 'Rechazar'.",
+            title: "8. Transparencia Total",
+            description: "Si el sistema duda, te lo dice. Verás alertas amarillas para confirmar datos confusos. Además, puedes hacer clic en cualquier dato (Fuentes) para ver qué dijo exactamente el paciente. Cero cajas negras.",
             visual: (
                 <div className="mock-uncertainty-panel">
                     <div className="mock-uncertainty-item">
                         <div className="mock-warning-icon"><AlertTriangle size={14} /></div>
                         <div className="mock-text">
-                            <strong>Posible Alergia</strong>
-                            <span>¿Dijo "Penicilina" o "Insulina"?</span>
+                            <strong>Duda: Dosis</strong>
+                            <span>¿500mg o 800mg? (Audio confuso)</span>
                         </div>
                         <div className="mock-actions">
-                            <button className="mock-btn-confirm">Confirmar</button>
-                            <button className="mock-btn-reject">Corregir</button>
+                            <button className="mock-btn-confirm">500mg</button>
+                            <button className="mock-btn-reject">800mg</button>
                         </div>
-                    </div>
-                </div>
-            )
-        },
-        {
-            icon: Brain,
-            color: '#ec4899',
-            title: "Machine Learning (Aprendizaje)",
-            description: "¿Cómo funciona? Simple: Cuando corriges una nota o confirmas una duda, el sistema guarda esa lección. Mañana, la IA recordará tu estilo y no cometerá el mismo error.",
-            visual: (
-                <div className="mock-learning-ui">
-                    <div className="mock-graph">
-                        <div className="bar" style={{ height: '40%' }}></div>
-                        <div className="bar" style={{ height: '60%' }}></div>
-                        <div className="bar" style={{ height: '85%' }}></div>
-                        <div className="bar active" style={{ height: '100%' }}></div>
-                    </div>
-                    <div className="mock-learning-status">
-                        <Check size={14} /> Entrenando con tus correcciones
-                    </div>
-                </div>
-            )
-        },
-        {
-            icon: FileText,
-            color: '#8b5cf6',
-            title: "Evidencia y Trazabilidad",
-            description: "Transparencia total. Ahora, al ver un dato extraído, puedes consultar la 'Fuente Original'. El sistema te mostrará exactamente qué palabras del paciente justifican ese diagnóstico.",
-            visual: (
-                <div className="mock-sources-ui">
-                    <div className="mock-field-group">
-                        <label>Diagnóstico (Extraído)</label>
-                        <div className="mock-value">Otitis Media Aguda</div>
-                    </div>
-                    <div className="mock-connector"></div>
-                    <div className="mock-evidence-box">
-                        <div className="mock-evidence-label">Evidencia original:</div>
-                        <div className="mock-evidence-text">"...veo el tímpano <span className="highlight">rojo y abombado</span>..."</div>
                     </div>
                 </div>
             )
@@ -218,7 +278,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                             ))}
                         </div>
                         <button className="next-btn" onClick={nextSlide} style={{ backgroundColor: features[currentSlide].color }}>
-                            <span>{currentSlide === features.length - 1 ? 'Empezar a usar' : 'Siguiente'}</span>
+                            <span>{currentSlide === features.length - 1 ? '¡Impresionante!' : 'Siguiente'}</span>
                             <ChevronRight size={16} />
                         </button>
                     </div>
