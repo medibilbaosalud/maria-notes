@@ -731,7 +731,8 @@ ${JSON.stringify(previousErrors)}`
 Reglas obligatorias:
 - Mantener EXACTAMENTE el formato actual del sistema (no agregues, quites ni renombres secciones).
 - Usa SOLO los datos del JSON; NO inventes.
-- Si un campo esta vacio o null, no lo completes con suposiciones.
+- Si un campo de antecedentes (alergias, enfermedades_cronicas, cirugias, tratamiento_habitual) esta vacio, null o [], escribe "No refiere" o "Niega [campo]".
+- Si otro campo esta vacio o null, no lo completes con suposiciones.
 - Evita agregar datos no mencionados en la transcripcion.
 ${errorsBlock}
 

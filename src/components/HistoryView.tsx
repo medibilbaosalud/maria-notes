@@ -478,17 +478,22 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               <div className="uncertainty-panel">
                 <div className="uncertainty-header">
                   <AlertTriangle size={18} />
-                  <span>Campos con baja confianza</span>
+                  <span>Revisión recomendada</span>
                 </div>
+                <p className="uncertainty-intro">
+                  La IA no encontró en la transcripción evidencia directa de los siguientes datos. Por favor, confirma si son correctos o corrígelos.
+                </p>
                 <ul className="uncertainty-list">
                   {metadata.uncertaintyFlags.map((flag, i) => {
                     const decision = flagDecisions[flag.field_path];
+                    // Humanize field path
+                    const fieldLabel = flag.field_path.replace(/_/g, ' ').replace(/\./g, ' → ');
                     return (
                       <li key={`${flag.field_path}-${i}`} className="uncertainty-item">
                         <div className="uncertainty-details">
-                          <strong>{flag.field_path}</strong>
-                          <span>{flag.reason}</span>
-                          {flag.value && <em>Valor: {flag.value}</em>}
+                          <strong>{fieldLabel}</strong>
+                          {flag.value && <span className="uncertainty-value">"{flag.value}"</span>}
+                          <span className="uncertainty-reason">⚠ {flag.reason}</span>
                         </div>
                         <div className="uncertainty-actions">
                           <button
@@ -496,14 +501,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                             disabled={Boolean(decision)}
                             onClick={() => handleFlagDecision(flag, true)}
                           >
-                            {decision === 'confirmed' ? 'Confirmado' : 'Confirmar'}
+                            {decision === 'confirmed' ? '✓ Correcto' : 'Es correcto'}
                           </button>
                           <button
                             className="flag-action reject"
                             disabled={Boolean(decision)}
                             onClick={() => handleFlagDecision(flag, false)}
                           >
-                            {decision === 'rejected' ? 'Marcado' : 'Corregir'}
+                            {decision === 'rejected' ? '✗ A corregir' : 'Necesita corrección'}
                           </button>
                         </div>
                       </li>
@@ -891,6 +896,28 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           gap: 4px;
           font-size: 0.85rem;
           color: #7c2d12;
+        }
+
+        .uncertainty-intro {
+          font-size: 0.9rem;
+          color: #92400e;
+          margin: 0 0 1rem 0;
+          line-height: 1.5;
+        }
+
+        .uncertainty-value {
+          font-weight: 600;
+          color: #c2410c;
+          background: #ffedd5;
+          padding: 2px 8px;
+          border-radius: 6px;
+          font-size: 0.85rem;
+        }
+
+        .uncertainty-reason {
+          font-size: 0.8rem;
+          color: #9a3412;
+          font-style: italic;
         }
 
         .uncertainty-details em {
