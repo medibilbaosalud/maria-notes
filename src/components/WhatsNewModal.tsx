@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertTriangle, Brain, ChevronRight, Check, ShieldCheck, Layers, Cpu, Scale, MessageSquare, BarChart2, Clock, Sparkles } from 'lucide-react';
+import { X, AlertTriangle, Brain, ChevronRight, Check, ShieldCheck, Layers, Cpu, Scale, MessageSquare, BarChart2, Clock, Sparkles, Zap, Star } from 'lucide-react';
 import './WhatsNewModal.css';
 
 interface WhatsNewModalProps {
@@ -71,8 +71,34 @@ const CoverSlide = ({ onStart }: { onStart: () => void }) => (
     </motion.div>
 );
 
+const FinalSlide = ({ onFinish }: { onFinish: () => void }) => (
+    <motion.div
+        className="final-slide"
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, y: -20 }}
+    >
+        <div className="final-content">
+            <div className="final-icon-large">
+                <Star size={48} color="white" fill="white" />
+            </div>
+
+            <h1 className="final-title">Tu Nuevo Superpoder</h1>
+            <p className="final-text">
+                El sistema médico más avanzado que hemos creado jamás, ahora es tuyo.
+                <br /><br />
+                Disfruta de la tranquilidad de tener un equipo de IAs<br />cuidando cada detalle de tu consulta.
+            </p>
+
+            <button className="final-cta" onClick={onFinish}>
+                Empezar la Experiencia <Sparkles size={20} />
+            </button>
+        </div>
+    </motion.div>
+);
+
 export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
-    const [currentSlide, setCurrentSlide] = useState(0); // 0 = Cover, 1..N = Features
+    const [currentSlide, setCurrentSlide] = useState(0); // 0 = Cover, 1..N = Features, N+1 = Final
 
     const features = [
         {
@@ -149,22 +175,47 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
             icon: Layers,
             color: '#3b82f6',
             title: "3. La Nueva Arquitectura",
-            description: "Antes, una sola IA intentaba hacerlo todo (audio, texto, resumen) y se saturaba. Ahora, hemos dividido el trabajo en 4 especialistas: Escucha perfecta, Extracción quirúgica, Redacción clínica y Verificación. Divide y vencerás.",
+            description: "Antes, una sola IA intentaba hacerlo todo (audio a texto, y luego resumen) y se saturaba. Ahora, hemos dividido el trabajo en 4 especialistas: Escucha perfecta, Extracción quirúgica, Redacción clínica y Verificación. Divide y vencerás.",
             visual: (
-                <div className="mock-pipeline-ui">
-                    <div className="pipeline-step step-1">
-                        <div className="step-dot"></div>
-                        <span>Audio</span>
+                <div className="mock-pipeline-comparison">
+                    <div className="pipeline-row old">
+                        <span className="pipeline-label">Antes</span>
+                        <div className="pipeline-step">
+                            <div className="step-dot"></div>
+                            <span>Audio</span>
+                        </div>
+                        <div className="pipeline-line"></div>
+                        <div className="pipeline-step">
+                            <div className="step-dot"></div>
+                            <span>Texto</span>
+                        </div>
+                        <div className="pipeline-line"></div>
+                        <div className="pipeline-step">
+                            <div className="step-dot"></div>
+                            <span>Resumen</span>
+                        </div>
                     </div>
-                    <div className="pipeline-line"></div>
-                    <div className="pipeline-step step-2">
-                        <div className="step-dot"></div>
-                        <span>Extracción</span>
-                    </div>
-                    <div className="pipeline-line"></div>
-                    <div className="pipeline-step step-3">
-                        <div className="step-dot"></div>
-                        <span>Redacción</span>
+                    <div className="pipeline-row new">
+                        <span className="pipeline-label">Ahora</span>
+                        <div className="pipeline-step">
+                            <div className="step-dot"></div>
+                            <span>Audio</span>
+                        </div>
+                        <div className="pipeline-line"></div>
+                        <div className="pipeline-step">
+                            <div className="step-dot"></div>
+                            <span>Extracción</span>
+                        </div>
+                        <div className="pipeline-line"></div>
+                        <div className="pipeline-step">
+                            <div className="step-dot"></div>
+                            <span>Redacción</span>
+                        </div>
+                        <div className="pipeline-line"></div>
+                        <div className="pipeline-step highlight">
+                            <div className="step-dot"></div>
+                            <span>Verificación</span>
+                        </div>
                     </div>
                 </div>
             )
@@ -192,23 +243,41 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
         {
             icon: Cpu,
             color: '#6366f1',
-            title: "5. Orquestación Inteligente",
-            description: "¿Cómo funciona la magia? El sistema asigna tareas. ¿Transcripción simple? Usa el modelo veloz. ¿Duda médica compleja? Despierta al modelo gigante. Así logramos precisión máxima sin perder velocidad.",
+            title: "5. Enjambre Inteligente de Modelos",
+            description: "Tu consulta es procesada por un flujo de expertos. Un Router Inteligente distribuye la carga: Sonnet para el razonamiento profundo, Whisper para el oído fino y Haiku para la velocidad. Todo termina en un Verificador que asegura la calidad.",
             visual: (
-                <div className="mock-models-ui">
-                    <div className="model-card">
-                        <div className="model-icon speed">⚡</div>
-                        <div className="model-info">
-                            <span className="model-name">Flash Model</span>
-                            <span className="model-task">Rutina Diaria</span>
+                <div className="mock-swarm-flow">
+                    <div className="swarm-stage">
+                        <div className="swarm-box input">
+                            <span className="box-title"><MessageSquare size={14} /> Input</span>
+                            <span className="box-desc">Audio / Notas</span>
+                        </div>
+                        <div className="swarm-arrow">↓</div>
+                    </div>
+
+                    <div className="swarm-grid">
+                        <div className="swarm-agent-card flash">
+                            <div className="agent-header"><Zap size={14} color="#d97706" /> Rápido</div>
+                            <span className="agent-task">Transcripción</span>
+                            <span className="agent-model">Whisper V3</span>
+                        </div>
+                        <div className="swarm-agent-card reasoning">
+                            <div className="agent-header"><Brain size={14} color="#7c3aed" /> Cerebro</div>
+                            <span className="agent-task">Razonamiento</span>
+                            <span className="agent-model">Sonnet 3.5</span>
+                        </div>
+                        <div className="swarm-agent-card extract">
+                            <div className="agent-header"><BarChart2 size={14} color="#2563eb" /> Datos</div>
+                            <span className="agent-task">Extracción JSON</span>
+                            <span className="agent-model">Gemini Flash</span>
                         </div>
                     </div>
-                    <div className="connector-line"></div>
-                    <div className="model-card highlight">
-                        <div className="model-icon brain">🧠</div>
-                        <div className="model-info">
-                            <span className="model-name">Reasoning Engine</span>
-                            <span className="model-task">Casos Complejos</span>
+
+                    <div className="swarm-stage">
+                        <div className="swarm-arrow">↓</div>
+                        <div className="swarm-box output">
+                            <span className="box-title"><ShieldCheck size={14} color="#059669" /> Verificación</span>
+                            <span className="box-desc">Cross-Check & Validación Final</span>
                         </div>
                     </div>
                 </div>
@@ -270,7 +339,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
         }
     ];
 
-    const totalSlides = features.length + 1; // Cover + Features
+    const totalSlides = features.length + 2; // Cover + Features + Final
 
     const nextSlide = () => {
         if (currentSlide < totalSlides - 1) {
@@ -298,6 +367,8 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                     <div className="whats-new-content">
                         {currentSlide === 0 ? (
                             <CoverSlide onStart={() => setCurrentSlide(1)} />
+                        ) : currentSlide === totalSlides - 1 ? (
+                            <FinalSlide onFinish={onClose} />
                         ) : (
                             <FeatureSlide
                                 {...features[currentSlide - 1]}
@@ -305,7 +376,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                         )}
                     </div>
 
-                    {currentSlide > 0 && (
+                    {currentSlide > 0 && currentSlide < totalSlides - 1 && (
                         <div className="whats-new-footer">
                             <div className="dots-indicator">
                                 {features.map((_, idx) => (
@@ -317,7 +388,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                                 ))}
                             </div>
                             <button className="next-btn" onClick={nextSlide} style={{ backgroundColor: features[currentSlide - 1].color }}>
-                                <span>{currentSlide === totalSlides - 1 ? '¡Finalizar!' : 'Siguiente'}</span>
+                                <span>Siguiente</span>
                                 <ChevronRight size={16} />
                             </button>
                         </div>

@@ -13,8 +13,10 @@
 .whats-new-card {
   background: white;
   width: 100%;
-  max-width: 950px;
-  height: 650px;
+  max-width: 1100px;
+  /* Even wider for the flow diagram */
+  height: 700px;
+  /* Taller */
   border-radius: 24px;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
   display: flex;
@@ -52,7 +54,7 @@
 }
 
 /* -------------------------------------------------------------------
-   COVER SLIDE (New Commercial Intro)
+   COVER & FINAL SLIDES
    ------------------------------------------------------------------- */
 .cover-slide {
   display: flex;
@@ -168,6 +170,74 @@
   box-shadow: 0 25px 30px -5px rgba(37, 99, 235, 0.4);
 }
 
+.final-slide {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  color: white;
+  border-radius: 20px;
+}
+
+.final-content {
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+}
+
+.final-icon-large {
+  width: 100px;
+  height: 100px;
+  background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+  border-radius: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 20px 40px -10px rgba(245, 158, 11, 0.5);
+  margin-bottom: 1rem;
+}
+
+.final-title {
+  font-size: 2.5rem;
+  font-weight: 800;
+  margin: 0;
+  background: linear-gradient(to right, #ffffff, #cbd5e1);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.final-text {
+  font-size: 1.2rem;
+  color: #94a3b8;
+  line-height: 1.6;
+}
+
+.final-cta {
+  background: white;
+  color: #0f172a;
+  padding: 1rem 3rem;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 1.1rem;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.final-cta:hover {
+  transform: scale(1.05);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+}
+
 @keyframes pulse {
   0% {
     transform: scale(1);
@@ -197,9 +267,8 @@
   }
 }
 
-
 /* -------------------------------------------------------------------
-   EXISTING SLIDES
+   SLIDES
    ------------------------------------------------------------------- */
 .feature-slide {
   display: flex;
@@ -241,7 +310,7 @@
 .slide-visual {
   flex: 1;
   height: 100%;
-  max-height: 480px;
+  max-height: 520px;
   background: #f8fafc;
   border-radius: 20px;
   border: 1px solid #e2e8f0;
@@ -377,9 +446,212 @@
   font-weight: 600;
 }
 
+/* Pipeline Comparison */
+.mock-pipeline-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  width: 90%;
+}
+
+.pipeline-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: white;
+  padding: 1rem;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.pipeline-row.old {
+  opacity: 0.6;
+  border-style: dashed;
+}
+
+.pipeline-row.new {
+  border-color: #3b82f6;
+  box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.1);
+}
+
+.pipeline-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748b;
+  width: 70px;
+  margin-right: 0.5rem;
+}
+
+.pipeline-row.new .pipeline-label {
+  color: #2563eb;
+}
+
+.pipeline-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #475569;
+  position: relative;
+  width: 80px;
+  text-align: center;
+}
+
+.pipeline-step .step-dot {
+  z-index: 2;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #cbd5e1;
+}
+
+.pipeline-row.new .step-dot {
+  background: #3b82f6;
+  box-shadow: 0 0 0 3px #dbeafe;
+}
+
+.pipeline-step.highlight {
+  color: #2563eb;
+}
+
+.pipeline-row.new .pipeline-step.highlight .step-dot {
+  background: #2563eb;
+  box-shadow: 0 0 0 3px #93c5fd;
+}
+
+.pipeline-line {
+  height: 2px;
+  flex: 1;
+  background: #e2e8f0;
+  margin-top: -1.2rem;
+}
+
+/* -------------------------------------------------------------------
+   SWARM FLOW (Detailed)
+   ------------------------------------------------------------------- */
+.mock-swarm-flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  width: 95%;
+  position: relative;
+  padding: 1rem;
+}
+
+.swarm-stage {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.swarm-box {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.8rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  min-width: 180px;
+}
+
+.swarm-box.input {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.swarm-box.output {
+  border-color: #10b981;
+  background: #ecfdf5;
+}
+
+.box-title {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.box-desc {
+  font-size: 0.7rem;
+  color: #64748b;
+}
+
+.swarm-arrow {
+  color: #cbd5e1;
+  font-size: 1.2rem;
+  margin: 0.2rem 0;
+}
+
+.swarm-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1rem;
+  width: 100%;
+}
+
+.swarm-agent-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.4rem;
+  position: relative;
+}
+
+.swarm-agent-card.flash {
+  border-top: 4px solid #f59e0b;
+}
+
+.swarm-agent-card.reasoning {
+  border-top: 4px solid #8b5cf6;
+}
+
+.swarm-agent-card.extract {
+  border-top: 4px solid #3b82f6;
+}
+
+.agent-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: #0f172a;
+}
+
+.agent-task {
+  font-size: 0.65rem;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.agent-model {
+  font-size: 0.65rem;
+  color: #94a3b8;
+  margin-top: auto;
+  font-family: monospace;
+}
+
+
 /* Existing mocks generic reuse */
 .mock-ui-card,
-.mock-pipeline-ui,
 .mock-shield-ui,
 .mock-uncertainty-panel,
 .mock-sources-ui,
@@ -389,35 +661,6 @@
 .mock-semantic-ui,
 .mock-classification-ui {
   width: 90%;
-}
-
-.mock-pipeline-ui {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  justify-content: center;
-}
-
-.pipeline-step {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.step-dot {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #3b82f6;
-  box-shadow: 0 0 0 4px #dbeafe;
-}
-
-.pipeline-line {
-  width: 40px;
-  height: 2px;
-  background: #cbd5e1;
-  margin-bottom: 1.2rem;
 }
 
 .mock-shield-ui {
