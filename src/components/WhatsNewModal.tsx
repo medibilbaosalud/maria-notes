@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertTriangle, FileText, Brain, ChevronRight, Check, ShieldCheck, Layers } from 'lucide-react';
+import { X, AlertTriangle, FileText, Brain, ChevronRight, Check, ShieldCheck, Layers, Cpu } from 'lucide-react';
 import './WhatsNewModal.css';
 
 interface WhatsNewModalProps {
@@ -65,6 +65,39 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                         <span>Redacción</span>
                     </div>
                     {/* Active phase visual */}
+                </div>
+            )
+        },
+        {
+            icon: Cpu,
+            color: '#6366f1',
+            title: "Orquestación de Modelos",
+            description: "El sistema ya no depende de una sola IA. Actúa como un director de orquesta, eligiendo el 'cerebro' ideal para cada tarea: Modelos rápidos para escribir, y modelos de alto razonamiento (como GPT-OSS-120b) para el análisis clínico.",
+            visual: (
+                <div className="mock-models-ui">
+                    <div className="model-card">
+                        <div className="model-icon speed">⚡</div>
+                        <div className="model-info">
+                            <span className="model-name">Flash Model</span>
+                            <span className="model-task">Transcripción</span>
+                        </div>
+                    </div>
+                    <div className="connector-line"></div>
+                    <div className="model-card highlight">
+                        <div className="model-icon brain">🧠</div>
+                        <div className="model-info">
+                            <span className="model-name">Reasoning Engine</span>
+                            <span className="model-task">Diagnóstico</span>
+                        </div>
+                    </div>
+                    <div className="connector-line"></div>
+                    <div className="model-card">
+                        <div className="model-icon shield">🛡️</div>
+                        <div className="model-info">
+                            <span className="model-name">Guard Model</span>
+                            <span className="model-task">Validación</span>
+                        </div>
+                    </div>
                 </div>
             )
         },
