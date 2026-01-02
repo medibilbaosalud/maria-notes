@@ -265,7 +265,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                         <div className="swarm-agent-card reasoning">
                             <div className="agent-header"><Brain size={14} color="#7c3aed" /> Cerebro</div>
                             <span className="agent-task">Razonamiento</span>
-                            <span className="agent-model">Llama 3.3 70B</span>
+                            <span className="agent-model">GPT-OSS 120B</span>
                         </div>
                         <div className="swarm-agent-card extract">
                             <div className="agent-header"><BarChart2 size={14} color="#2563eb" /> Datos</div>
