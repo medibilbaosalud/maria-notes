@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertTriangle, Brain, ChevronRight, Check, ShieldCheck, Layers, Cpu, Scale, MessageSquare, BarChart2, Clock } from 'lucide-react';
+import { X, AlertTriangle, Brain, ChevronRight, Check, ShieldCheck, Layers, Cpu, Scale, MessageSquare, BarChart2, Clock, Sparkles } from 'lucide-react';
 import './WhatsNewModal.css';
 
 interface WhatsNewModalProps {
@@ -39,8 +39,40 @@ const FeatureSlide = ({
     </motion.div>
 );
 
+const CoverSlide = ({ onStart }: { onStart: () => void }) => (
+    <motion.div
+        className="cover-slide"
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, y: -20 }}
+    >
+        <div className="cover-badge">
+            <Sparkles size={12} style={{ display: 'inline', marginRight: '6px' }} />
+            Nueva Versión 3.0
+        </div>
+
+        <div className="cover-visual">
+            <div className="cover-blob"></div>
+            <div className="cover-emoji">👩‍⚕️</div>
+            <div className="cover-sparkle s1"><Sparkles size={24} /></div>
+            <div className="cover-sparkle s2"><Sparkles size={20} /></div>
+            <div className="cover-sparkle s3"><Sparkles size={16} /></div>
+        </div>
+
+        <h1 className="cover-title">Bienvenida,<br />Dra. Gotxi</h1>
+        <p className="cover-subtitle">
+            Descubre la nueva generación de Inteligencia Artificial Médica.<br />
+            Más inteligente. Más segura. Diseñada exclusivamente para ti.
+        </p>
+
+        <button className="cover-cta-btn" onClick={onStart}>
+            Ver Novedades <ChevronRight size={20} />
+        </button>
+    </motion.div>
+);
+
 export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
-    const [currentSlide, setCurrentSlide] = useState(0);
+    const [currentSlide, setCurrentSlide] = useState(0); // 0 = Cover, 1..N = Features
 
     const features = [
         {
@@ -87,7 +119,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
             icon: Brain,
             color: '#ec4899',
             title: "2. Machine Learning Profundo",
-            description: "Codex ha introducido un ciclo de sueño para la IA. 1) Durante el día, aprende correcciones rápidas (Memoria Corta). 2) Por la noche, mientras 'duerme', consolida esas lecciones en reglas globales (Memoria Largo Plazo), igual que el cerebro humano.",
+            description: "Hemos dotado a tu asistente de un ciclo de sueño biológico. 1) Durante el día, aprende correcciones rápidas. 2) Por la noche, mientras 'descansa', consolida esas lecciones para aplicarlas siempre a futuro.",
             visual: (
                 <div className="mock-memory-arch">
                     <div className="memory-layer short">
@@ -238,8 +270,10 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
         }
     ];
 
+    const totalSlides = features.length + 1; // Cover + Features
+
     const nextSlide = () => {
-        if (currentSlide < features.length - 1) {
+        if (currentSlide < totalSlides - 1) {
             setCurrentSlide(prev => prev + 1);
         } else {
             onClose();
@@ -262,26 +296,32 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                     <button className="close-btn-absolute" onClick={onClose}><X size={20} /></button>
 
                     <div className="whats-new-content">
-                        <FeatureSlide
-                            {...features[currentSlide]}
-                        />
+                        {currentSlide === 0 ? (
+                            <CoverSlide onStart={() => setCurrentSlide(1)} />
+                        ) : (
+                            <FeatureSlide
+                                {...features[currentSlide - 1]}
+                            />
+                        )}
                     </div>
 
-                    <div className="whats-new-footer">
-                        <div className="dots-indicator">
-                            {features.map((_, idx) => (
-                                <div
-                                    key={idx}
-                                    className={`dot ${idx === currentSlide ? 'active' : ''}`}
-                                    onClick={() => setCurrentSlide(idx)}
-                                />
-                            ))}
+                    {currentSlide > 0 && (
+                        <div className="whats-new-footer">
+                            <div className="dots-indicator">
+                                {features.map((_, idx) => (
+                                    <div
+                                        key={idx}
+                                        className={`dot ${idx === currentSlide - 1 ? 'active' : ''}`}
+                                        onClick={() => setCurrentSlide(idx + 1)}
+                                    />
+                                ))}
+                            </div>
+                            <button className="next-btn" onClick={nextSlide} style={{ backgroundColor: features[currentSlide - 1].color }}>
+                                <span>{currentSlide === totalSlides - 1 ? '¡Finalizar!' : 'Siguiente'}</span>
+                                <ChevronRight size={16} />
+                            </button>
                         </div>
-                        <button className="next-btn" onClick={nextSlide} style={{ backgroundColor: features[currentSlide].color }}>
-                            <span>{currentSlide === features.length - 1 ? '¡Impresionante!' : 'Siguiente'}</span>
-                            <ChevronRight size={16} />
-                        </button>
-                    </div>
+                    )}
                 </motion.div>
             </motion.div>
         </AnimatePresence>
