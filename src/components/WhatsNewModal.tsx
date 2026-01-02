@@ -282,6 +282,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                         </div>
                         <div className="loop-container">
                             <div className="loop-line"></div>
+                            <div className="loop-arrow-head"></div>
                             <div className="loop-label">
                                 <span style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', display: 'block' }}>REINTENTO</span>
                             </div>
