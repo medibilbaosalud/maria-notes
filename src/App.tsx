@@ -14,6 +14,8 @@ import { saveLabTestLog } from './services/storage';
 import { AudioTestLab } from './components/AudioTestLab';
 import LessonsPanel from './components/LessonsPanel';
 import { MemoryService } from './services/memory';
+import { WhatsNewModal } from './components/WhatsNewModal';
+
 import './App.css';
 import { Brain, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -144,6 +146,8 @@ function App() {
     } | undefined>(undefined);
     const [showLessons, setShowLessons] = useState(false);
     const [showWelcomeModal, setShowWelcomeModal] = useState(false);
+    const [showWhatsNew, setShowWhatsNew] = useState(false);
+
 
     // ════════════════════════════════════════════════════════════════
     // BATCHING STATE: Store partial extractions for long consultations
@@ -391,7 +395,7 @@ function App() {
             // We need to map the result to the LabTestLog format loosely or just rely on the fact 
             // that this function is primarily used by AudioTestLab now.
             if (result.active_memory_used) {
-                        await saveLabTestLog({
+                await saveLabTestLog({
                     test_name: patientName,
                     input_type: 'text',
                     transcription: text,
@@ -424,12 +428,46 @@ function App() {
                 )}
             </AnimatePresence>
 
+            <AnimatePresence>
+                {showWhatsNew && (
+                    <WhatsNewModal onClose={() => setShowWhatsNew(false)} />
+                )}
+            </AnimatePresence>
+
             <Layout
                 currentView={currentView}
                 onNavigate={setCurrentView}
                 onOpenSettings={() => setShowSettings(true)}
                 onOpenLessons={() => setShowLessons(true)}
             >
+                {/* Floating "Novedades" Pill */}
+                <motion.button
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="whats-new-trigger"
+                    onClick={() => setShowWhatsNew(true)}
+                    style={{
+                        position: 'fixed',
+                        top: '1rem',
+                        right: '180px', // Left of settings usually
+                        zIndex: 50,
+                        background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                        border: 'none',
+                        color: 'white',
+                        padding: '0.4rem 0.8rem',
+                        borderRadius: '99px',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)'
+                    }}
+                >
+                    <Sparkles size={14} />
+                    <span>Novedades: AI v3.0</span>
+                </motion.button>
                 {currentView === 'record' && (
                     <div className="view-content">
                         <Recorder onRecordingComplete={handleRecordingComplete} />
@@ -493,7 +531,6 @@ function App() {
                         onRunTextPipeline={handleTextPipeline}
                     />
                 )}
-
                 {showSettings && (
                     <Settings
                         apiKey={apiKey}
