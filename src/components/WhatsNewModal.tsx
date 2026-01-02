@@ -259,7 +259,8 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                         <div className="swarm-agent-card flash">
                             <div className="agent-header"><Zap size={14} color="#d97706" /> Rápido</div>
                             <span className="agent-task">Transcripción</span>
-                            <span className="agent-model">Whisper V3</span>
+                            <span className="agent-model">Whisper V3 Turbo</span>
+                            <span style={{ fontSize: '0.6rem', color: '#cbd5e1' }}>(Backup: V3)</span>
                         </div>
                         <div className="swarm-agent-card reasoning">
                             <div className="agent-header"><Brain size={14} color="#7c3aed" /> Cerebro</div>
