@@ -20,7 +20,7 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
     patientNameRef.current = patientName;
   }, [patientName]);
 
-  // Callback for when a batch is ready (every 35 mins)
+  // Callback for when a batch is ready (every 10 mins)
   const handleBatchReady = (blob: Blob, batchIndex: number) => {
     console.log(`[RecorderUI] Batch ${batchIndex} ready (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
     setProcessedBatches(prev => [...prev, batchIndex]);
@@ -37,7 +37,7 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
     audioBlob
   } = useAudioRecorder({
     onBatchReady: handleBatchReady,
-    batchIntervalMs: 35 * 60 * 1000 // 35 minutes
+    batchIntervalMs: 10 * 60 * 1000 // 10 minutes
     // batchIntervalMs: 20 * 1000 // DEBUG: 20 seconds for testing
   });
 

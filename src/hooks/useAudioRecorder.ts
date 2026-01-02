@@ -9,11 +9,11 @@ export interface AudioRecorderState {
 
 interface UseAudioRecorderOptions {
     onBatchReady?: (blob: Blob, batchIndex: number) => void;
-    batchIntervalMs?: number; // Default: 35 minutes
+    batchIntervalMs?: number; // Default: 10 minutes
 }
 
 export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
-    const { onBatchReady, batchIntervalMs = 35 * 60 * 1000 } = options;
+    const { onBatchReady, batchIntervalMs = 10 * 60 * 1000 } = options;
 
     const [isRecording, setIsRecording] = useState(false);
     const [audioBlob, setAudioBlob] = useState<Blob | null>(null);

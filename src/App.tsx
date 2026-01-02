@@ -9,7 +9,7 @@ import { HistoryView } from './components/HistoryView';
 import { Settings } from './components/Settings';
 import { AIService } from './services/ai';
 import { ReportsView } from './components/ReportsView';
-import { ExtractionResult } from './services/groq';
+import type { ExtractionResult, ExtractionMeta, ConsultationClassification, UncertaintyFlag } from './services/groq';
 import { saveLabTestLog } from './services/storage';
 import { AudioTestLab } from './components/AudioTestLab';
 import LessonsPanel from './components/LessonsPanel';
@@ -137,6 +137,10 @@ function App() {
         versionsCount: number;
         remainingErrors?: { type: string; field: string; reason: string }[];
         validationHistory?: { type: string; field: string; reason: string }[];
+        extractionMeta?: ExtractionMeta[];
+        classification?: ConsultationClassification;
+        uncertaintyFlags?: UncertaintyFlag[];
+        auditId?: string;
     } | undefined>(undefined);
     const [showLessons, setShowLessons] = useState(false);
     const [showWelcomeModal, setShowWelcomeModal] = useState(false);
@@ -146,6 +150,38 @@ function App() {
     // ════════════════════════════════════════════════════════════════
     const extractionPartsRef = useRef<ExtractionResult[]>([]);
     const transcriptionPartsRef = useRef<string[]>([]);
+    const extractionMetaPartsRef = useRef<ExtractionMeta[]>([]);
+    const classificationPartsRef = useRef<ConsultationClassification[]>([]);
+    const aiServiceRef = useRef<AIService | null>(null);
+
+    const pickBestClassification = (items: ConsultationClassification[]) => {
+        if (!items || items.length === 0) {
+            return { visit_type: 'unknown', ent_area: 'unknown', urgency: 'unknown', confidence: 0 };
+        }
+        return items.reduce((best, current) => {
+            const bestScore = best?.confidence ?? 0;
+            const currentScore = current?.confidence ?? 0;
+            return currentScore > bestScore ? current : best;
+        }, items[0]);
+    };
+
+    const buildValidationLabel = (validations?: { validator: string }[]) => {
+        if (!validations || validations.length === 0) return 'unknown';
+        const unique = Array.from(new Set(validations.map(v => v.validator).filter(Boolean)));
+        return unique.join(' + ');
+    };
+
+    const prefixExtractionMeta = (meta: ExtractionMeta[], batchIndex: number) => {
+        const prefix = `batch_${batchIndex + 1}`;
+        return meta.map((chunk) => ({
+            ...chunk,
+            chunk_id: `${prefix}_${chunk.chunk_id}`,
+            field_evidence: (chunk.field_evidence || []).map((entry) => ({
+                ...entry,
+                chunk_id: `${prefix}_${entry.chunk_id}`
+            }))
+        }));
+    };
 
     // ════════════════════════════════════════════════════════════════
     // PERSONALIZATION & MEMORY INIT
@@ -179,6 +215,7 @@ function App() {
     const handleSaveSettings = (key: string) => {
         setApiKey(key);
         localStorage.setItem('groq_api_key', key);
+        aiServiceRef.current = null;
         setShowSettings(false);
     };
 
@@ -210,11 +247,12 @@ function App() {
             return;
         }
 
-        const aiService = new AIService(getApiKeys(apiKey));
+        const aiService = aiServiceRef.current || new AIService(getApiKeys(apiKey));
+        aiServiceRef.current = aiService;
 
         try {
             // ─────────────────────────────────────────────────────────
-            // CASE 1: PARTIAL BATCH (Background processing at T=35min)
+            // CASE 1: PARTIAL BATCH (Background processing at T=30min)
             // ─────────────────────────────────────────────────────────
             if (isPartialBatch) {
                 console.log(`[App] Processing partial batch ${batchIndex} in background...`);
@@ -228,7 +266,10 @@ function App() {
 
                 // Extract only (Phase 1)
                 const extraction = await aiService.extractOnly(transcriptResult.data);
-                extractionPartsRef.current.push(extraction);
+                const normalizedMeta = prefixExtractionMeta(extraction.meta, batchIndex);
+                extractionPartsRef.current.push(extraction.data);
+                extractionMetaPartsRef.current.push(...normalizedMeta);
+                classificationPartsRef.current.push(extraction.classification);
                 console.log(`[App] Batch ${batchIndex} extracted. Total parts: ${extractionPartsRef.current.length}`);
 
                 return; // Don't update UI, keep recording
@@ -256,7 +297,10 @@ function App() {
             // 2. Final Extraction
             setProcessingStatus('Extrayendo datos clínicos finales...');
             const finalExtraction = await aiService.extractOnly(transcriptResult.data);
-            extractionPartsRef.current.push(finalExtraction);
+            const normalizedFinalMeta = prefixExtractionMeta(finalExtraction.meta, batchIndex);
+            extractionPartsRef.current.push(finalExtraction.data);
+            extractionMetaPartsRef.current.push(...normalizedFinalMeta);
+            classificationPartsRef.current.push(finalExtraction.classification);
 
             // 3. Merge & Generate (The Logic Core)
             setProcessingStatus(`Fusionando ${extractionPartsRef.current.length} segmentos y generando historia...`);
@@ -264,30 +308,42 @@ function App() {
             const result = await aiService.generateFromMergedExtractions(
                 extractionPartsRef.current,
                 fullTranscription,
-                patientName
+                patientName,
+                extractionMetaPartsRef.current,
+                pickBestClassification(classificationPartsRef.current)
             );
 
             // 4. Update UI
             setHistory(result.data);
             setPipelineMetadata({
                 corrections: result.corrections_applied || 0,
-                models: { generation: result.model, validation: 'gpt-4o' }, // Simplified
+                models: { generation: result.model, validation: buildValidationLabel(result.validations) },
                 errorsFixed: 0, // Need to track this from validated pipeline
                 versionsCount: (result.corrections_applied || 0) + 1,
                 remainingErrors: result.remaining_errors,
-                validationHistory: result.validations?.flatMap(v => v.errors)
+                validationHistory: result.validations?.flatMap(v => v.errors),
+                extractionMeta: result.extraction_meta,
+                classification: result.classification,
+                uncertaintyFlags: result.uncertainty_flags,
+                auditId: result.audit_id
             });
 
 
             // 5. Cleanup Batch State
             extractionPartsRef.current = [];
             transcriptionPartsRef.current = [];
+            extractionMetaPartsRef.current = [];
+            classificationPartsRef.current = [];
 
         } catch (error) {
             console.error(error);
             setProcessingStatus('Error en el procesamiento.');
             alert('Error processing audio. See console for details.');
             setCurrentView('record');
+            extractionPartsRef.current = [];
+            transcriptionPartsRef.current = [];
+            extractionMetaPartsRef.current = [];
+            classificationPartsRef.current = [];
         } finally {
             // setIsLoading(false); // Removed
         }
@@ -298,7 +354,8 @@ function App() {
             alert('Configura tu API Key primero');
             return;
         }
-        const aiService = new AIService(getApiKeys(apiKey));
+        const aiService = aiServiceRef.current || new AIService(getApiKeys(apiKey));
+        aiServiceRef.current = aiService;
         // setIsLoading(true); // Removed
         setCurrentView('result');
         setProcessingStatus('Procesando texto directo...');
@@ -306,31 +363,42 @@ function App() {
             // Treat as single extraction for now, or just extract -> generate
             // Reuse merge pipeline for consistency if we want
             const extraction = await aiService.extractOnly(text);
-            const result = await aiService.generateFromMergedExtractions([extraction], text, patientName);
+            const normalizedMeta = prefixExtractionMeta(extraction.meta, 0);
+            const result = await aiService.generateFromMergedExtractions(
+                [extraction.data],
+                text,
+                patientName,
+                normalizedMeta,
+                extraction.classification
+            );
 
             setHistory(result.data);
             setTranscription(text);
             setPipelineMetadata({
                 corrections: result.corrections_applied || 0,
-                models: { generation: result.model, validation: 'gpt-4o' },
+                models: { generation: result.model, validation: buildValidationLabel(result.validations) },
                 errorsFixed: 0,
                 versionsCount: (result.corrections_applied || 0) + 1,
                 remainingErrors: result.remaining_errors,
-                validationHistory: result.validations?.flatMap(v => v.errors)
+                validationHistory: result.validations?.flatMap(v => v.errors),
+                extractionMeta: result.extraction_meta,
+                classification: result.classification,
+                uncertaintyFlags: result.uncertainty_flags,
+                auditId: result.audit_id
             });
 
             // NEW: Save log for AudioTestLab history
             // We need to map the result to the LabTestLog format loosely or just rely on the fact 
             // that this function is primarily used by AudioTestLab now.
             if (result.active_memory_used) {
-                await saveLabTestLog({
+                        await saveLabTestLog({
                     test_name: patientName,
                     input_type: 'text',
                     transcription: text,
                     medical_history: result.data,
                     metadata: {
                         corrections: result.corrections_applied || 0,
-                        models: { generation: result.model, validation: 'mixed' },
+                        models: { generation: result.model, validation: buildValidationLabel(result.validations) },
                         versionsCount: (result.corrections_applied || 0) + 1,
                         errorsFixed: 0,
                         active_memory_used: true
@@ -393,7 +461,18 @@ function App() {
                         patientName={currentPatientName}
                         transcription={transcription}
                         apiKey={apiKey}
-                        onNewConsultation={() => setCurrentView('record')}
+                        onNewConsultation={() => {
+                            setHistory('');
+                            setTranscription('');
+                            setCurrentPatientName('');
+                            setPipelineMetadata(undefined);
+                            extractionPartsRef.current = [];
+                            transcriptionPartsRef.current = [];
+                            extractionMetaPartsRef.current = [];
+                            classificationPartsRef.current = [];
+                            aiServiceRef.current = null;
+                            setCurrentView('record');
+                        }}
                         onContentChange={(newContent) => setHistory(newContent)}
                         metadata={pipelineMetadata}
                         onGenerateReport={async () => {

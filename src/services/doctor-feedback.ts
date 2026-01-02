@@ -4,8 +4,9 @@
 // Analyzes changes using Qwen3-32b and stores lessons in Supabase
 
 import { supabase } from './supabase';
+import { getTaskModels } from './model-registry';
 
-const ANALYZER_MODEL = 'qwen/qwen3-32b';
+const ANALYZER_MODEL = getTaskModels('feedback')[0] || 'qwen/qwen3-32b';
 
 export interface ChangeDetected {
     section: string;
@@ -99,6 +100,29 @@ function parseSections(text: string): Record<string, string> {
     return sections;
 }
 
+function normalizeText(value: string): string {
+    return value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function similarityScore(a: string, b: string): number {
+    const tokensA = new Set(normalizeText(a).split(' ').filter(Boolean));
+    const tokensB = new Set(normalizeText(b).split(' ').filter(Boolean));
+    if (tokensA.size === 0 || tokensB.size === 0) return 0;
+
+    let intersection = 0;
+    for (const token of tokensA) {
+        if (tokensB.has(token)) intersection++;
+    }
+
+    return intersection / Math.max(tokensA.size, tokensB.size);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // AI ANALYZER: Enhanced for Content vs Format classification
 // ═══════════════════════════════════════════════════════════════
@@ -114,26 +138,26 @@ export async function analyzeChangesWithAI(
 ): Promise<{ summary: string; category: ImprovementLesson['improvement_category']; isFormat: boolean }> {
 
     const changesDescription = changes.map(c =>
-        `Sección: ${c.section}\nOriginal: ${c.original.substring(0, 150)}...\nEditado: ${c.edited.substring(0, 150)}...`
+        `Seccion: ${c.section}\nOriginal: ${c.original.substring(0, 150)}...\nEditado: ${c.edited.substring(0, 150)}...`
     ).join('\n\n');
 
-    const prompt = `Analiza estas correcciones médicas:
+    const prompt = `Analiza estas correcciones medicas:
 ${changesDescription}
 
 TAREA:
-1. Resume la lección en una frase técnica (ej: "Usar 'Niega' en lugar de 'No refiere'").
-2. Clasifica en categoría: 'formatting', 'terminology', 'missing_data', 'hallucination', 'style'.
-3. Indica si es un cambio de FORMATO/ESTILO (true) o de CONTENIDO MÉDICO (false).
+1. Resume la leccion en una frase tecnica (ej: "Usar 'Niega' en lugar de 'No refiere'").
+2. Clasifica en categoria: 'formatting', 'terminology', 'missing_data', 'hallucination', 'style'.
+3. Indica si es un cambio de FORMATO/ESTILO (true) o de CONTENIDO MEDICO (false).
 
-Responde JSON: { "lesson": "...", "category": "...", "is_format": boolean }`;
+Responde SOLO JSON: { "lesson": "...", "category": "...", "is_format": boolean }`;
 
     try {
         const groq = new GroqService(groqApiKey);
-        const jsonText = await groq.chat(prompt, ANALYZER_MODEL, { jsonMode: true });
+        const jsonText = await groq.chat(prompt, ANALYZER_MODEL, { jsonMode: true, temperature: 0, maxTokens: 600, task: 'feedback' });
         const parsed = JSON.parse(jsonText);
 
         return {
-            summary: parsed.lesson || 'Corrección de estilo',
+            summary: parsed.lesson || 'Correccion de estilo',
             category: (parsed.category || 'style') as ImprovementLesson['improvement_category'],
             isFormat: parsed.is_format ?? (parsed.category === 'formatting' || parsed.category === 'style')
         };
@@ -142,10 +166,6 @@ Responde JSON: { "lesson": "...", "category": "...", "is_format": boolean }`;
         return { summary: 'Ajuste de contenido', category: 'style', isFormat: true };
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-// MAIN FLOW: Process doctor's save action with 2x Rule
-// ═══════════════════════════════════════════════════════════════
 
 export async function processDoctorFeedback(
     transcription: string,
@@ -181,12 +201,8 @@ export async function processDoctorFeedback(
             .order('created_at', { ascending: false })
             .limit(20);
 
-        // Simple string similarity or fuzzy check (here we'll use a basic inclusion check or just rely on categorization)
-        // For a more robust production app, we would use embeddings.
-        const similar = similarLessons?.find(l =>
-            l.lesson_summary.toLowerCase().includes(analysis.summary.toLowerCase().split(' ')[0]) ||
-            analysis.summary.toLowerCase().includes(l.lesson_summary.toLowerCase().split(' ')[0])
-        );
+        // Lightweight similarity check to reduce false positives/negatives.
+        const similar = similarLessons?.find(l => similarityScore(l.lesson_summary, analysis.summary) >= 0.6);
 
         if (similar) {
             recurrenceCount = (similar.recurrence_count || 1) + 1;

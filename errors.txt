@@ -1,0 +1,16 @@
+﻿src/services/ai.ts(97,17): error TS2345: Argument of type '{ type: string; field: string; reason: string; field_value?: string | undefined; }[] | undefined' is not assignable to parameter of type 'ValidationError[] | undefined'.
+  Type '{ type: string; field: string; reason: string; field_value?: string | undefined; }[]' is not assignable to type 'ValidationError[]'.
+    Type '{ type: string; field: string; reason: string; field_value?: string | undefined; }' is not assignable to type 'ValidationError'.
+      Types of property 'type' are incompatible.
+        Type 'string' is not assignable to type '"hallucination" | "missing" | "inconsistency"'.
+src/services/ai.ts(201,15): error TS2322: Type '{ field_path: string; reason: string; severity: string; value: string | undefined; }[]' is not assignable to type 'UncertaintyFlag[]'.
+  Type '{ field_path: string; reason: string; severity: string; value: string | undefined; }' is not assignable to type 'UncertaintyFlag'.
+    Types of property 'severity' are incompatible.
+      Type 'string' is not assignable to type '"low" | "medium" | "high"'.
+src/services/groq.ts(908,17): error TS2367: This comparison appears to be unintentional because the types '"A" | "B" | "both"' and '"unknown"' have no overlap.
+src/services/groq.ts(1064,46): error TS18046: 'parsed' is of type 'unknown'.
+src/services/groq.ts(1064,63): error TS18046: 'parsed' is of type 'unknown'.
+src/services/groq.ts(1065,46): error TS18046: 'parsed' is of type 'unknown'.
+src/services/groq.ts(1065,79): error TS18046: 'parsed' is of type 'unknown'.
+src/services/groq.ts(1065,100): error TS18046: 'parsed' is of type 'unknown'.
+src/services/groq.ts(1070,39): error TS18046: 'parsed' is of type 'unknown'.

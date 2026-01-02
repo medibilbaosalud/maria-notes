@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Copy, Check, FileText, Sparkles, FileOutput, X, Printer, Plus, AlertTriangle, Edit2, Brain, Wand2, ThumbsDown } from 'lucide-react';
@@ -6,6 +6,8 @@ import ReactMarkdown from 'react-markdown';
 import { MBSLogo } from './MBSLogo';
 import { AIAuditWidget } from './AIAuditWidget';
 import { processDoctorFeedback } from '../services/doctor-feedback';
+import type { ExtractionMeta, ConsultationClassification, UncertaintyFlag, FieldEvidence } from '../services/groq';
+import { saveFieldConfirmation, logQualityEvent } from '../services/supabase';
 
 interface HistoryViewProps {
   content: string;
@@ -23,6 +25,10 @@ interface HistoryViewProps {
     versionsCount: number;
     remainingErrors?: { type: string; field: string; reason: string }[];
     validationHistory?: { type: string; field: string; reason: string }[];
+    extractionMeta?: ExtractionMeta[];
+    classification?: ConsultationClassification;
+    uncertaintyFlags?: UncertaintyFlag[];
+    auditId?: string;
   };
 }
 
@@ -102,9 +108,59 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportContent, setReportContent] = useState('');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [showSourcesModal, setShowSourcesModal] = useState(false);
+  const [flagDecisions, setFlagDecisions] = useState<Record<string, 'confirmed' | 'rejected'>>({});
 
   // Split content into History and Maria Notes
   const [historyText, mariaNotes] = content ? content.split('---MARIA_NOTES---') : ['', ''];
+
+  const evidenceByField = useMemo(() => {
+    const entries: FieldEvidence[] = [];
+    const meta = metadata?.extractionMeta || [];
+    meta.forEach((chunk) => {
+      (chunk.field_evidence || []).forEach((evidence) => {
+        if (!evidence.field_path) return;
+        if (!evidence.value && !evidence.evidence_snippet) return;
+        entries.push(evidence);
+      });
+    });
+    const grouped = new Map<string, FieldEvidence[]>();
+    entries.forEach((entry) => {
+      const list = grouped.get(entry.field_path) || [];
+      list.push(entry);
+      grouped.set(entry.field_path, list);
+    });
+    return Array.from(grouped.entries());
+  }, [metadata]);
+
+  const handleFlagDecision = async (flag: UncertaintyFlag, confirmed: boolean) => {
+    if (flagDecisions[flag.field_path]) return;
+    setFlagDecisions((prev) => ({
+      ...prev,
+      [flag.field_path]: confirmed ? 'confirmed' : 'rejected'
+    }));
+
+    await saveFieldConfirmation({
+      record_id: metadata?.auditId,
+      field_path: flag.field_path,
+      suggested_value: flag.value,
+      confirmed
+    });
+
+    await logQualityEvent({
+      record_id: metadata?.auditId,
+      event_type: confirmed ? 'field_confirmation' : 'field_rejection',
+      payload: {
+        field_path: flag.field_path,
+        reason: flag.reason,
+        suggested_value: flag.value || null
+      }
+    });
+
+    if (!confirmed && !isEditing) {
+      handleEditClick();
+    }
+  };
 
   const handleEditClick = () => {
     setEditValue(historyText);
@@ -113,15 +169,26 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
   const handleSaveEdit = () => {
     // TRIGGER LEARNING: If content changed, analyze why
-    if (editValue !== historyText && transcription && apiKey) {
-      processDoctorFeedback(
-        transcription,
-        historyText, // Original AI version
-        editValue,   // Doctor's edited version
-        apiKey
-      ).then(lesson => {
-        if (lesson) {
-          console.log('[HistoryView] Aprendizaje registrado:', lesson.improvement_category);
+    if (editValue !== historyText) {
+      if (transcription && apiKey) {
+        processDoctorFeedback(
+          transcription,
+          historyText, // Original AI version
+          editValue,   // Doctor's edited version
+          apiKey,
+          metadata?.auditId
+        ).then(lesson => {
+          if (lesson) {
+            console.log('[HistoryView] Aprendizaje registrado:', lesson.improvement_category);
+          }
+        });
+      }
+      logQualityEvent({
+        record_id: metadata?.auditId,
+        event_type: 'doctor_edit',
+        payload: {
+          length_diff: Math.abs(editValue.length - historyText.length),
+          sections_changed: 1
         }
       });
     }
@@ -281,6 +348,16 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         <Edit2 size={16} />
                         <span>Editar</span>
                       </button>
+                      {metadata?.extractionMeta && metadata.extractionMeta.length > 0 && (
+                        <button
+                          className="action-button secondary"
+                          onClick={() => setShowSourcesModal(true)}
+                          title="Ver fuentes"
+                        >
+                          <FileText size={16} />
+                          <span>Fuentes</span>
+                        </button>
+                      )}
                       <button
                         className="action-button secondary"
                         onClick={handleOpenReport}
@@ -312,6 +389,15 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 </div>
               </div>
             </div>
+
+            {metadata?.classification && (
+              <div className="classification-banner">
+                <span>Contexto ENT:</span>
+                <span className="classification-pill">{metadata.classification.visit_type}</span>
+                <span className="classification-pill">{metadata.classification.ent_area}</span>
+                <span className="classification-pill">{metadata.classification.urgency}</span>
+              </div>
+            )}
 
             <div className="document-content markdown-body">
               {isEditing ? (
@@ -388,6 +474,44 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               </div>
             )}
 
+            {metadata?.uncertaintyFlags && metadata.uncertaintyFlags.length > 0 && (
+              <div className="uncertainty-panel">
+                <div className="uncertainty-header">
+                  <AlertTriangle size={18} />
+                  <span>Campos con baja confianza</span>
+                </div>
+                <ul className="uncertainty-list">
+                  {metadata.uncertaintyFlags.map((flag, i) => {
+                    const decision = flagDecisions[flag.field_path];
+                    return (
+                      <li key={`${flag.field_path}-${i}`} className="uncertainty-item">
+                        <div className="uncertainty-details">
+                          <strong>{flag.field_path}</strong>
+                          <span>{flag.reason}</span>
+                          {flag.value && <em>Valor: {flag.value}</em>}
+                        </div>
+                        <div className="uncertainty-actions">
+                          <button
+                            className="flag-action confirm"
+                            disabled={Boolean(decision)}
+                            onClick={() => handleFlagDecision(flag, true)}
+                          >
+                            {decision === 'confirmed' ? 'Confirmado' : 'Confirmar'}
+                          </button>
+                          <button
+                            className="flag-action reject"
+                            disabled={Boolean(decision)}
+                            onClick={() => handleFlagDecision(flag, false)}
+                          >
+                            {decision === 'rejected' ? 'Marcado' : 'Corregir'}
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
 
           </motion.div>
         </div>
@@ -467,6 +591,53 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         )}
       </AnimatePresence>
 
+      {/* Sources Modal */}
+      <AnimatePresence>
+        {showSourcesModal && (
+          <motion.div
+            className="modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="modal-content sources-modal"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+            >
+              <div className="modal-header">
+                <h3>Fuentes y evidencia</h3>
+                <button className="close-btn" onClick={() => setShowSourcesModal(false)}>
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="modal-body sources-body">
+                {evidenceByField.length === 0 ? (
+                  <p>No hay evidencia disponible.</p>
+                ) : (
+                  evidenceByField.map(([fieldPath, entries]) => (
+                    <div key={fieldPath} className="source-group">
+                      <h4>{fieldPath}</h4>
+                      {entries.map((entry, idx) => (
+                        <div key={`${fieldPath}-${idx}`} className="source-entry">
+                          <div className="source-meta">
+                            <span className="source-value">{entry.value}</span>
+                            <span className="source-chunk">{entry.chunk_id}</span>
+                          </div>
+                          <p className="source-snippet">{entry.evidence_snippet || 'Sin evidencia literal.'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <style>{`
         .history-view-container {
           height: 100%;
@@ -511,6 +682,26 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           padding: 1rem 2rem;
           background: #f8fafc;
           border-bottom: 1px solid var(--glass-border);
+        }
+
+        .classification-banner {
+          display: flex;
+          gap: 10px;
+          align-items: center;
+          padding: 0.75rem 2rem;
+          background: #f1f5f9;
+          border-bottom: 1px solid #e2e8f0;
+          font-size: 0.85rem;
+          color: #334155;
+        }
+
+        .classification-pill {
+          background: #e2e8f0;
+          color: #0f172a;
+          padding: 2px 8px;
+          border-radius: 999px;
+          font-weight: 600;
+          font-size: 0.75rem;
         }
 
         .doc-title {
@@ -657,6 +848,132 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
         .remaining-errors-warning .error-list li strong {
           color: #b91c1c;
+        }
+
+        .uncertainty-panel {
+          margin: 1.5rem 2rem 2rem;
+          padding: 1rem;
+          border-radius: 12px;
+          background: #fefce8;
+          border: 1px solid #fde68a;
+        }
+
+        .uncertainty-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-weight: 600;
+          color: #92400e;
+          margin-bottom: 0.75rem;
+        }
+
+        .uncertainty-list {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+          display: grid;
+          gap: 0.75rem;
+        }
+
+        .uncertainty-item {
+          display: flex;
+          justify-content: space-between;
+          gap: 1rem;
+          padding: 0.75rem;
+          background: #fff7ed;
+          border-radius: 10px;
+          border: 1px solid #fed7aa;
+        }
+
+        .uncertainty-details {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          font-size: 0.85rem;
+          color: #7c2d12;
+        }
+
+        .uncertainty-details em {
+          font-style: normal;
+          color: #9a3412;
+        }
+
+        .uncertainty-actions {
+          display: flex;
+          gap: 0.5rem;
+          align-items: center;
+        }
+
+        .flag-action {
+          border: none;
+          padding: 6px 12px;
+          border-radius: 999px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .flag-action.confirm {
+          background: #16a34a;
+          color: white;
+        }
+
+        .flag-action.reject {
+          background: #f97316;
+          color: white;
+        }
+
+        .flag-action:disabled {
+          opacity: 0.6;
+          cursor: default;
+        }
+
+        .sources-modal {
+          max-width: 720px;
+          width: 92%;
+          max-height: 80vh;
+          overflow: hidden;
+        }
+
+        .sources-body {
+          max-height: 60vh;
+          overflow-y: auto;
+          display: grid;
+          gap: 1rem;
+        }
+
+        .source-group h4 {
+          margin: 0 0 0.5rem 0;
+          font-size: 0.9rem;
+          color: #0f172a;
+        }
+
+        .source-entry {
+          border: 1px solid #e2e8f0;
+          border-radius: 10px;
+          padding: 0.75rem;
+          background: #f8fafc;
+          margin-bottom: 0.5rem;
+        }
+
+        .source-meta {
+          display: flex;
+          justify-content: space-between;
+          font-size: 0.75rem;
+          color: #475569;
+          margin-bottom: 0.5rem;
+        }
+
+        .source-value {
+          font-weight: 600;
+          color: #0f172a;
+        }
+
+        .source-snippet {
+          margin: 0;
+          font-size: 0.85rem;
+          color: #1e293b;
+          white-space: pre-wrap;
         }
         .maria-notes-card {
           background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
