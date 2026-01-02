@@ -1,6 +1,0 @@
-﻿src/services/ai.ts(97,77): error TS2304: Cannot find name 'ValidationError'.
-src/services/ai.ts(201,15): error TS2322: Type '({ field_path: string; reason: string; severity: "low" | "medium" | "high"; value: string | undefined; } | { field_path: string; reason: string; severity: string; value: undefined; })[]' is not assignable to type 'UncertaintyFlag[]'.
-  Type '{ field_path: string; reason: string; severity: "low" | "medium" | "high"; value: string | undefined; } | { field_path: string; reason: string; severity: string; value: undefined; }' is not assignable to type 'UncertaintyFlag'.
-    Type '{ field_path: string; reason: string; severity: string; value: undefined; }' is not assignable to type 'UncertaintyFlag'.
-      Types of property 'severity' are incompatible.
-        Type 'string' is not assignable to type '"low" | "medium" | "high"'.
