@@ -243,8 +243,8 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
         {
             icon: Cpu,
             color: '#6366f1',
-            title: "5. Enjambre Inteligente de Modelos",
-            description: "Tu consulta es procesada por un flujo de expertos. Un Router Inteligente distribuye la carga: Sonnet para el razonamiento profundo, Whisper para el oído fino y Haiku para la velocidad. Todo termina en un Verificador que asegura la calidad.",
+            title: "5. Flujo Multifase & Auto-Corrección",
+            description: "¿Router? No, es algo mejor: un Flujo Continuo con Bucle de Calidad. 1) Whisper Turbo escucha. 2) Llama 3.3 (el modelo más potente) piensa y estructura. 3) Si la Verificación final detecta el más mínimo error, el sistema repite el proceso automáticamente hasta garantizar el 100%.",
             visual: (
                 <div className="mock-swarm-flow">
                     <div className="swarm-stage">
@@ -257,7 +257,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
 
                     <div className="swarm-grid">
                         <div className="swarm-agent-card flash">
-                            <div className="agent-header"><Zap size={14} color="#d97706" /> Rápido</div>
+                            <div className="agent-header"><Zap size={14} color="#d97706" /> Oído</div>
                             <span className="agent-task">Transcripción</span>
                             <span className="agent-model">Whisper V3 Turbo</span>
                             <span style={{ fontSize: '0.6rem', color: '#cbd5e1' }}>(Backup: V3)</span>
@@ -265,12 +265,12 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                         <div className="swarm-agent-card reasoning">
                             <div className="agent-header"><Brain size={14} color="#7c3aed" /> Cerebro</div>
                             <span className="agent-task">Razonamiento</span>
-                            <span className="agent-model">Sonnet 3.5</span>
+                            <span className="agent-model">Llama 3.3 70B</span>
                         </div>
                         <div className="swarm-agent-card extract">
                             <div className="agent-header"><BarChart2 size={14} color="#2563eb" /> Datos</div>
                             <span className="agent-task">Extracción JSON</span>
-                            <span className="agent-model">Gemini Flash</span>
+                            <span className="agent-model">Llama 3.1 8B</span>
                         </div>
                     </div>
 
@@ -279,6 +279,12 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                         <div className="swarm-box output">
                             <span className="box-title"><ShieldCheck size={14} color="#059669" /> Verificación</span>
                             <span className="box-desc">Cross-Check & Validación Final</span>
+                        </div>
+                        <div className="loop-container">
+                            <div className="loop-line"></div>
+                            <div className="loop-label">
+                                <span style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', display: 'block' }}>REINTENTO</span>
+                            </div>
                         </div>
                     </div>
                 </div>
