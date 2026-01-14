@@ -33,7 +33,7 @@ export const saveMedicalRecord = async (record: MedicalRecord) => {
         .select();
 
     if (error) throw error;
-    return data;
+    return data?.[0] || null;
 };
 
 export const searchMedicalRecords = async (query: string) => {

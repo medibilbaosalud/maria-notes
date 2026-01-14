@@ -1,5 +1,5 @@
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Layout } from './components/Layout';
 import { Recorder } from './components/Recorder';
 
@@ -11,7 +11,7 @@ import { AIService } from './services/ai';
 import { ReportsView } from './components/ReportsView';
 import type { ExtractionResult, ExtractionMeta, ConsultationClassification, UncertaintyFlag } from './services/groq';
 import { saveLabTestLog } from './services/storage';
-import { saveMedicalRecord, logError } from './services/supabase';
+import { saveMedicalRecord, updateMedicalRecord, logError } from './services/supabase';
 import { AudioTestLab } from './components/AudioTestLab';
 import LessonsPanel from './components/LessonsPanel';
 import { MemoryService } from './services/memory';
@@ -149,6 +149,7 @@ function App() {
     const [showLessons, setShowLessons] = useState(false);
     const [showWelcomeModal, setShowWelcomeModal] = useState(false);
     const [showWhatsNew, setShowWhatsNew] = useState(false);
+    const [currentRecordId, setCurrentRecordId] = useState<string | null>(null);
 
 
     // ════════════════════════════════════════════════════════════════
@@ -224,6 +225,34 @@ function App() {
         aiServiceRef.current = null;
         setShowSettings(false);
     };
+
+    const persistMedicalHistory = useCallback(
+        async (
+            newContent: string,
+            options?: {
+                autosave?: boolean;
+            }
+        ) => {
+            if (!currentRecordId) return;
+
+            try {
+                await updateMedicalRecord(currentRecordId, {
+                    medical_history: newContent
+                });
+            } catch (error) {
+                console.error('[App] Error updating medical record:', error);
+                if (!options?.autosave) {
+                    logError({
+                        message: 'Error actualizando historia médica',
+                        context: { recordId: currentRecordId },
+                        source: 'App.persistMedicalHistory',
+                        severity: 'warning'
+                    });
+                }
+            }
+        },
+        [currentRecordId]
+    );
 
     const blobToBase64 = (blob: Blob): Promise<string> => {
         return new Promise((resolve, reject) => {
@@ -337,13 +366,16 @@ function App() {
             // 5. AUTO-SAVE TO SUPABASE
             setProcessingStatus('Guardando en base de datos...');
             try {
-                await saveMedicalRecord({
+                const savedRecord = await saveMedicalRecord({
                     patient_name: patientName,
                     consultation_type: result.classification?.visit_type || 'unknown',
                     transcription: fullTranscription,
                     medical_history: result.data,
                     ai_model: result.model
                 });
+                if (savedRecord?.id) {
+                    setCurrentRecordId(savedRecord.id);
+                }
                 console.log('[App] Historia clínica guardada automáticamente en Supabase');
             } catch (saveError) {
                 console.error('[App] Error guardando en Supabase:', saveError);
@@ -502,15 +534,16 @@ function App() {
                 )}
 
                 {currentView === 'history' && (
-                    <SearchHistory
-                        apiKey={apiKey}
-                        onLoadRecord={(record) => {
-                            setHistory(record.medical_history);
-                            setTranscription(record.transcription || '');
-                            setCurrentPatientName(record.patient_name);
+                <SearchHistory
+                    apiKey={apiKey}
+                    onLoadRecord={(record) => {
+                        setHistory(record.medical_history);
+                        setTranscription(record.transcription || '');
+                        setCurrentPatientName(record.patient_name);
+                        setCurrentRecordId(record.id || null);
 
-                            // Set metadata if relevant, though legacy records might lack it
-                            setCurrentView('result');
+                        // Set metadata if relevant, though legacy records might lack it
+                        setCurrentView('result');
                         }}
                     />
                 )}
@@ -536,10 +569,13 @@ function App() {
                             extractionMetaPartsRef.current = [];
                             classificationPartsRef.current = [];
                             aiServiceRef.current = null;
+                            setCurrentRecordId(null);
                             setCurrentView('record');
                         }}
                         onContentChange={(newContent) => setHistory(newContent)}
                         metadata={pipelineMetadata}
+                        recordId={currentRecordId || undefined}
+                        onPersistMedicalHistory={persistMedicalHistory}
                         onGenerateReport={async () => {
                             // Reuse existing report generation logic if possible, or leave handled by HistoryView internal logic if simpler
                             // For now HistoryView handles generation via its own simple standard prompt if prop not fully passed, 

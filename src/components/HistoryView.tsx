@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Copy, Check, FileText, Sparkles, FileOutput, X, Printer, Plus, AlertTriangle, Edit2, Brain, Wand2, ThumbsDown } from 'lucide-react';
@@ -30,6 +30,8 @@ interface HistoryViewProps {
     uncertaintyFlags?: UncertaintyFlag[];
     auditId?: string;
   };
+  recordId?: string;
+  onPersistMedicalHistory?: (newContent: string, options?: { autosave?: boolean }) => Promise<void> | void;
 }
 
 const LoadingMessages = () => {
@@ -97,7 +99,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onGenerateReport,
   onNewConsultation,
   onContentChange,
-  metadata
+  metadata,
+  recordId,
+  onPersistMedicalHistory
 }) => {
   // ... (existing state)
   const [copied, setCopied] = useState(false);
@@ -110,9 +114,137 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [showSourcesModal, setShowSourcesModal] = useState(false);
   const [flagDecisions, setFlagDecisions] = useState<Record<string, 'confirmed' | 'rejected'>>({});
+  const [showEvidenceModal, setShowEvidenceModal] = useState(false);
+  const [selectedEvidenceField, setSelectedEvidenceField] = useState<string | null>(null);
+  const [showCompareModal, setShowCompareModal] = useState(false);
+  const [showVersionsModal, setShowVersionsModal] = useState(false);
+  const [hasEdited, setHasEdited] = useState(false);
+  const [hasFinalized, setHasFinalized] = useState(false);
+  const [hasGeneratedReport, setHasGeneratedReport] = useState(false);
+  const [hasExported, setHasExported] = useState(false);
+  const [isAutosaving, setIsAutosaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+  const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const quickCommands = ['Niega', 'Sin cambios', 'Sin hallazgos relevantes'];
+
+  const originalHistoryRef = useRef<string>('');
+  const lastSavedValueRef = useRef<string>('');
+  const lastRecordIdRef = useRef<string | null>(null);
+
+  type HistoryVersion = {
+    id: string;
+    label: string;
+    content: string;
+    createdAt: Date;
+    source: 'ai' | 'edit' | 'autosave';
+  };
+
+  const [versions, setVersions] = useState<HistoryVersion[]>([]);
 
   // Split content into History and Maria Notes
   const [historyText, mariaNotes] = content ? content.split('---MARIA_NOTES---') : ['', ''];
+
+  useEffect(() => {
+    if (recordId !== lastRecordIdRef.current) {
+      lastRecordIdRef.current = recordId || null;
+      originalHistoryRef.current = historyText;
+      lastSavedValueRef.current = historyText;
+      setVersions(
+        historyText
+          ? [{
+            id: `ai-${Date.now()}`,
+            label: 'IA (original)',
+            content: historyText,
+            createdAt: new Date(),
+            source: 'ai'
+          }]
+          : []
+      );
+      setHasEdited(false);
+      setHasFinalized(false);
+      setHasGeneratedReport(false);
+      setHasExported(false);
+      setLastSavedAt(null);
+      setFlagDecisions({});
+    }
+  }, [recordId, historyText]);
+
+  useEffect(() => {
+    if (!originalHistoryRef.current && historyText) {
+      originalHistoryRef.current = historyText;
+      lastSavedValueRef.current = historyText;
+      setVersions([{
+        id: `ai-${Date.now()}`,
+        label: 'IA (original)',
+        content: historyText,
+        createdAt: new Date(),
+        source: 'ai'
+      }]);
+    }
+  }, [historyText]);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const isEditingRef = useRef(isEditing);
+  useEffect(() => {
+    isEditingRef.current = isEditing;
+  }, [isEditing]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const meta = event.metaKey || event.ctrlKey;
+      if (!meta) return;
+
+      if (key === 's' && !event.shiftKey) {
+        event.preventDefault();
+        if (isEditingRef.current) {
+          saveEditRef.current();
+        }
+      }
+
+      if (event.shiftKey && key === 'r') {
+        event.preventDefault();
+        openReportRef.current();
+      }
+
+      if (event.shiftKey && key === 'e') {
+        event.preventDefault();
+        const field = metadata?.uncertaintyFlags?.[0]?.field_path || evidenceByField[0]?.[0];
+        if (field) {
+          openEvidenceRef.current(field);
+        }
+      }
+
+      if (event.shiftKey && key === 'm') {
+        event.preventDefault();
+        setShowSourcesModal(true);
+      }
+
+      if (event.shiftKey && key === 'c') {
+        event.preventDefault();
+        setShowCompareModal(true);
+      }
+
+      if (event.shiftKey && key === 'v') {
+        event.preventDefault();
+        setShowVersionsModal(true);
+      }
+    };
+
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [metadata, evidenceByField]);
 
   const evidenceByField = useMemo(() => {
     const entries: FieldEvidence[] = [];
@@ -132,6 +264,33 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     });
     return Array.from(grouped.entries());
   }, [metadata]);
+
+  const evidenceMap = useMemo(() => {
+    const map = new Map<string, FieldEvidence[]>();
+    evidenceByField.forEach(([fieldPath, entries]) => {
+      map.set(fieldPath, entries);
+    });
+    return map;
+  }, [evidenceByField]);
+
+  const uncertaintyEntries = useMemo(() => {
+    return (metadata?.uncertaintyFlags || [])
+      .filter((flag) => flag.value && flag.value.trim().length >= 2)
+      .map((flag) => ({
+        fieldPath: flag.field_path,
+        value: flag.value?.trim() || '',
+        reason: flag.reason
+      }));
+  }, [metadata]);
+
+  const openEvidence = useCallback((fieldPath: string) => {
+    setSelectedEvidenceField(fieldPath);
+    setShowEvidenceModal(true);
+  }, []);
+  const openEvidenceRef = useRef(openEvidence);
+  useEffect(() => {
+    openEvidenceRef.current = openEvidence;
+  }, [openEvidence]);
 
   const handleFlagDecision = async (flag: UncertaintyFlag, confirmed: boolean) => {
     if (flagDecisions[flag.field_path]) return;
@@ -167,7 +326,39 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     setIsEditing(true);
   };
 
-  const handleSaveEdit = () => {
+  const handleCommandInsert = (command: string) => {
+    setHasEdited(true);
+    setIsEditing(true);
+    const textarea = editTextareaRef.current;
+    const baseValue = textarea ? textarea.value : editValue;
+    const selectionStart = textarea?.selectionStart ?? baseValue.length;
+    const selectionEnd = textarea?.selectionEnd ?? selectionStart;
+    const prefix = baseValue.slice(0, selectionStart);
+    const suffix = baseValue.slice(selectionEnd);
+    const needsLeadingSpace = prefix && !/\s$/.test(prefix);
+    const needsTrailingSpace = suffix && !/^\s/.test(suffix);
+    const insertValue = `${prefix}${needsLeadingSpace ? ' ' : ''}${command}${needsTrailingSpace ? ' ' : ''}${suffix}`;
+    setEditValue(insertValue);
+    setTimeout(() => {
+      if (textarea) {
+        const cursorPos = prefix.length + (needsLeadingSpace ? 1 : 0) + command.length + (needsTrailingSpace ? 1 : 0);
+        textarea.focus();
+        textarea.setSelectionRange(cursorPos, cursorPos);
+      }
+    }, 0);
+  };
+
+  const persistContent = useCallback(async (newText: string, options?: { autosave?: boolean }) => {
+    if (onContentChange) {
+      const fullContent = newText + (mariaNotes ? '\n---MARIA_NOTES---\n' + mariaNotes : '');
+      onContentChange(fullContent);
+    }
+    if (onPersistMedicalHistory) {
+      await onPersistMedicalHistory(newText, options);
+    }
+  }, [mariaNotes, onContentChange, onPersistMedicalHistory]);
+
+  const handleSaveEdit = useCallback(async () => {
     // TRIGGER LEARNING: If content changed, analyze why
     if (editValue !== historyText) {
       if (transcription && apiKey) {
@@ -193,21 +384,37 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       });
     }
 
-    if (onContentChange) {
-      const fullContent = editValue + (mariaNotes ? '\n---MARIA_NOTES---\n' + mariaNotes : '');
-      onContentChange(fullContent);
-    }
+    await persistContent(editValue, { autosave: false });
+    lastSavedValueRef.current = editValue;
+    setLastSavedAt(new Date());
+    setHasEdited(editValue !== originalHistoryRef.current);
+    setVersions((prev) => [
+      ...prev,
+      {
+        id: `edit-${Date.now()}`,
+        label: `Edición ${prev.filter((item) => item.source === 'edit').length + 1}`,
+        content: editValue,
+        createdAt: new Date(),
+        source: 'edit'
+      }
+    ]);
     setIsEditing(false);
-  };
+  }, [apiKey, editValue, historyText, metadata, persistContent, transcription]);
 
   const handleCancelEdit = () => {
     setIsEditing(false);
     setEditValue('');
   };
 
+  const saveEditRef = useRef(handleSaveEdit);
+  useEffect(() => {
+    saveEditRef.current = handleSaveEdit;
+  }, [handleSaveEdit]);
+
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text.trim());
     setCopied(true);
+    setHasExported(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -218,6 +425,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       try {
         const report = await onGenerateReport();
         setReportContent(report);
+        setHasGeneratedReport(true);
       } catch (error) {
         console.error("Error generating report:", error);
         setReportContent("Error al generar el informe. Inténtelo de nuevo.");
@@ -226,6 +434,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       }
     }
   };
+
+  const openReportRef = useRef(handleOpenReport);
+  useEffect(() => {
+    openReportRef.current = handleOpenReport;
+  }, [handleOpenReport]);
 
   const handlePrintReport = () => {
     const printWindow = window.open('', '_blank');
@@ -286,6 +499,139 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       `);
       printWindow.document.close();
     }
+  };
+
+  const normalizeText = (value: string) => value.toLowerCase();
+
+  const findMatches = (text: string) => {
+    const matches: { start: number; end: number; fieldPath: string; value: string; reason: string }[] = [];
+    const lowerText = normalizeText(text);
+
+    uncertaintyEntries.forEach((entry) => {
+      const needle = normalizeText(entry.value);
+      if (!needle) return;
+      let index = lowerText.indexOf(needle);
+      while (index !== -1) {
+        matches.push({
+          start: index,
+          end: index + needle.length,
+          fieldPath: entry.fieldPath,
+          value: entry.value,
+          reason: entry.reason
+        });
+        index = lowerText.indexOf(needle, index + needle.length);
+      }
+    });
+
+    matches.sort((a, b) => {
+      if (a.start !== b.start) return a.start - b.start;
+      return b.end - a.end;
+    });
+
+    const filtered: typeof matches = [];
+    let lastEnd = -1;
+    matches.forEach((match) => {
+      if (match.start >= lastEnd) {
+        filtered.push(match);
+        lastEnd = match.end;
+      }
+    });
+
+    return filtered;
+  };
+
+  const renderHighlightedText = (text: string) => {
+    const matches = findMatches(text);
+    if (matches.length === 0) return text;
+    const parts: React.ReactNode[] = [];
+    let cursor = 0;
+    matches.forEach((match, idx) => {
+      if (cursor < match.start) {
+        parts.push(text.slice(cursor, match.start));
+      }
+      const snippet = text.slice(match.start, match.end);
+      parts.push(
+        <button
+          key={`${match.fieldPath}-${match.start}-${idx}`}
+          type="button"
+          className="uncertainty-highlight"
+          onClick={() => openEvidence(match.fieldPath)}
+          title={`Revisar: ${match.reason}`}
+        >
+          {snippet}
+        </button>
+      );
+      cursor = match.end;
+    });
+    if (cursor < text.length) {
+      parts.push(text.slice(cursor));
+    }
+    return parts;
+  };
+
+  const highlightChildren = (children: React.ReactNode): React.ReactNode => {
+    return React.Children.map(children, (child) => {
+      if (typeof child === 'string') {
+        return renderHighlightedText(child);
+      }
+      if (React.isValidElement(child) && child.props?.children) {
+        return React.cloneElement(child, {
+          ...child.props,
+          children: highlightChildren(child.props.children)
+        });
+      }
+      return child;
+    });
+  };
+
+  useEffect(() => {
+    if (!isEditing) return;
+    const timeout = setTimeout(async () => {
+      if (editValue === lastSavedValueRef.current) return;
+      setIsAutosaving(true);
+      try {
+        await persistContent(editValue, { autosave: true });
+        lastSavedValueRef.current = editValue;
+        setLastSavedAt(new Date());
+        setVersions((prev) => [
+          ...prev,
+          {
+            id: `autosave-${Date.now()}`,
+            label: `Autosave ${prev.filter((item) => item.source === 'autosave').length + 1}`,
+            content: editValue,
+            createdAt: new Date(),
+            source: 'autosave'
+          }
+        ]);
+      } finally {
+        setIsAutosaving(false);
+      }
+    }, 1200);
+    return () => clearTimeout(timeout);
+  }, [editValue, isEditing]);
+
+  const reviewCompleted = (metadata?.uncertaintyFlags?.length || 0) === 0
+    || (metadata?.uncertaintyFlags || []).every((flag) => flagDecisions[flag.field_path]);
+
+  const steps = [
+    { key: 'record', label: 'Grabar', completed: Boolean(historyText) },
+    { key: 'review', label: 'Revisar alertas', completed: reviewCompleted },
+    { key: 'edit', label: 'Editar', completed: hasEdited || !isEditing },
+    { key: 'finalize', label: 'Finalizar', completed: hasFinalized },
+    { key: 'report', label: 'Informe', completed: hasGeneratedReport },
+    { key: 'export', label: 'Exportar', completed: hasExported }
+  ];
+
+  const selectedEvidenceEntries = selectedEvidenceField ? evidenceMap.get(selectedEvidenceField) || [] : [];
+  const selectedUncertaintyFlag = selectedEvidenceField
+    ? metadata?.uncertaintyFlags?.find((flag) => flag.field_path === selectedEvidenceField)
+    : undefined;
+  const aiBaseline = versions.find((item) => item.source === 'ai')?.content || originalHistoryRef.current;
+  const handleLoadVersion = (version: HistoryVersion) => {
+    setEditValue(version.content);
+    setIsEditing(true);
+    setHasEdited(true);
+    setShowVersionsModal(false);
   };
 
   if (isLoading) {
@@ -360,6 +706,22 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       )}
                       <button
                         className="action-button secondary"
+                        onClick={() => setShowCompareModal(true)}
+                        title="Comparar IA vs editado"
+                      >
+                        <FileText size={16} />
+                        <span>Comparar</span>
+                      </button>
+                      <button
+                        className="action-button secondary"
+                        onClick={() => setShowVersionsModal(true)}
+                        title="Ver versiones"
+                      >
+                        <FileText size={16} />
+                        <span>Versiones</span>
+                      </button>
+                      <button
+                        className="action-button secondary"
                         onClick={handleOpenReport}
                         title="Generar Informe Médico Formal"
                       >
@@ -372,6 +734,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       >
                         {copied ? <Check size={16} /> : <Copy size={16} />}
                         <span>{copied ? 'Copiado' : 'Copiar'}</span>
+                      </button>
+                      <button
+                        className={`action-button primary ${hasFinalized ? 'success' : ''}`}
+                        onClick={() => setHasFinalized(true)}
+                        title="Finalizar historia"
+                      >
+                        <Check size={16} />
+                        <span>{hasFinalized ? 'Finalizado' : 'Finalizar'}</span>
                       </button>
                     </>
                   ) : (
@@ -390,6 +760,25 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               </div>
             </div>
 
+            <div className="workflow-bar">
+              <div className="workflow-steps">
+                {steps.map((step, idx) => (
+                  <div key={step.key} className={`workflow-step ${step.completed ? 'done' : ''}`}>
+                    <span className="step-index">{idx + 1}</span>
+                    <span className="step-label">{step.label}</span>
+                  </div>
+                ))}
+              </div>
+              <div className={`sync-status ${isOnline ? 'online' : 'offline'}`}>
+                <span>{isOnline ? 'Online' : 'Sin conexión'}</span>
+                {isEditing && (
+                  <span className="sync-detail">
+                    {isAutosaving ? 'Autosave...' : lastSavedAt ? `Guardado ${lastSavedAt.toLocaleTimeString()}` : 'Sin guardar'}
+                  </span>
+                )}
+              </div>
+            </div>
+
             {metadata?.classification && (
               <div className="classification-banner">
                 <span>Contexto ENT:</span>
@@ -403,6 +792,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               {isEditing ? (
                 <>
                   <textarea
+                    ref={editTextareaRef}
                     className="history-edit-textarea"
                     value={editValue}
                     onChange={(e) => setEditValue(e.target.value)}
@@ -418,6 +808,20 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       resize: 'vertical'
                     }}
                   />
+
+                  <div className="command-bar">
+                    <span>Comandos rápidos:</span>
+                    {quickCommands.map((command) => (
+                      <button
+                        key={command}
+                        type="button"
+                        className="command-chip"
+                        onClick={() => handleCommandInsert(command)}
+                      >
+                        {command}
+                      </button>
+                    ))}
+                  </div>
 
                   {/* AI Feedback Widget */}
                   <motion.div
@@ -453,7 +857,20 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   </motion.div>
                 </>
               ) : (
-                <ReactMarkdown>{historyText}</ReactMarkdown>
+                <ReactMarkdown
+                  components={{
+                    p: ({ children }) => <p>{highlightChildren(children)}</p>,
+                    li: ({ children }) => <li>{highlightChildren(children)}</li>,
+                    h1: ({ children }) => <h1>{highlightChildren(children)}</h1>,
+                    h2: ({ children }) => <h2>{highlightChildren(children)}</h2>,
+                    h3: ({ children }) => <h3>{highlightChildren(children)}</h3>,
+                    h4: ({ children }) => <h4>{highlightChildren(children)}</h4>,
+                    strong: ({ children }) => <strong>{highlightChildren(children)}</strong>,
+                    em: ({ children }) => <em>{highlightChildren(children)}</em>
+                  }}
+                >
+                  {historyText}
+                </ReactMarkdown>
               )}
             </div>
 
@@ -497,6 +914,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         </div>
                         <div className="uncertainty-actions">
                           <button
+                            className="flag-action ghost"
+                            type="button"
+                            onClick={() => openEvidence(flag.field_path)}
+                          >
+                            Ver evidencia
+                          </button>
+                          <button
                             className="flag-action confirm"
                             disabled={Boolean(decision)}
                             onClick={() => handleFlagDecision(flag, true)}
@@ -535,7 +959,16 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <span>Notas de Maria AI</span>
               </div>
               <div className="notes-content">
-                <ReactMarkdown>{mariaNotes}</ReactMarkdown>
+                <ReactMarkdown
+                  components={{
+                    p: ({ children }) => <p>{highlightChildren(children)}</p>,
+                    li: ({ children }) => <li>{highlightChildren(children)}</li>,
+                    strong: ({ children }) => <strong>{highlightChildren(children)}</strong>,
+                    em: ({ children }) => <em>{highlightChildren(children)}</em>
+                  }}
+                >
+                  {mariaNotes}
+                </ReactMarkdown>
               </div>
             </motion.div>
           </div>
@@ -636,6 +1069,198 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       ))}
                     </div>
                   ))
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Evidence Modal */}
+      <AnimatePresence>
+        {showEvidenceModal && (
+          <motion.div
+            className="modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="modal-content evidence-modal"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+            >
+              <div className="modal-header">
+                <h3>Evidencia guiada</h3>
+                <button className="close-btn" onClick={() => setShowEvidenceModal(false)}>
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="modal-body evidence-body">
+                {selectedEvidenceField ? (
+                  <>
+                    <p className="modal-subtitle">{selectedEvidenceField.replace(/_/g, ' → ')}</p>
+                    {selectedEvidenceEntries.length === 0 ? (
+                      <p className="empty-message">No hay evidencia asociada a este campo.</p>
+                    ) : (
+                      selectedEvidenceEntries.map((entry, idx) => (
+                        <div key={`${entry.chunk_id}-${idx}`} className="evidence-entry">
+                          <div className="evidence-meta">
+                            <span className="source-label">Chunk:</span>
+                            <span>{entry.chunk_id}</span>
+                            <span className="source-label">Valor:</span>
+                            <span>{entry.value || '—'}</span>
+                          </div>
+                          <p className="source-snippet">
+                            {entry.evidence_snippet || 'Sin fragmento literal disponible.'}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                    {selectedUncertaintyFlag && (
+                      <div className="modal-actions">
+                        <button
+                          className="flag-action confirm"
+                          type="button"
+                          onClick={() => {
+                            handleFlagDecision(selectedUncertaintyFlag, true);
+                            setShowEvidenceModal(false);
+                          }}
+                        >
+                          Confirmar como correcto
+                        </button>
+                        <button
+                          className="flag-action reject"
+                          type="button"
+                          onClick={() => {
+                            handleFlagDecision(selectedUncertaintyFlag, false);
+                            setShowEvidenceModal(false);
+                          }}
+                        >
+                          Marcar corrección
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p>Selecciona un campo en revisión para ver la evidencia correspondiente.</p>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Compare Modal */}
+      <AnimatePresence>
+        {showCompareModal && (
+          <motion.div
+            className="modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="modal-content compare-modal"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+            >
+              <div className="modal-header">
+                <h3>Comparar IA vs editado</h3>
+                <button className="close-btn" onClick={() => setShowCompareModal(false)}>
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="modal-body compare-body">
+                <div className="compare-grid">
+                  <div className="compare-column">
+                    <h4>IA original</h4>
+                    <textarea
+                      readOnly
+                      className="compare-textarea"
+                      value={aiBaseline || ''}
+                    />
+                  </div>
+                  <div className="compare-column">
+                    <h4>Versión actual</h4>
+                    <textarea
+                      readOnly
+                      className="compare-textarea"
+                      value={historyText}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button
+                  className="action-button primary"
+                  onClick={() => {
+                    setEditValue(aiBaseline);
+                    setIsEditing(true);
+                    setHasEdited(true);
+                    setShowCompareModal(false);
+                  }}
+                >
+                  Cargar versión IA
+                </button>
+                <button className="action-button secondary" onClick={() => setShowCompareModal(false)}>
+                  Cerrar
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Versions Modal */}
+      <AnimatePresence>
+        {showVersionsModal && (
+          <motion.div
+            className="modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="modal-content versions-modal"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+            >
+              <div className="modal-header">
+                <h3>Versiones guardadas</h3>
+                <button className="close-btn" onClick={() => setShowVersionsModal(false)}>
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="modal-body versions-body">
+                {versions.length === 0 ? (
+                  <p>No hay versiones guardadas aún.</p>
+                ) : (
+                  <ul className="versions-list">
+                    {versions.map((version) => (
+                      <li key={version.id} className="versions-item">
+                        <div className="versions-meta">
+                          <strong>{version.label}</strong>
+                          <span>{`${version.source.toUpperCase()} · ${version.createdAt.toLocaleString()}`}</span>
+                        </div>
+                        <div className="versions-actions">
+                          <button className="action-button secondary" onClick={() => handleLoadVersion(version)}>
+                            Abrir
+                          </button>
+                          <button
+                            className="action-button primary"
+                            onClick={() => navigator.clipboard.writeText(version.content)}
+                          >
+                            Copiar
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
             </motion.div>
@@ -1226,6 +1851,210 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           display: flex;
           justify-content: flex-end;
           gap: 1rem;
+        }
+
+        .modal-content.evidence-modal,
+        .modal-content.compare-modal,
+        .modal-content.versions-modal {
+          max-width: 880px;
+        }
+
+        .modal-body.evidence-body,
+        .modal-body.versions-body {
+          max-height: 60vh;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+        }
+
+        .modal-subtitle {
+          font-size: 0.85rem;
+          color: #475569;
+          margin-bottom: 0.25rem;
+        }
+
+        .evidence-entry {
+          border-radius: 10px;
+          border: 1px solid #e2e8f0;
+          padding: 0.75rem;
+          background: #f8fafc;
+        }
+
+        .evidence-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+          font-size: 0.75rem;
+          color: #475569;
+          margin-bottom: 0.5rem;
+        }
+
+        .source-label {
+          font-weight: 600;
+          color: #0f172a;
+        }
+
+        .compare-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 1rem;
+        }
+
+        .compare-column h4 {
+          margin-top: 0;
+          margin-bottom: 0.5rem;
+          font-size: 0.85rem;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          color: #0f172a;
+        }
+
+        .compare-textarea {
+          width: 100%;
+          min-height: 220px;
+          border-radius: 12px;
+          border: 1px solid #cbd5f5;
+          padding: 1rem;
+          font-family: 'Georgia', serif;
+          font-size: 1rem;
+          line-height: 1.6;
+          background: #f8fafc;
+          resize: none;
+        }
+
+        .versions-list {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+        }
+
+        .versions-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 0.75rem 1rem;
+          border-radius: 10px;
+          border: 1px solid #e5e7eb;
+          background: #fff;
+        }
+
+        .versions-meta {
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+
+        .versions-meta span {
+          font-size: 0.8rem;
+          color: #64748b;
+        }
+
+        .versions-actions {
+          display: flex;
+          gap: 0.5rem;
+        }
+
+        .command-bar {
+          margin-top: 0.75rem;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          flex-wrap: wrap;
+          font-size: 0.85rem;
+          color: #475569;
+        }
+
+        .command-chip {
+          border: 1px solid #bae6fd;
+          background: #e0f2fe;
+          color: #0f172a;
+          padding: 0.35rem 0.9rem;
+          border-radius: 999px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .command-chip:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 3px 8px rgba(15, 118, 110, 0.2);
+        }
+
+        .workflow-bar {
+          margin-top: 1rem;
+          padding: 0 2rem 1rem;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 1rem;
+        }
+
+        .workflow-steps {
+          display: flex;
+          gap: 0.75rem;
+          flex-wrap: wrap;
+        }
+
+        .workflow-step {
+          display: flex;
+          align-items: center;
+          gap: 0.35rem;
+          padding: 0.35rem 0.75rem;
+          border-radius: 999px;
+          border: 1px solid #e5e7eb;
+          font-size: 0.75rem;
+          color: #475569;
+        }
+
+        .workflow-step.done {
+          background: #dcfce7;
+          border-color: #86efac;
+          color: #15803d;
+        }
+
+        .sync-status {
+          display: flex;
+          flex-direction: column;
+          font-size: 0.75rem;
+          color: #64748b;
+          text-align: right;
+        }
+
+        .sync-status.online span:first-child {
+          color: #15803d;
+        }
+
+        .sync-status.offline span:first-child {
+          color: #dc2626;
+        }
+
+        .sync-detail {
+          font-size: 0.7rem;
+          color: #475569;
+        }
+
+        .uncertainty-highlight {
+          background: #fef3c7;
+          border: 1px dashed #f59e0b;
+          color: #92400e;
+          padding: 0 4px;
+          border-radius: 4px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .uncertainty-highlight:hover {
+          background: #fef08a;
+        }
+
+        .flag-action.ghost {
+          border: 1px solid #cbd5f5;
+          background: #f8fafc;
+          color: #0f172a;
         }
 
         .loading-state {
