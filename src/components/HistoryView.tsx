@@ -200,6 +200,25 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     isEditingRef.current = isEditing;
   }, [isEditing]);
 
+  const evidenceByField = useMemo(() => {
+    const entries: FieldEvidence[] = [];
+    const meta = metadata?.extractionMeta || [];
+    meta.forEach((chunk) => {
+      (chunk.field_evidence || []).forEach((evidence) => {
+        if (!evidence.field_path) return;
+        if (!evidence.value && !evidence.evidence_snippet) return;
+        entries.push(evidence);
+      });
+    });
+    const grouped = new Map<string, FieldEvidence[]>();
+    entries.forEach((entry) => {
+      const list = grouped.get(entry.field_path) || [];
+      list.push(entry);
+      grouped.set(entry.field_path, list);
+    });
+    return Array.from(grouped.entries());
+  }, [metadata]);
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
@@ -245,25 +264,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [metadata, evidenceByField]);
-
-  const evidenceByField = useMemo(() => {
-    const entries: FieldEvidence[] = [];
-    const meta = metadata?.extractionMeta || [];
-    meta.forEach((chunk) => {
-      (chunk.field_evidence || []).forEach((evidence) => {
-        if (!evidence.field_path) return;
-        if (!evidence.value && !evidence.evidence_snippet) return;
-        entries.push(evidence);
-      });
-    });
-    const grouped = new Map<string, FieldEvidence[]>();
-    entries.forEach((entry) => {
-      const list = grouped.get(entry.field_path) || [];
-      list.push(entry);
-      grouped.set(entry.field_path, list);
-    });
-    return Array.from(grouped.entries());
-  }, [metadata]);
 
   const evidenceMap = useMemo(() => {
     const map = new Map<string, FieldEvidence[]>();
