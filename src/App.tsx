@@ -11,6 +11,7 @@ import { AIService } from './services/ai';
 import { ReportsView } from './components/ReportsView';
 import type { ExtractionResult, ExtractionMeta, ConsultationClassification, UncertaintyFlag } from './services/groq';
 import { saveLabTestLog } from './services/storage';
+import { saveMedicalRecord, logError } from './services/supabase';
 import { AudioTestLab } from './components/AudioTestLab';
 import LessonsPanel from './components/LessonsPanel';
 import { MemoryService } from './services/memory';
@@ -130,6 +131,7 @@ function App() {
     const [transcription, setTranscription] = useState<string>('');
     const [currentPatientName, setCurrentPatientName] = useState<string>('');
     const [_processingStatus, setProcessingStatus] = useState<string>('');
+    const [isLoading, setIsLoading] = useState(false);
     const [currentView, setCurrentView] = useState<'record' | 'history' | 'reports' | 'result' | 'test-lab'>('record');
 
     const [pipelineMetadata, setPipelineMetadata] = useState<{
@@ -282,7 +284,7 @@ function App() {
             // ─────────────────────────────────────────────────────────
             // CASE 2: FINAL RECORDING (Merge + Generate)
             // ─────────────────────────────────────────────────────────
-            // setIsLoading(true); // Removed
+            setIsLoading(true);
             setProcessingStatus('Iniciando procesamiento final...');
             setCurrentView('result');
             setCurrentPatientName(patientName);
@@ -332,16 +334,41 @@ function App() {
                 auditId: result.audit_id
             });
 
+            // 5. AUTO-SAVE TO SUPABASE
+            setProcessingStatus('Guardando en base de datos...');
+            try {
+                await saveMedicalRecord({
+                    patient_name: patientName,
+                    consultation_type: result.classification?.visit_type || 'unknown',
+                    transcription: fullTranscription,
+                    medical_history: result.data,
+                    ai_model: result.model
+                });
+                console.log('[App] Historia clínica guardada automáticamente en Supabase');
+            } catch (saveError) {
+                console.error('[App] Error guardando en Supabase:', saveError);
+                // No bloquear el flujo si falla el guardado
+            }
 
-            // 5. Cleanup Batch State
+            // 6. Cleanup Batch State
             extractionPartsRef.current = [];
             transcriptionPartsRef.current = [];
             extractionMetaPartsRef.current = [];
             classificationPartsRef.current = [];
 
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
             setProcessingStatus('Error en el procesamiento.');
+
+            // Log error to Supabase
+            logError({
+                message: error?.message || 'Unknown error processing recording',
+                stack: error?.stack,
+                context: { patientName, blobSize: blob?.size, isPartialBatch, batchIndex },
+                source: 'App.handleRecordingComplete',
+                severity: 'error'
+            });
+
             alert('Error processing audio. See console for details.');
             setCurrentView('record');
             extractionPartsRef.current = [];
@@ -349,7 +376,7 @@ function App() {
             extractionMetaPartsRef.current = [];
             classificationPartsRef.current = [];
         } finally {
-            // setIsLoading(false); // Removed
+            setIsLoading(false);
         }
     };
 
@@ -495,7 +522,7 @@ function App() {
                 {currentView === 'result' && (
                     <HistoryView
                         content={history}
-                        isLoading={false} // Loading handled by processing status usually, but here we are showing result
+                        isLoading={isLoading}
                         patientName={currentPatientName}
                         transcription={transcription}
                         apiKey={apiKey}

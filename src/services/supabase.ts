@@ -329,3 +329,42 @@ export const logQualityEvent = async (event: {
         await upsertDailyMetrics(metricDate, { total_manual_edits: 1 });
     }
 };
+
+// ════════════════════════════════════════════════════════════════
+// ERROR LOGGING: Log errors to Supabase for debugging
+// ════════════════════════════════════════════════════════════════
+export interface ErrorLogEntry {
+    message: string;
+    stack?: string;
+    context?: Record<string, any>;
+    source?: string;
+    severity?: 'error' | 'warning' | 'info';
+    url?: string;
+}
+
+export const logError = async (error: ErrorLogEntry): Promise<void> => {
+    if (!supabase) {
+        console.warn('[logError] Supabase not configured, logging to console only:', error);
+        return;
+    }
+
+    try {
+        const { error: insertError } = await supabase.from('error_logs').insert([{
+            message: error.message,
+            stack: error.stack || null,
+            context: error.context || {},
+            source: error.source || 'maria-notes-app',
+            severity: error.severity || 'error',
+            url: error.url || (typeof window !== 'undefined' ? window.location.href : null),
+            created_at: new Date().toISOString()
+        }]);
+
+        if (insertError) {
+            console.error('[logError] Failed to log error to Supabase:', insertError);
+        } else {
+            console.log('[logError] Error logged to Supabase:', error.message);
+        }
+    } catch (e) {
+        console.error('[logError] Exception while logging error:', e);
+    }
+};
