@@ -32,34 +32,34 @@ export const useSimulation = () => {
 const SCRIPT: SimulationStep[] = [
     {
         id: 'intro',
-        duration: 3000,
+        duration: 4000,
         caption: "Bienvenida, Dra. Gotxi. Vamos a ver una consulta completa desde cero."
     },
     // Phase 1: Processing
     {
         id: 'processing_1',
-        duration: 4000,
-        caption: "1. Procesando Audio: Whisper v3 transcribe mientras Llama-3-70b empieza a estructurar.",
+        duration: 5000,
+        caption: "1. Procesando Audio: Whisper v3 transcribe... Llama-3 estructura los datos médicos...",
         action: () => {
             // In a real app we might blur the screen or show a loader here
         }
     },
     {
         id: 'processing_2',
-        duration: 4000,
+        duration: 5000,
         caption: "2. Validación Clínica: Qwen-2.5-Med audita el resultado buscando alucinaciones o errores."
     },
     // Phase 2: Uncertainty
     {
         id: 'wait_for_highlight',
         targetId: 'uncertainty-highlight-0',
-        duration: 2500,
+        duration: 4000,
         caption: "3. Detección de Dudas: La IA marca en amarillo un dato ambiguo ('hipoacusia') para tu revisión."
     },
     {
         id: 'click_highlight',
         targetId: 'uncertainty-highlight-0',
-        duration: 1000,
+        duration: 1500,
         action: () => {
             const el = document.getElementById('uncertainty-highlight-0');
             if (el) el.click();
@@ -69,13 +69,13 @@ const SCRIPT: SimulationStep[] = [
     {
         id: 'wait_for_modal',
         targetId: 'evidence-modal-confirm-btn',
-        duration: 3000,
-        caption: "Aquí ves la transcripción exacta. Tú tienes la última palabra."
+        duration: 5000,
+        caption: "Aquí ves la transcripción exacta. Tú tienes la última palabra sobre qué guardar."
     },
     {
         id: 'click_confirm',
         targetId: 'evidence-modal-confirm-btn',
-        duration: 1000,
+        duration: 1500,
         action: () => {
             const el = document.getElementById('evidence-modal-confirm-btn');
             if (el) el.click();
@@ -86,13 +86,13 @@ const SCRIPT: SimulationStep[] = [
     {
         id: 'move_to_edit',
         targetId: 'edit-mode-btn',
-        duration: 2000,
+        duration: 3000,
         caption: "¿No te gusta el estilo o falta algo? Dale a 'Editar'."
     },
     {
         id: 'click_edit',
         targetId: 'edit-mode-btn',
-        duration: 1000,
+        duration: 1500,
         action: () => {
             const el = document.getElementById('edit-mode-btn');
             if (el) el.click();
@@ -101,28 +101,27 @@ const SCRIPT: SimulationStep[] = [
     },
     {
         id: 'simulate_typing',
-        targetId: 'save-edit-btn', // Move cursor near safe button while "typing"
-        duration: 3000,
-        caption: "Haces tus cambios... (Simulación: modificando estructura)",
+        targetId: 'save-edit-btn',
+        duration: 6000,
+        caption: "Modificas el texto... (La IA observa cómo prefieres estructurar la 'Enfermedad Actual')",
         action: () => {
-            // Optional: Could simulate typing if we had a ref to textarea, 
-            // but for now just the caption implies it.
+            // Typing simulation logic if needed
         }
     },
     {
         id: 'click_save',
         targetId: 'save-edit-btn',
-        duration: 1000,
+        duration: 2000,
         action: () => {
             const el = document.getElementById('save-edit-btn');
             if (el) el.click();
         },
-        caption: "Al guardar, la IA compara tu versión con la suya."
+        caption: "Guardando cambios..."
     },
     {
         id: 'finish_learning',
-        duration: 5000,
-        caption: "¡Aprendido! Tus preferencias de estilo se aplicarán automáticamente en la próxima consulta."
+        duration: 7000,
+        caption: "¡Analizando correcciones! He actualizado mis parámetros para que la próxima nota use TU estructura preferida."
     },
     {
         id: 'finish',
