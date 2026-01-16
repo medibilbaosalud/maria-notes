@@ -689,6 +689,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       )}
                       <button
                         className="action-button secondary"
+                        id="edit-mode-btn"
                         onClick={handleEditClick}
                         title="Editar texto"
                       >
@@ -752,7 +753,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         <X size={16} />
                         <span>Cancelar</span>
                       </button>
-                      <button className="action-button primary success" onClick={handleSaveEdit}>
+                      <button className="action-button primary success" id="save-edit-btn" onClick={handleSaveEdit}>
                         <Check size={16} />
                         <span>Guardar</span>
                       </button>
