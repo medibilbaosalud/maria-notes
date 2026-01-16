@@ -8,6 +8,7 @@ import { HistoryView } from './components/HistoryView';
 
 import { Settings } from './components/Settings';
 import { AIService } from './services/ai';
+
 import { ReportsView } from './components/ReportsView';
 import type { ExtractionResult, ExtractionMeta, ConsultationClassification, UncertaintyFlag } from './services/groq';
 import { saveLabTestLog } from './services/storage';
@@ -16,9 +17,11 @@ import { AudioTestLab } from './components/AudioTestLab';
 import LessonsPanel from './components/LessonsPanel';
 import { MemoryService } from './services/memory';
 import { WhatsNewModal } from './components/WhatsNewModal';
+import { SimulationProvider, useSimulation } from './components/Simulation/SimulationContext';
+import { SimulationOverlay } from './components/Simulation/SimulationOverlay';
 
 import './App.css';
-import { Brain, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { Brain, ShieldCheck, Sparkles, X, PlayCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // API Key from environment variable
@@ -39,6 +42,14 @@ const getApiKeys = (userKey: string) => {
 // NEW: WELCOME MODAL FOR DRA. GOTXI (30 DEC 2025)
 // ════════════════════════════════════════════════════════════════
 const WelcomeDraGotxiModal = ({ onClose }: { onClose: () => void }) => {
+    const { startSimulation } = useSimulation();
+
+    const handleStartDemo = () => {
+        // Close modal first
+        onClose();
+        // Small delay to allow fade out before starting
+        setTimeout(() => startSimulation(), 300);
+    };
     return (
         <div style={{
             position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999,
@@ -112,19 +123,31 @@ const WelcomeDraGotxiModal = ({ onClose }: { onClose: () => void }) => {
                     </div>
                 </div>
 
-                <button onClick={onClose} style={{
-                    width: '100%', padding: '1rem', marginTop: '2rem', background: '#0f766e', color: 'white',
-                    border: 'none', borderRadius: '12px', fontSize: '1.1rem', fontWeight: 600, cursor: 'pointer',
-                    boxShadow: '0 4px 6px -1px rgba(15, 118, 110, 0.2)'
-                }}>
-                    Entendido, ¡vamos a consulta! 🚀
-                </button>
+                <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
+                    <button onClick={handleStartDemo} style={{
+                        flex: 1, padding: '1rem', background: '#3b82f6', color: 'white',
+                        border: 'none', borderRadius: '12px', fontSize: '1.1rem', fontWeight: 600, cursor: 'pointer',
+                        boxShadow: '0 4px 6px -1px rgba(59, 130, 246, 0.3)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                    }}>
+                        <PlayCircle size={20} />
+                        Ver Demo Interactiva
+                    </button>
+
+                    <button onClick={onClose} style={{
+                        flex: 1, padding: '1rem', background: '#0f766e', color: 'white',
+                        border: 'none', borderRadius: '12px', fontSize: '1.1rem', fontWeight: 600, cursor: 'pointer',
+                        boxShadow: '0 4px 6px -1px rgba(15, 118, 110, 0.2)'
+                    }}>
+                        ¡Vamos a consulta! 🚀
+                    </button>
+                </div>
             </motion.div>
         </div>
     );
 };
 
-function App() {
+const AppContent = () => {
     const [apiKey, setApiKey] = useState<string>(GROQ_API_KEY);
     const [showSettings, setShowSettings] = useState(false);
     const [history, setHistory] = useState<string>('');
@@ -150,6 +173,24 @@ function App() {
     const [showWelcomeModal, setShowWelcomeModal] = useState(false);
     const [showWhatsNew, setShowWhatsNew] = useState(false);
     const [currentRecordId, setCurrentRecordId] = useState<string | null>(null);
+
+    const { isPlaying, demoData } = useSimulation();
+
+    // Effect to handle Simulation Mode Data Injection
+    useEffect(() => {
+        if (isPlaying && demoData) {
+            setCurrentView('result');
+            setHistory(demoData.history);
+            setCurrentPatientName(demoData.patientName);
+            setPipelineMetadata(demoData.pipelineMetadata);
+        } else if (!isPlaying && currentPatientName === "Paciente Demo (Simulación)") {
+            // Reset when stopping demo
+            setCurrentView('record');
+            setHistory('');
+            setCurrentPatientName('');
+            setPipelineMetadata(undefined);
+        }
+    }, [isPlaying, demoData]);
 
 
     // ════════════════════════════════════════════════════════════════
@@ -477,16 +518,14 @@ function App() {
         }
     }
 
-
-
     return (
         <div className="app-container">
+            <SimulationOverlay />
             <AnimatePresence>
                 {showWelcomeModal && (
                     <WelcomeDraGotxiModal onClose={() => setShowWelcomeModal(false)} />
                 )}
             </AnimatePresence>
-
             <AnimatePresence>
                 {showWhatsNew && (
                     <WhatsNewModal onClose={() => setShowWhatsNew(false)} />
@@ -534,16 +573,16 @@ function App() {
                 )}
 
                 {currentView === 'history' && (
-                <SearchHistory
-                    apiKey={apiKey}
-                    onLoadRecord={(record) => {
-                        setHistory(record.medical_history);
-                        setTranscription(record.transcription || '');
-                        setCurrentPatientName(record.patient_name);
-                        setCurrentRecordId(record.id || null);
+                    <SearchHistory
+                        apiKey={apiKey}
+                        onLoadRecord={(record) => {
+                            setHistory(record.medical_history);
+                            setTranscription(record.transcription || '');
+                            setCurrentPatientName(record.patient_name);
+                            setCurrentRecordId(record.id || null);
 
-                        // Set metadata if relevant, though legacy records might lack it
-                        setCurrentView('result');
+                            // Set metadata if relevant, though legacy records might lack it
+                            setCurrentView('result');
                         }}
                     />
                 )}
@@ -609,8 +648,16 @@ function App() {
                     />
                 )}
             </Layout>
-        </div>
+        </div >
     );
 }
+
+const App = () => {
+    return (
+        <SimulationProvider>
+            <AppContent />
+        </SimulationProvider>
+    );
+};
 
 export default App;

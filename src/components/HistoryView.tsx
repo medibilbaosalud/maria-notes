@@ -553,6 +553,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       parts.push(
         <button
           key={`${match.fieldPath}-${match.start}-${idx}`}
+          id={`uncertainty-highlight-${idx}`}
           type="button"
           className="uncertainty-highlight"
           onClick={() => openEvidence(match.fieldPath)}
@@ -739,6 +740,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         className={`action-button primary ${hasFinalized ? 'success' : ''}`}
                         onClick={() => setHasFinalized(true)}
                         title="Finalizar historia"
+                        id="finalize-btn"
                       >
                         <Check size={16} />
                         <span>{hasFinalized ? 'Finalizado' : 'Finalizar'}</span>
@@ -1123,6 +1125,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       <div className="modal-actions">
                         <button
                           className="flag-action confirm"
+                          id="evidence-modal-confirm-btn"
                           type="button"
                           onClick={() => {
                             handleFlagDecision(selectedUncertaintyFlag, true);
