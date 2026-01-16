@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useRef, useEffect, ReactNode } from 'react';
 import { simulationData } from './simulationData';
-import { AppState, useApp } from '../../hooks/useApp'; // Assuming useApp exists or we just manage local state
 
 type SimulationStep = {
     id: 'intro' | 'wait_for_highlight' | 'click_highlight' | 'wait_for_modal' | 'click_confirm' | 'wait_for_save' | 'finish';

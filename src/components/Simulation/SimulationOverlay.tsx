@@ -2,7 +2,7 @@ import React from 'react';
 import { useSimulation } from './SimulationContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GhostCursor } from './GhostCursor';
-import { X, Play } from 'lucide-react';
+import { X } from 'lucide-react';
 
 export const SimulationOverlay: React.FC = () => {
     const { isPlaying, currentStep, stopSimulation, cursorPosition } = useSimulation();

@@ -34,7 +34,8 @@ Extracción de cerumen mediante lavado con agua templada. Se comprueba integrida
             {
                 field_path: "motivo_consulta",
                 value: "hipoacusia",
-                reason: "¿Confirmas que el paciente usó el término médico 'hipoacusia' o dijo 'sordera'?"
+                reason: "¿Confirmas que el paciente usó el término médico 'hipoacusia' o dijo 'sordera'?",
+                severity: "medium" as "medium"
             }
         ],
         extractionMeta: [
@@ -44,6 +45,7 @@ Extracción de cerumen mediante lavado con agua templada. Se comprueba integrida
                     {
                         field_path: "motivo_consulta",
                         value: "hipoacusia",
+                        chunk_id: "demo_chunk_1",
                         evidence_snippet: "...noto como una hipoacusia, como que no oigo bien...",
                         confidence: 0.85
                     }
