@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Save, Key, Download, Upload, Check, AlertCircle, Cloud, CloudOff } from 'lucide-react';
+import { X, Save, Key, Download, Upload, Check, AlertCircle, Cloud, CloudOff, Play } from 'lucide-react';
 import { downloadBackup, importRecords } from '../services/backup';
 import { useCloudSync } from '../hooks/useCloudSync';
+import { useSimulation } from './Simulation/SimulationContext';
 
 interface SettingsProps {
   apiKey: string;
@@ -15,6 +16,7 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
   const [backupStatus, setBackupStatus] = useState<'idle' | 'exporting' | 'importing' | 'success' | 'error'>('idle');
   const [backupMessage, setBackupMessage] = useState('');
   const { isCloudEnabled, toggleCloud } = useCloudSync();
+  const { startSimulation } = useSimulation();
 
   useEffect(() => {
     setKey(apiKey);
@@ -162,6 +164,23 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
                   ⚠️ Al activar esto, los datos médicos saldrán de este dispositivo.
                 </p>
               )}
+            </div>
+
+            {/* Help & Tutorials Section - NEW */}
+            <div className="form-group help-section">
+              <label>Ayuda y Tutoriales</label>
+              <button
+                type="button"
+                className="btn-backup"
+                style={{ width: '100%', justifyContent: 'center', marginTop: '0.5rem', background: '#f0fdfa', borderColor: '#ccfbf1', color: '#0f766e' }}
+                onClick={() => {
+                  startSimulation();
+                  onClose();
+                }}
+              >
+                <Play size={18} />
+                Ver Demo Interactiva (Auto-Pilot)
+              </button>
             </div>
           </div>
 
