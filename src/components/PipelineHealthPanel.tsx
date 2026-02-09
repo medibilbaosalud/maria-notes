@@ -85,6 +85,16 @@ export const PipelineHealthPanel = () => {
     ? Math.round(metrics.queue_wait.total_ms / metrics.queue_wait.count)
     : 0;
 
+  const stageSummaries = Object.entries(metrics.stage_latency)
+    .map(([stage, value]) => ({
+      stage,
+      avg: value.count > 0 ? Math.round(value.total_ms / value.count) : 0,
+      max: Math.round(value.max_ms || 0),
+      count: value.count
+    }))
+    .sort((a, b) => b.avg - a.avg)
+    .slice(0, 4);
+
   const topDegradation = Object.entries(metrics.degradation_causes)
     .sort((a, b) => b[1] - a[1])[0];
 
@@ -134,6 +144,16 @@ export const PipelineHealthPanel = () => {
         <span className="pipeline-health-chip">Conflictos: {metrics.rule_conflict_incidents}</span>
         <span className="pipeline-health-chip">Budget excedido: {metrics.rule_pack_token_budget_exceeded}</span>
       </div>
+
+      {stageSummaries.length > 0 && (
+        <div className="pipeline-health-stage-grid">
+          {stageSummaries.map((stage) => (
+            <span key={stage.stage} className="pipeline-health-chip stage-latency">
+              {stage.stage}: avg {stage.avg} ms / max {stage.max} ms ({stage.count})
+            </span>
+          ))}
+        </div>
+      )}
 
       {topDegradation && (
         <div className="pipeline-health-warning">
@@ -218,6 +238,19 @@ export const PipelineHealthPanel = () => {
 
         .pipeline-health-chip-row.compact .pipeline-health-chip {
           font-size: 0.75rem;
+        }
+
+        .pipeline-health-stage-grid {
+          margin-top: 0.45rem;
+          display: flex;
+          gap: 0.45rem;
+          flex-wrap: wrap;
+        }
+
+        .pipeline-health-chip.stage-latency {
+          background: #f0f9ff;
+          border-color: #bae6fd;
+          color: #0c4a6e;
         }
 
         .pipeline-health-warning {

@@ -49,10 +49,7 @@ const DEFAULT_HISTORY_TEMPLATE = `Usa EXACTAMENTE este formato (Markdown). No aÃ
 {diagnostico}
 
 ## PLAN
-{plan}
-
-## INCERTIDUMBRES / REVISAR (si aplica)
-{notas_calidad}`;
+{plan}`;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -98,21 +95,24 @@ const THINKING_BUDGET: Record<'low' | 'medium', number> = {
     medium: 1024
 };
 
+const FAST_PATH_TOKEN_BUDGETS = String(import.meta.env.VITE_FAST_PATH_TOKEN_BUDGETS || 'true').toLowerCase() === 'true';
+const FAST_PATH_ADAPTIVE_VALIDATION = String(import.meta.env.VITE_FAST_PATH_ADAPTIVE_VALIDATION || 'true').toLowerCase() === 'true';
+
 const TASK_MAX_OUTPUT_TOKENS: Partial<Record<TaskType, number>> = {
     extraction: 900,
     classification: 350,
     semantic_check: 450,
     prompt_guard: 250,
     merge: 1400,
-    validation_a: 1400,
-    validation_b: 1400,
+    validation_a: 800,
+    validation_b: 800,
     quality_triage: 900,
     memory: 900,
     feedback: 900,
     rule_categorization: 1000,
     report: 2200,
     json_repair: 1400,
-    generation: 2600
+    generation: 1500
 };
 
 export interface ExtractionResult {
@@ -195,6 +195,7 @@ export interface ValidationResult {
     is_valid: boolean;
     errors: ValidationError[];
     confidence: number;
+    risk_level?: 'low' | 'medium' | 'high';
 }
 
 export interface PipelineResult {
@@ -832,9 +833,11 @@ ${schemaHint}`;
             } catch (error) {
                 lastError = error;
                 const status = this.getErrorStatus(error);
-                if (status === 401 || status === 429) continue;
+                const transientStatus = status === 401 || status === 429 || status === 408 || (typeof status === 'number' && status >= 500);
+                const networkLike = typeof status !== 'number';
+                if (transientStatus || networkLike) continue;
                 if (error instanceof BudgetExceededError) throw error;
-                await this.delay(300);
+                throw error;
             }
         }
 
@@ -850,7 +853,9 @@ ${schemaHint}`;
             throw new Error(`No models configured for task: ${options.task}`);
         }
 
-        const taskCap = TASK_MAX_OUTPUT_TOKENS[options.task] || this.getDefaultMaxTokens(options.task);
+        const taskCap = FAST_PATH_TOKEN_BUDGETS
+            ? (TASK_MAX_OUTPUT_TOKENS[options.task] || this.getDefaultMaxTokens(options.task))
+            : this.getDefaultMaxTokens(options.task);
         const requestedMaxTokens = options.maxTokens ?? this.getDefaultMaxTokens(options.task);
         const maxTokens = Math.max(64, Math.min(requestedMaxTokens, taskCap));
         let lastError: unknown = null;
@@ -1219,14 +1224,14 @@ ${schemaHint}`;
         const toRuleLines = (rules: typeof rulePackContext.applied_rules) =>
             rules.map((rule) => `- (${rule.confidence.toFixed(2)}|p=${rule.priority.toFixed(2)}) ${rule.text}`).join('\n');
 
-        const globalRules = this.trimToTokens(rulePackContext.prompt_context || 'Ninguna', 850);
+        const globalRules = this.trimToTokens(rulePackContext.prompt_context || 'Ninguna', FAST_PATH_TOKEN_BUDGETS ? 420 : 850);
         const dailyLessons = this.trimToTokens(
             rulePackContext.applied_rules
                 .sort((a, b) => b.priority - a.priority)
                 .slice(0, 8)
                 .map((rule) => `- ${rule.text}`)
                 .join('\n') || 'Ninguna',
-            450
+            FAST_PATH_TOKEN_BUDGETS ? 220 : 450
         );
         const terminologyRules = toRuleLines(rulesByCategory.terminology);
         const formattingRules = toRuleLines(rulesByCategory.formatting);
@@ -1254,9 +1259,9 @@ Reglas obligatorias:
 - Si un campo de antecedentes (alergias, enfermedades_cronicas, cirugias, tratamiento_habitual) esta vacio, null o [], escribe "Niega" o "No refiere" segun corresponda.
 - Si otro campo esta vacio o null, escribe "No consta" (no lo completes con suposiciones).
 - En "EXPLORACION / PRUEBAS": si el objeto esta vacio, escribe "Sin hallazgos relevantes" o "No realizado" (elige el mas neutro).
-- En "INCERTIDUMBRES / REVISAR": si notas_calidad esta vacio o no existe, escribe "Sin incidencias".
 - Evita agregar datos no mencionados en la transcripcion.
 - Mantiene consistencia clinica interna (sin contradicciones entre secciones).
+- NO incluyas informacion tecnica interna (clasificacion, rulepack, aprendizaje, notas del sistema).
 ${errorsBlock}
 
 FORMATO OBLIGATORIO:
@@ -1294,7 +1299,10 @@ DATOS (JSON):
 ${JSON.stringify(extraction, null, 2)}`;
 
         const temperature = previousErrors && previousErrors.length > 0 ? 0.1 : 0.2;
-        const result = await this.callTaskModel('generation', prompt, { temperature, maxTokens: 2200 });
+        const generationTokens = FAST_PATH_TOKEN_BUDGETS
+            ? (previousErrors && previousErrors.length > 0 ? 1900 : 1500)
+            : 2200;
+        const result = await this.callTaskModel('generation', prompt, { temperature, maxTokens: generationTokens });
         return {
             ...result,
             active_memory_used: activeMemoryUsed,
@@ -1386,14 +1394,48 @@ ${JSON.stringify(extraction, null, 2)}`;
     }
 
     private mergeValidationErrors(validations: ValidationResult[]): ValidationError[] {
-        const merged = new Map<string, ValidationError>();
+        const merged = new Map<string, { error: ValidationError; votes: number; validators: Set<string> }>();
         for (const validation of validations) {
             for (const error of validation.errors || []) {
                 const key = `${error.type}|${error.field}|${error.field_value || ''}|${error.reason || ''}`;
-                if (!merged.has(key)) merged.set(key, error);
+                const existing = merged.get(key);
+                if (!existing) {
+                    merged.set(key, {
+                        error,
+                        votes: 1,
+                        validators: new Set([validation.validator || 'unknown'])
+                    });
+                    continue;
+                }
+                existing.votes += 1;
+                existing.validators.add(validation.validator || 'unknown');
             }
         }
-        return Array.from(merged.values());
+        const output: ValidationError[] = [];
+        for (const entry of merged.values()) {
+            const isCoverageGuard = entry.validators.has('coverage_guard');
+            const needsStrongSignal = entry.error.type === 'hallucination' || entry.error.type === 'inconsistency';
+            if (isCoverageGuard || !needsStrongSignal || entry.votes >= 2) {
+                output.push(entry.error);
+            }
+        }
+        return output;
+    }
+
+    private severityWeight(severity?: string): number {
+        if (severity === 'critical') return 3;
+        if (severity === 'major') return 2;
+        return 1;
+    }
+
+    private deriveRiskLevel(errors: ValidationError[]): 'low' | 'medium' | 'high' {
+        if (!errors || errors.length === 0) return 'low';
+        const hasHighType = errors.some((error) =>
+            (error.type === 'hallucination' || error.type === 'inconsistency') && this.severityWeight(error.severity) >= 2
+        );
+        if (hasHighType) return 'high';
+        const totalWeight = errors.reduce((acc, error) => acc + this.severityWeight(error.severity), 0);
+        return totalWeight >= 4 ? 'medium' : 'low';
     }
 
     private mergeStringLists(a: string[] | null, b: string[] | null): string[] | null {
@@ -1762,18 +1804,18 @@ Reglas:
 - Si falta un dato critico de la extraccion en la historia, marca missing.
 - Si hay contradiccion, marca inconsistency.
 - No marques como hallucination frases de negacion/relleno ("No consta", "Niega", "No refiere", "Sin hallazgos relevantes", "Sin incidencias") si no afirman hechos positivos.
-- La seccion "INCERTIDUMBRES / REVISAR" puede contener notas_calidad del JSON; eso NO es alucinacion si coincide con dichas notas.
+- La historia final NO debe incluir secciones tecnicas (clasificacion/rulepack/incertidumbres del sistema).
 - Cada error debe incluir field, reason concreta y, si existe, evidence_snippet.
 - Si no hay error real, devuelve errors=[] e is_valid=true.
 
 REGLAS TERMINOLOGIA:
-${this.trimToTokens(terminologyRules || 'Ninguna', 400)}
+${this.trimToTokens(terminologyRules || 'Ninguna', FAST_PATH_TOKEN_BUDGETS ? 220 : 400)}
 
 REGLAS FORMATO:
-${this.trimToTokens(formattingRules || 'Ninguna', 300)}
+${this.trimToTokens(formattingRules || 'Ninguna', FAST_PATH_TOKEN_BUDGETS ? 180 : 300)}
 
 REGLAS CLINICAS:
-${this.trimToTokens(clinicalRules || 'Ninguna', 400)}
+${this.trimToTokens(clinicalRules || 'Ninguna', FAST_PATH_TOKEN_BUDGETS ? 260 : 400)}
 
 EVIDENCIA DEL TEXTO (fragmentos relevantes):
 ${evidenceBlock}
@@ -1795,11 +1837,11 @@ MODO SKEPTICAL:
 - Revisa negaciones y temporalidad de forma agresiva.
 - Si no encuentras errores, responde OK con errors vacio.`;
 
-        const runValidator = async (task: TaskType, promptText: string) => {
+        const runValidator = async (task: TaskType, promptText: string): Promise<ValidationResult> => {
             try {
                 const result = await this.callTaskModel(task, promptText, { temperature: 0, jsonMode: true });
                 const parsed = await this.parseJsonWithRepair(result.text, schemaHint) as any;
-                const errors = Array.isArray(parsed.errors)
+                const errors: ValidationError[] = Array.isArray(parsed.errors)
                     ? parsed.errors.map((error: Record<string, unknown>) => ({
                         type: error.type as ValidationError['type'],
                         field: String(error.field || 'unknown'),
@@ -1820,7 +1862,8 @@ MODO SKEPTICAL:
                     validator: result.model,
                     is_valid: Boolean(parsed.is_valid),
                     errors,
-                    confidence
+                    confidence,
+                    risk_level: this.deriveRiskLevel(errors)
                 };
             } catch (error) {
                 return {
@@ -1828,12 +1871,13 @@ MODO SKEPTICAL:
                     is_valid: false,
                     errors: [
                         {
-                            type: 'inconsistency',
+                            type: 'inconsistency' as const,
                             field: 'validator',
                             reason: 'validator_output_unparseable'
                         }
                     ],
-                    confidence: 0
+                    confidence: 0,
+                    risk_level: 'high'
                 };
             }
         };
@@ -1845,6 +1889,16 @@ MODO SKEPTICAL:
 
         const validations = [validationA, validationB];
         const coverageErrors = this.evaluateCriticalCoverage(generatedHistory, extraction);
+        if (FAST_PATH_ADAPTIVE_VALIDATION) {
+            const bothCleanHighConfidence =
+                validationA.errors.length === 0 &&
+                validationB.errors.length === 0 &&
+                validationA.confidence >= 0.8 &&
+                validationB.confidence >= 0.8;
+            if (bothCleanHighConfidence) {
+                return { validations, consensus: [] };
+            }
+        }
         const merged = this.mergeValidationErrors([
             ...validations,
             {
@@ -1877,7 +1931,7 @@ MODO SKEPTICAL:
             if (criticalGaps.length > 0) {
                 actions.push(`Revisar primero: ${criticalGaps[0].field.replace(/_/g, ' ')}`);
             }
-            actions.push('Confirmar datos en INCERTIDUMBRES / REVISAR');
+            actions.push('Revisar panel de incertidumbres antes de finalizar');
             actions.push('Finalizar solo cuando no queden gaps criticos');
             return {
                 quality_score: qualityScore,
@@ -1920,7 +1974,7 @@ ${schemaHint}`;
             const result = await this.callTaskModel('quality_triage', prompt, {
                 temperature: 0,
                 jsonMode: true,
-                maxTokens: 800
+                maxTokens: FAST_PATH_TOKEN_BUDGETS ? 500 : 800
             });
             const parsed = await this.parseJsonWithRepair<any>(result.text, schemaHint);
             const qualityScoreRaw = Number(parsed?.quality_score ?? 0);

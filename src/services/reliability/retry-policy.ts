@@ -13,6 +13,8 @@ export interface StageRetryPolicy {
     maxDelayMs: number;
 }
 
+const FAST_PATH_RETRY_TUNING = String(import.meta.env.VITE_FAST_PATH_RETRY_TUNING || 'true').toLowerCase() === 'true';
+
 const RETRY_POLICY: Record<RetryStage, StageRetryPolicy> = {
     transcription: {
         retries: 5,
@@ -27,14 +29,14 @@ const RETRY_POLICY: Record<RetryStage, StageRetryPolicy> = {
         maxDelayMs: 8_000
     },
     generation: {
-        retries: 4,
-        timeoutMs: 90_000,
+        retries: FAST_PATH_RETRY_TUNING ? 2 : 4,
+        timeoutMs: FAST_PATH_RETRY_TUNING ? 45_000 : 90_000,
         baseDelayMs: 350,
         maxDelayMs: 8_000
     },
     validation: {
-        retries: 4,
-        timeoutMs: 90_000,
+        retries: FAST_PATH_RETRY_TUNING ? 2 : 4,
+        timeoutMs: FAST_PATH_RETRY_TUNING ? 45_000 : 90_000,
         baseDelayMs: 350,
         maxDelayMs: 8_000
     },

@@ -52,6 +52,10 @@ const RULEPACK_APPLY_ENABLED = String(import.meta.env.VITE_RULEPACK_APPLY_ENABLE
 const RULE_AUTO_PROMOTE_ENABLED = String(import.meta.env.VITE_RULE_AUTO_PROMOTE_ENABLED || 'true').toLowerCase() === 'true';
 const QUALITY_TRIAGE_ENABLED = String(import.meta.env.VITE_QUALITY_TRIAGE_ENABLED || 'true').toLowerCase() === 'true';
 const SECTION_REGEN_ENABLED = String(import.meta.env.VITE_SECTION_REGEN_ENABLED || 'true').toLowerCase() === 'true';
+const FAST_PATH_ADAPTIVE_VALIDATION = String(import.meta.env.VITE_FAST_PATH_ADAPTIVE_VALIDATION || 'true').toLowerCase() === 'true';
+const FAST_PATH_TOKEN_BUDGETS = String(import.meta.env.VITE_FAST_PATH_TOKEN_BUDGETS || 'true').toLowerCase() === 'true';
+const FAST_PATH_RETRY_TUNING = String(import.meta.env.VITE_FAST_PATH_RETRY_TUNING || 'true').toLowerCase() === 'true';
+const FAST_PATH_ASYNC_TRIAGE = String(import.meta.env.VITE_FAST_PATH_ASYNC_TRIAGE || 'true').toLowerCase() === 'true';
 
 // Helper to get key array
 const getApiKeys = (userKey: string) => {
@@ -105,6 +109,16 @@ const AppContent = () => {
         criticalGaps?: { field: string; reason: string; severity: 'critical' | 'major' | 'minor' }[];
         doctorNextActions?: string[];
         qualityTriageModel?: string;
+        correctionRoundsExecuted?: number;
+        earlyStopReason?: 'clean_consensus' | 'low_risk_remaining' | 'max_rounds_reached';
+        riskLevel?: 'low' | 'medium' | 'high';
+        phaseTimingsMs?: { extract: number; generate: number; validate: number; corrections: number; total: number };
+        fastPathConfig?: {
+            adaptiveValidation: boolean;
+            tokenBudgets: boolean;
+            retryTuning: boolean;
+            asyncTriage: boolean;
+        };
     } | undefined>(undefined);
     const [showLessons, setShowLessons] = useState(false);
     const [showWelcomeModal, setShowWelcomeModal] = useState(false);
@@ -686,7 +700,17 @@ const AppContent = () => {
             qualityScore: result.quality_score,
             criticalGaps: result.critical_gaps,
             doctorNextActions: result.doctor_next_actions,
-            qualityTriageModel: result.quality_triage_model
+            qualityTriageModel: result.quality_triage_model,
+            correctionRoundsExecuted: result.correction_rounds_executed,
+            earlyStopReason: result.early_stop_reason,
+            riskLevel: result.risk_level,
+            phaseTimingsMs: result.phase_timings_ms,
+            fastPathConfig: {
+                adaptiveValidation: FAST_PATH_ADAPTIVE_VALIDATION,
+                tokenBudgets: FAST_PATH_TOKEN_BUDGETS,
+                retryTuning: FAST_PATH_RETRY_TUNING,
+                asyncTriage: FAST_PATH_ASYNC_TRIAGE
+            }
         });
 
         if (sessionId) {
@@ -1122,7 +1146,17 @@ const AppContent = () => {
                 qualityScore: result.quality_score,
                 criticalGaps: result.critical_gaps,
                 doctorNextActions: result.doctor_next_actions,
-                qualityTriageModel: result.quality_triage_model
+                qualityTriageModel: result.quality_triage_model,
+                correctionRoundsExecuted: result.correction_rounds_executed,
+                earlyStopReason: result.early_stop_reason,
+                riskLevel: result.risk_level,
+                phaseTimingsMs: result.phase_timings_ms,
+                fastPathConfig: {
+                    adaptiveValidation: FAST_PATH_ADAPTIVE_VALIDATION,
+                    tokenBudgets: FAST_PATH_TOKEN_BUDGETS,
+                    retryTuning: FAST_PATH_RETRY_TUNING,
+                    asyncTriage: FAST_PATH_ASYNC_TRIAGE
+                }
             });
 
             setProcessingStatus('Guardando consulta de prueba en Historial...');
