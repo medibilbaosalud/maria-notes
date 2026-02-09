@@ -1,3 +1,12 @@
+/**
+ * Settings Component
+ * 
+ * Provides an interface for configuring the application, including:
+ * - Groq API key management
+ * - Biological data backup (Export/Import)
+ * - Cloud synchronization with Supabase
+ * - Interactive demo/simulation controls
+ */
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Save, Key, Download, Upload, Check, AlertCircle, Cloud, CloudOff, Play } from 'lucide-react';
 import { downloadBackup, importRecords } from '../services/backup';
