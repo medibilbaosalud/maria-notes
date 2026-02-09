@@ -509,7 +509,7 @@ export const loadRecoverableSession = async (sessionId?: string) => {
     } else {
         session = await db.consultation_sessions
             .where('status')
-            .anyOf('recording', 'uploading_chunks', 'extracting', 'finalizing', 'awaiting_budget', 'provisional')
+            .anyOf('recording', 'uploading_chunks', 'transcribing_partial', 'extracting', 'finalizing', 'awaiting_budget', 'provisional')
             .reverse()
             .sortBy('updated_at')
             .then((rows) => rows[rows.length - 1]);
@@ -537,7 +537,7 @@ export const getRecoverableSessions = async (): Promise<ConsultationSession[]> =
     const now = nowIso();
     const sessions = await db.consultation_sessions
         .where('status')
-        .anyOf('recording', 'uploading_chunks', 'extracting', 'finalizing', 'awaiting_budget', 'provisional')
+        .anyOf('recording', 'uploading_chunks', 'transcribing_partial', 'extracting', 'finalizing', 'awaiting_budget', 'provisional')
         .toArray();
     return sessions.filter((session) => session.ttl_expires_at >= now);
 };
@@ -606,7 +606,7 @@ export const getPipelineHealthSnapshot = async () => {
         db.pipeline_failures.orderBy('created_at').reverse().limit(50).toArray()
     ]);
 
-    const active = sessions.filter((s) => ['recording', 'uploading_chunks', 'extracting', 'finalizing', 'awaiting_budget'].includes(s.status)).length;
+    const active = sessions.filter((s) => ['recording', 'uploading_chunks', 'transcribing_partial', 'extracting', 'finalizing', 'awaiting_budget'].includes(s.status)).length;
     const provisional = sessions.filter((s) => s.status === 'provisional').length;
     const deadLetters = outbox.filter((item) => item.status === 'dead_letter').length;
     const nextAttempt = sessions

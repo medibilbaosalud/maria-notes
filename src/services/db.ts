@@ -55,7 +55,7 @@ export interface ConsultationSession {
     id?: number;
     session_id: string;
     patient_name: string;
-    status: 'preflight' | 'recording' | 'uploading_chunks' | 'extracting' | 'finalizing' | 'awaiting_budget' | 'provisional' | 'completed' | 'failed';
+    status: 'preflight' | 'recording' | 'uploading_chunks' | 'transcribing_partial' | 'extracting' | 'finalizing' | 'awaiting_budget' | 'provisional' | 'completed' | 'failed';
     result_status?: 'completed' | 'provisional' | 'failed_recoverable' | 'failed_final';
     last_batch_index: number;
     next_attempt_at?: string;

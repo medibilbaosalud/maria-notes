@@ -52,16 +52,34 @@ export interface AIResultWithMetadata extends AIResult<string> {
         corrections: number;
         total: number;
     };
+    logical_calls_used?: number;
+    physical_calls_used?: number;
+    call_budget_mode?: 'two_call_adaptive' | 'standard';
+    provisional_reason?: string;
+    fallback_hops?: number;
 }
 
 const FAST_PATH_ADAPTIVE_VALIDATION = String(import.meta.env.VITE_FAST_PATH_ADAPTIVE_VALIDATION || 'true').toLowerCase() === 'true';
 const FAST_PATH_ASYNC_TRIAGE = String(import.meta.env.VITE_FAST_PATH_ASYNC_TRIAGE || 'true').toLowerCase() === 'true';
+const TWO_CALL_ADAPTIVE_MODE = String(import.meta.env.VITE_TWO_CALL_ADAPTIVE_MODE || 'true').toLowerCase() === 'true';
 
 export class AIService {
     private groq: GroqService;
 
     constructor(groqApiKey: string | string[]) {
         this.groq = new GroqService(groqApiKey);
+    }
+
+    resetInvocationCounters(sessionId?: string): void {
+        this.groq.resetInvocationCounters(sessionId);
+    }
+
+    getInvocationCounters(sessionId?: string): {
+        total_invocations: number;
+        fallback_hops: number;
+        by_task: Record<string, number>;
+    } {
+        return this.groq.getInvocationCounters(sessionId);
     }
 
     private estimateTokens(text: string): number {
@@ -153,6 +171,90 @@ export class AIService {
         if (hasHighType) return 'high';
         const totalWeight = errors.reduce((acc, error) => acc + this.severityWeight(error.severity), 0);
         return totalWeight >= 4 ? 'medium' : 'low';
+    }
+
+    private runDeterministicClinicalGuard(
+        generatedHistory: string,
+        mergedExtraction: ExtractionResult
+    ): {
+        validations: ValidationResult[];
+        consensus: ValidationError[];
+    } {
+        const issues: ValidationError[] = [];
+        const text = generatedHistory || '';
+        // Strip accents/tildes to avoid false positives (e.g. EXPLORACIÓN vs EXPLORACION)
+        const stripAccents = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const normalized = stripAccents(text.toUpperCase());
+        const requiredSections = [
+            '## MOTIVO DE CONSULTA',
+            '## ANTECEDENTES',
+            '## ENFERMEDAD ACTUAL',
+            '## EXPLORACION / PRUEBAS',
+            '## DIAGNOSTICO',
+            '## PLAN'
+        ];
+
+        for (const section of requiredSections) {
+            if (!normalized.includes(stripAccents(section))) {
+                issues.push({
+                    type: 'missing',
+                    field: section.replace('## ', '').toLowerCase(),
+                    reason: `Falta seccion obligatoria: ${section}`,
+                    severity: section.includes('DIAGNOSTICO') || section.includes('PLAN') ? 'critical' : 'major'
+                });
+            }
+        }
+
+        if (/\{[^}]+\}/.test(text)) {
+            issues.push({
+                type: 'inconsistency',
+                field: 'template',
+                reason: 'Hay placeholders sin resolver en la historia final',
+                severity: 'critical'
+            });
+        }
+
+        const bannedInternalBlocks = [
+            '## INCERTIDUMBRES / REVISAR',
+            'CLASIFICACION (CONTEXTO',
+            'RULEPACK:',
+            'REGLAS DE APRENDIZAJE:'
+        ];
+        for (const marker of bannedInternalBlocks) {
+            if (normalized.includes(stripAccents(marker))) {
+                issues.push({
+                    type: 'hallucination',
+                    field: 'history_format',
+                    reason: `Bloque interno no permitido en historia final: ${marker}`,
+                    severity: 'critical'
+                });
+            }
+        }
+
+        const qualityNotes = mergedExtraction.notas_calidad || [];
+        for (const note of qualityNotes) {
+            if (note.tipo === 'INAUDIBLE' || note.tipo === 'AMBIGUO') {
+                issues.push({
+                    type: 'missing',
+                    field: note.seccion || 'transcripcion',
+                    reason: `[${note.tipo}] ${note.descripcion}`,
+                    severity: note.tipo === 'INAUDIBLE' ? 'major' : 'minor'
+                });
+            }
+        }
+
+        const risk = this.computeRiskLevel(issues);
+        const validation: ValidationResult = {
+            validator: 'deterministic_guard',
+            is_valid: issues.length === 0,
+            errors: issues,
+            confidence: issues.length === 0 ? 0.94 : Math.max(0.25, 0.86 - issues.length * 0.08),
+            risk_level: risk
+        };
+        return {
+            validations: [validation],
+            consensus: issues
+        };
     }
 
     private shouldEscalateCorrections(
@@ -251,7 +353,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
 
             const transcriptTokens = this.estimateTokens(fullTranscription);
             const hardMaxCorrections = transcriptTokens > 8000 ? 3 : 2;
-            let maxCorrections = FAST_PATH_ADAPTIVE_VALIDATION ? 1 : hardMaxCorrections;
+            let maxCorrections = TWO_CALL_ADAPTIVE_MODE ? 0 : (FAST_PATH_ADAPTIVE_VALIDATION ? 1 : hardMaxCorrections);
             let correctionsApplied = 0;
             const versions: PipelineResult['versions'] = [];
             let generatedHistory = '';
@@ -298,12 +400,14 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 });
 
                 const validationStartedAt = Date.now();
-                const { validations, consensus } = await this.groq.validateOutput(
-                    generatedHistory,
-                    mergedExtraction,
-                    fullTranscription,
-                    extractionMetaParts
-                );
+                const { validations, consensus } = TWO_CALL_ADAPTIVE_MODE
+                    ? this.runDeterministicClinicalGuard(generatedHistory, mergedExtraction)
+                    : await this.groq.validateOutput(
+                        generatedHistory,
+                        mergedExtraction,
+                        fullTranscription,
+                        extractionMetaParts
+                    );
                 validationDurationMs += Date.now() - validationStartedAt;
                 allValidations.push(...validations);
                 aggregateRiskLevel = this.computeRiskLevel(consensus);
@@ -315,6 +419,10 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 }
 
                 previousErrors = consensus;
+                if (TWO_CALL_ADAPTIVE_MODE) {
+                    earlyStopReason = 'max_rounds_reached';
+                    break;
+                }
                 maxCorrections = this.shouldEscalateCorrections(attempt, transcriptTokens, consensus);
 
                 const hasHighRiskError = consensus.some((error) =>
@@ -393,6 +501,9 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 early_stop_reason?: string;
                 risk_level?: 'low' | 'medium' | 'high';
                 fallback_hops?: number;
+                logical_calls_used?: number;
+                physical_calls_used?: number;
+                provisional_reason?: string;
             } = {
                 corrections_applied: correctionsApplied,
                 error_counts: errorCounts,
@@ -407,7 +518,9 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 rounds_executed: correctionRoundsExecuted,
                 early_stop_reason: earlyStopReason,
                 risk_level: aggregateRiskLevel,
-                fallback_hops: modelInvocations.filter((item) => item.is_fallback).length
+                fallback_hops: modelInvocations.filter((item) => item.is_fallback).length,
+                logical_calls_used: 2,
+                physical_calls_used: modelInvocations.length
             };
 
             const qualityErrors = (mergedExtraction.notas_calidad || [])
@@ -434,7 +547,17 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 }))
             ];
 
+            const hasHighRiskError = finalErrors.some((error) =>
+                (error.type === 'hallucination' || error.type === 'inconsistency') &&
+                this.severityWeight((error as ValidationError).severity) >= 2
+            );
+            // Only mark provisional for genuine high-risk issues (hallucination/inconsistency with severity major+)
+            // Minor quality notes and missing-data flags should NOT block finalization to avoid alert fatigue
+            const provisionalReason = hasHighRiskError
+                ? 'high_risk_detected_requires_manual_review'
+                : undefined;
             const pipelineStatus: 'completed' | 'degraded' = finalErrors.length > 0 ? 'degraded' : 'completed';
+            const resultStatus: 'completed' | 'provisional' = provisionalReason ? 'provisional' : 'completed';
             const historyOutput = this.sanitizeClinicalHistory(generatedHistory);
             const deterministicTriage: QualityTriageResult = {
                 quality_score: Math.max(25, 100 - (finalErrors.length * 10)),
@@ -484,6 +607,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
 
             qualityPayload.quality_score = triageResult.quality_score;
             qualityPayload.critical_gaps = triageResult.critical_gaps.length;
+            qualityPayload.provisional_reason = provisionalReason;
 
             void enqueueAuditEvent('pipeline_audit_bundle', {
                 audit_id: auditId,
@@ -507,6 +631,10 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                     metadata: {
                         learning_applied: learningApplied,
                         rule_ids_used: Array.from(ruleIdsUsed),
+                        call_budget_mode: TWO_CALL_ADAPTIVE_MODE ? 'two_call_adaptive' : 'standard',
+                        logical_calls_used: 1 + (generatedHistory ? 1 : 0),
+                        physical_calls_used: modelInvocations.length,
+                        provisional_reason: provisionalReason || null,
                         phase_timings_ms: {
                             extract: extractDurationMs,
                             generate: generationDurationMs,
@@ -550,7 +678,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 uncertainty_flags: uncertaintyFlags.length > 0 ? uncertaintyFlags : undefined,
                 audit_id: auditId,
                 pipeline_status: pipelineStatus,
-                result_status: pipelineStatus === 'completed' ? 'completed' : 'provisional',
+                result_status: resultStatus,
                 session_id: sessionId,
                 rule_pack_version: rulePackVersion,
                 rule_ids_used: Array.from(ruleIdsUsed),
@@ -562,6 +690,11 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 correction_rounds_executed: correctionRoundsExecuted,
                 early_stop_reason: earlyStopReason,
                 risk_level: aggregateRiskLevel,
+                call_budget_mode: TWO_CALL_ADAPTIVE_MODE ? 'two_call_adaptive' : 'standard',
+                logical_calls_used: 1 + (generatedHistory ? 1 : 0),
+                physical_calls_used: modelInvocations.length,
+                provisional_reason: provisionalReason,
+                fallback_hops: modelInvocations.filter((item) => item.is_fallback).length,
                 phase_timings_ms: {
                     extract: extractDurationMs,
                     generate: generationDurationMs,
@@ -594,6 +727,11 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 correction_rounds_executed: 0,
                 early_stop_reason: 'max_rounds_reached',
                 risk_level: 'high',
+                call_budget_mode: 'two_call_adaptive',
+                logical_calls_used: 2,
+                physical_calls_used: 0,
+                provisional_reason: reason,
+                fallback_hops: 0,
                 phase_timings_ms: {
                     extract: 0,
                     generate: 0,
@@ -607,6 +745,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
 
     async generateMedicalHistory(transcription: string, patientName: string = ""): Promise<AIResultWithMetadata> {
         try {
+            this.groq.resetInvocationCounters();
             const extractionResult = await this.extractOnly(transcription);
             const pipelineResult = await this.generateFromMergedExtractions(
                 [extractionResult.data],
@@ -670,6 +809,11 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 correction_rounds_executed: 0,
                 early_stop_reason: 'max_rounds_reached',
                 risk_level: 'high',
+                call_budget_mode: 'two_call_adaptive',
+                logical_calls_used: 2,
+                physical_calls_used: 0,
+                provisional_reason: reason,
+                fallback_hops: 0,
                 phase_timings_ms: { extract: 0, generate: 0, validate: 0, corrections: 0, total: 0 }
             };
         }

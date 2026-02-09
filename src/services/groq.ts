@@ -319,6 +319,27 @@ export class GroqService {
         });
     }
 
+    resetInvocationCounters(_sessionId?: string): void {
+        this.modelInvocations = [];
+    }
+
+    getInvocationCounters(_sessionId?: string): {
+        total_invocations: number;
+        fallback_hops: number;
+        by_task: Record<string, number>;
+    } {
+        const byTask: Record<string, number> = {};
+        for (const record of this.modelInvocations) {
+            const task = record.task || 'unknown';
+            byTask[task] = (byTask[task] || 0) + 1;
+        }
+        return {
+            total_invocations: this.modelInvocations.length,
+            fallback_hops: this.modelInvocations.filter((item) => item.is_fallback).length,
+            by_task: byTask
+        };
+    }
+
     drainModelInvocations(): ModelInvocationRecord[] {
         const records = [...this.modelInvocations];
         this.modelInvocations = [];

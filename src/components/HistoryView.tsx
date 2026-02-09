@@ -39,6 +39,11 @@ interface HistoryViewProps {
     criticalGaps?: { field: string; reason: string; severity: 'critical' | 'major' | 'minor' }[];
     doctorNextActions?: string[];
     qualityTriageModel?: string;
+    resultStatus?: 'completed' | 'provisional' | 'failed_recoverable' | 'failed_final';
+    provisionalReason?: string;
+    logicalCallsUsed?: number;
+    physicalCallsUsed?: number;
+    fallbackHops?: number;
   };
   recordId?: string;
   onPersistMedicalHistory?: (newContent: string, options?: { autosave?: boolean }) => Promise<void> | void;
@@ -352,6 +357,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
   const topDoctorActions = useMemo(() => {
     return (metadata?.doctorNextActions || []).filter(Boolean).slice(0, 3);
+  }, [metadata]);
+
+  const generationProviderLabel = useMemo(() => {
+    const generation = metadata?.models?.generation || '';
+    if (generation.startsWith('gemini:')) return 'Gemini';
+    if (generation.startsWith('groq:')) return 'Groq';
+    return 'Desconocido';
   }, [metadata]);
 
   const openEvidence = useCallback((fieldPath: string) => {
@@ -795,6 +807,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     errorsFixed={metadata.errorsFixed}
                     versionsCount={metadata.versionsCount}
                     validationLogs={metadata.validationHistory || metadata.remainingErrors}
+                    logicalCallsUsed={metadata.logicalCallsUsed}
+                    physicalCallsUsed={metadata.physicalCallsUsed}
+                    fallbackHops={metadata.fallbackHops}
+                    providerLabel={generationProviderLabel}
                   />
                 )}
                 <div className="action-buttons-group">
@@ -962,6 +978,16 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <span className="classification-pill">{metadata.classification.visit_type}</span>
                 <span className="classification-pill">{metadata.classification.ent_area}</span>
                 <span className="classification-pill">{metadata.classification.urgency}</span>
+              </div>
+            )}
+
+            {metadata?.resultStatus === 'provisional' && (
+              <div className="provisional-review-banner" role="alert" aria-live="polite">
+                <AlertTriangle size={16} />
+                <span>
+                  Revision obligatoria antes de finalizar.
+                  {metadata.provisionalReason ? ` Motivo: ${metadata.provisionalReason.replace(/_/g, ' ')}` : ''}
+                </span>
               </div>
             )}
 
@@ -1551,6 +1577,20 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           border-radius: 999px;
           font-weight: 600;
           font-size: 0.75rem;
+        }
+
+        .provisional-review-banner {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+          margin: 0.75rem 2rem 0;
+          padding: 0.7rem 0.9rem;
+          border: 1px solid #fdba74;
+          background: #fff7ed;
+          color: #9a3412;
+          border-radius: 10px;
+          font-size: 0.86rem;
+          font-weight: 600;
         }
 
         .doc-title {

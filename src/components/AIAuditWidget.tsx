@@ -11,6 +11,10 @@ interface AIAuditWidgetProps {
     errorsFixed: number;
     versionsCount: number;
     validationLogs?: { field: string; reason: string; type: string }[];
+    logicalCallsUsed?: number;
+    physicalCallsUsed?: number;
+    fallbackHops?: number;
+    providerLabel?: string;
 }
 
 export const AIAuditWidget: React.FC<AIAuditWidgetProps> = ({
@@ -18,7 +22,11 @@ export const AIAuditWidget: React.FC<AIAuditWidgetProps> = ({
     models,
     errorsFixed,
     versionsCount,
-    validationLogs
+    validationLogs,
+    logicalCallsUsed,
+    physicalCallsUsed,
+    fallbackHops,
+    providerLabel
 }) => {
     const [isHovered, setIsHovered] = useState(false);
     const [expanded, setExpanded] = useState(false);
@@ -108,6 +116,24 @@ export const AIAuditWidget: React.FC<AIAuditWidgetProps> = ({
                                 <span className="label">Versiones:</span>
                                 <span className="value">{versionsCount} borradores</span>
                             </div>
+                            {typeof logicalCallsUsed === 'number' && (
+                                <div className="tooltip-row">
+                                    <span className="label">Llamadas logicas:</span>
+                                    <span className="value">{logicalCallsUsed}</span>
+                                </div>
+                            )}
+                            {typeof physicalCallsUsed === 'number' && (
+                                <div className="tooltip-row">
+                                    <span className="label">Llamadas fisicas:</span>
+                                    <span className="value">{physicalCallsUsed}</span>
+                                </div>
+                            )}
+                            {typeof fallbackHops === 'number' && (
+                                <div className="tooltip-row">
+                                    <span className="label">Fallback hops:</span>
+                                    <span className="value">{fallbackHops}</span>
+                                </div>
+                            )}
 
                             <div className="divider"></div>
 
@@ -134,6 +160,12 @@ export const AIAuditWidget: React.FC<AIAuditWidgetProps> = ({
                                     <span className="role">Generación:</span>
                                     <span className="name">{models.generation}</span>
                                 </div>
+                                {providerLabel && (
+                                    <div className="model-tag">
+                                        <span className="role">Proveedor:</span>
+                                        <span className="name">{providerLabel}</span>
+                                    </div>
+                                )}
                                 <div className="model-tag">
                                     <span className="role">Validación:</span>
                                     <span className="name">{models.validation}</span>
@@ -331,3 +363,4 @@ export const AIAuditWidget: React.FC<AIAuditWidgetProps> = ({
         </div>
     );
 };
+
