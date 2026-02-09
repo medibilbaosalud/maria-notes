@@ -25,7 +25,7 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [backupStatus, setBackupStatus] = useState<'idle' | 'exporting' | 'importing' | 'success' | 'error'>('idle');
   const [backupMessage, setBackupMessage] = useState('');
-  const { isCloudEnabled, toggleCloud } = useCloudSync();
+  const { isCloudEnabled } = useCloudSync();
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [cloudSyncMessage, setCloudSyncMessage] = useState('');
   const { startSimulation } = useSimulation();
@@ -88,15 +88,6 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
     }
   };
 
-  const handleToggleCloud = () => {
-    const willEnable = !isCloudEnabled;
-    toggleCloud();
-    if (willEnable) {
-      setTimeout(() => {
-        void runCloudSync();
-      }, 0);
-    }
-  };
 
   return (
     <div className="settings-modal-overlay">
@@ -194,28 +185,24 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
                 <div className="settings-cloud-info">
                   {isCloudEnabled ? <Cloud size={20} /> : <CloudOff size={20} />}
                   <div className="settings-cloud-text">
-                    <span className="settings-cloud-status">{isCloudEnabled ? 'Activado' : 'Desactivado'}</span>
+                    <span className="settings-cloud-status">Activado (Permanente)</span>
                     <span className="settings-cloud-desc">
-                      {isCloudEnabled
-                        ? 'Los datos se guardan localmente y en Supabase'
-                        : 'Los datos solo se guardan localmente'}
+                      Los datos se guardan localmente y en Supabase
                     </span>
                   </div>
                 </div>
                 <button
                   type="button"
-                  className={`settings-toggle-btn ${isCloudEnabled ? 'active' : ''}`}
-                  onClick={handleToggleCloud}
-                  aria-label="Activar o desactivar sincronizacion en la nube"
+                  className={`settings-toggle-btn active disabled`}
+                  onClick={() => { }}
+                  disabled={true}
+                  title="Esta opción está activada permanentemente"
+                  aria-label="Sincronización en la nube activada permanentemente"
+                  style={{ opacity: 0.7, cursor: 'not-allowed' }}
                 >
                   <span className="settings-toggle-knob" />
                 </button>
               </div>
-              {isCloudEnabled && (
-                <p className="settings-help-text settings-cloud-warning">
-                  Atencion: al activar esto, los datos medicos saldran de este dispositivo.
-                </p>
-              )}
             </div>
 
             <div className="settings-form-group settings-help-section">
