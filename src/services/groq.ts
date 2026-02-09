@@ -384,7 +384,11 @@ ${schemaHint}
 RAW:
 ${raw}`;
             const repaired = await this.callTaskModel('json_repair', repairPrompt, { jsonMode: true, temperature: 0 });
-            return JSON.parse(repaired.text);
+            try {
+                return JSON.parse(repaired.text);
+            } catch {
+                throw new Error(`json_repair_failed: original=${raw.slice(0, 120)}`);
+            }
         }
     }
 
@@ -734,19 +738,33 @@ ${schemaHint}`;
         options: { temperature?: number; jsonMode?: boolean; maxTokens: number; task: TaskType; thinking?: 'low' | 'medium' }
     ): Promise<string> {
         const retryPolicy = getRetryPolicyForTask(options.task);
+        const isThinking = options.thinking && modelName.startsWith('gemini-');
         const generationConfig: Record<string, unknown> = {
-            temperature: options.temperature ?? 0.2,
             maxOutputTokens: options.maxTokens
         };
+
+        // Gemini 3+ requires temperature=1.0 (default) when thinking is active;
+        // omit temperature entirely so the API uses its default.
+        if (!isThinking) {
+            generationConfig.temperature = options.temperature ?? 0.2;
+        }
 
         if (options.jsonMode) {
             generationConfig.responseMimeType = 'application/json';
         }
 
-        if (options.thinking && modelName.startsWith('gemini-')) {
-            generationConfig.thinkingConfig = {
-                thinkingBudget: THINKING_BUDGET[options.thinking]
-            };
+        if (isThinking) {
+            if (modelName.startsWith('gemini-3')) {
+                // Gemini 3 models use thinkingLevel enum instead of thinkingBudget
+                generationConfig.thinkingConfig = {
+                    thinkingLevel: options.thinking === 'medium' ? 'MEDIUM' : 'LOW'
+                };
+            } else {
+                // Gemini 2.5 models use thinkingBudget (numeric token count)
+                generationConfig.thinkingConfig = {
+                    thinkingBudget: THINKING_BUDGET[options.thinking!]
+                };
+            }
         }
 
         const response = await fetchWithRetry(
@@ -788,11 +806,27 @@ ${schemaHint}`;
         }
 
         const data = await response.json();
-        const parts = data.candidates?.[0]?.content?.parts || [];
+
+        // Handle blocked/empty candidates (safety filters, content policy, etc.)
+        if (!data.candidates || data.candidates.length === 0) {
+            const blockReason = data.promptFeedback?.blockReason || 'unknown';
+            throw new Error(`gemini_blocked:${blockReason}`);
+        }
+
+        const parts = data.candidates[0]?.content?.parts || [];
+        // Filter out 'thought' parts that come from thinking-enabled models
         const text = Array.isArray(parts)
-            ? parts.map((part: Record<string, unknown>) => String(part.text || '')).join('')
+            ? parts
+                .filter((part: Record<string, unknown>) => 'text' in part && !('thought' in part))
+                .map((part: Record<string, unknown>) => String(part.text || '')).join('')
             : '';
         if (text.trim()) return text;
+        // Fallback: if thought-part filter excluded everything, try all text parts
+        const unfilteredText = Array.isArray(parts)
+            ? parts.filter((part: Record<string, unknown>) => 'text' in part)
+                .map((part: Record<string, unknown>) => String(part.text || '')).join('')
+            : '';
+        if (unfilteredText.trim()) return unfilteredText;
         const fallbackText = String(data.text || '');
         if (!fallbackText.trim()) throw new Error('gemini_empty_response');
         return fallbackText;
@@ -1895,7 +1929,7 @@ MODO SKEPTICAL:
                 validationB.errors.length === 0 &&
                 validationA.confidence >= 0.8 &&
                 validationB.confidence >= 0.8;
-            if (bothCleanHighConfidence) {
+            if (bothCleanHighConfidence && coverageErrors.length === 0) {
                 return { validations, consensus: [] };
             }
         }

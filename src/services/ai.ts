@@ -619,6 +619,8 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
         } catch (error) {
             this.groq.drainModelInvocations();
             const failureAuditId = this.buildAuditId();
+            const reason = (error as Error)?.message || 'pipeline_error';
+            console.error('[AIService] Pipeline failed:', reason);
             void enqueueAuditEvent('pipeline_audit_bundle', {
                 audit_id: failureAuditId,
                 audit_data: {
@@ -640,7 +642,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                     event_type: 'pipeline_completed',
                     payload: {
                         corrections_applied: 0,
-                        error_counts: { inconsistency: 1 },
+                        error_counts: { pipeline_error: 1 },
                         uncertainty_flags: 1,
                         duration_ms: 0,
                         transcript_tokens: this.estimateTokens(transcription)
@@ -649,7 +651,27 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
             }).catch((enqueueError) => {
                 console.error('[AIService] Failed to enqueue failure audit:', enqueueError);
             });
-            throw error;
+            // Return provisional history instead of crashing — the doctor
+            // always sees a structured template they can fill in manually.
+            return {
+                data: this.buildProvisionalHistory(reason),
+                model: 'pipeline_failed',
+                remaining_errors: [{ type: 'error', field: 'pipeline', reason }],
+                pipeline_status: 'degraded',
+                result_status: 'failed_recoverable',
+                quality_score: 0,
+                critical_gaps: [{ field: 'pipeline', reason, severity: 'critical' as const }],
+                doctor_next_actions: [
+                    'Reintentar el procesamiento',
+                    'Verificar conexion a internet',
+                    'Revisar la transcripcion manualmente'
+                ],
+                quality_triage_model: 'quality_triage_fallback',
+                correction_rounds_executed: 0,
+                early_stop_reason: 'max_rounds_reached',
+                risk_level: 'high',
+                phase_timings_ms: { extract: 0, generate: 0, validate: 0, corrections: 0, total: 0 }
+            };
         }
     }
 
