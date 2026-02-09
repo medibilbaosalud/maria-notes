@@ -1,591 +1,382 @@
-
-import { useState, useEffect } from 'react';
-import {
-    BookOpen, AlertTriangle, CheckCircle, Lightbulb,
-    RefreshCw, ChevronDown, ChevronUp, Trash2, Edit3,
-    MessageSquare, Check, X, Info, Sparkles
-} from 'lucide-react';
-import { getLessonsFromDB, ImprovementLesson } from '../services/doctor-feedback';
+﻿import { useEffect, useMemo, useState } from 'react';
+import { X, RefreshCw, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { supabase } from '../services/supabase';
-import { motion, AnimatePresence } from 'framer-motion';
+import type { LearningLifecycleState } from '../services/learning/types';
 
 interface LessonsPanelProps {
     onClose: () => void;
-    groqApiKey?: string | string[];
+    readOnly?: boolean;
 }
 
-export default function LessonsPanel({ onClose }: LessonsPanelProps) {
-    const [lessons, setLessons] = useState<ImprovementLesson[]>([]);
+interface RuleCandidateRow {
+    id: string;
+    signature_hash: string;
+    rule_text: string;
+    category: string;
+    evidence_count: number;
+    contradiction_count: number;
+    confidence_score: number;
+    lifecycle_state: LearningLifecycleState;
+    last_seen_at: string;
+    metrics_snapshot?: {
+        score?: number;
+        edit_delta?: number;
+        hallucination_delta?: number;
+        inconsistency_delta?: number;
+    };
+}
+
+const tabs: LearningLifecycleState[] = ['candidate', 'shadow', 'active', 'deprecated', 'blocked'];
+
+const tabLabel: Record<LearningLifecycleState, string> = {
+    candidate: 'Candidatas',
+    shadow: 'Shadow',
+    active: 'Activas',
+    deprecated: 'Deprecadas',
+    blocked: 'Bloqueadas'
+};
+
+const decisionByTransition = (
+    from: LearningLifecycleState,
+    to: LearningLifecycleState
+): 'promote' | 'demote' | 'block' | 'rollback' | 'force_shadow' | 'resume' => {
+    if (to === 'blocked') return 'block';
+    if ((from === 'active' && to === 'deprecated') || (from === 'shadow' && to === 'candidate')) return 'demote';
+    if ((from === 'candidate' && to === 'shadow') || (from === 'shadow' && to === 'active')) return 'promote';
+    if (from === 'deprecated' && to === 'active') return 'resume';
+    if (to === 'shadow') return 'force_shadow';
+    return 'rollback';
+};
+
+export default function LessonsPanel({ onClose, readOnly = false }: LessonsPanelProps) {
+    const [rules, setRules] = useState<RuleCandidateRow[]>([]);
     const [loading, setLoading] = useState(true);
-    const [expandedId, setExpandedId] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'active' | 'learning' | 'rejected'>('active');
+    const [activeTab, setActiveTab] = useState<LearningLifecycleState>('active');
+    const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-    // Edit states
-    const [editingId, setEditingId] = useState<string | null>(null);
-    const [editValue, setEditValue] = useState('');
-    const [commentingId, setCommentingId] = useState<string | null>(null);
-    const [commentValue, setCommentValue] = useState('');
-
-    useEffect(() => {
-        loadLessons();
-    }, []);
-
-    const loadLessons = async () => {
+    const loadRules = async () => {
+        if (!supabase) {
+            setRules([]);
+            setLoading(false);
+            return;
+        }
         setLoading(true);
-        const data = await getLessonsFromDB();
-        // Since we updated the schema, we might need to handle legacy data or just filter
-        setLessons(data);
+        const { data, error } = await supabase
+            .from('ai_rule_candidates')
+            .select('id, signature_hash, rule_text, category, evidence_count, contradiction_count, confidence_score, lifecycle_state, last_seen_at, metrics_snapshot')
+            .order('confidence_score', { ascending: false })
+            .order('last_seen_at', { ascending: false })
+            .limit(300);
+
+        if (error) {
+            console.error('[LessonsPanel] failed to load rule candidates:', error);
+            setRules([]);
+        } else {
+            setRules((data || []) as RuleCandidateRow[]);
+        }
         setLoading(false);
     };
 
-    const handleUpdateStatus = async (id: string, status: 'active' | 'rejected' | 'learning') => {
-        if (!supabase) return;
-        const { error } = await supabase
-            .from('ai_improvement_lessons')
-            .update({ status })
-            .eq('id', id);
+    useEffect(() => {
+        void loadRules();
+    }, []);
 
-        if (!error) {
-            setLessons(lessons.map(l => l.id === id ? { ...l, status } : l));
+    const filtered = useMemo(() => rules.filter((rule) => rule.lifecycle_state === activeTab), [rules, activeTab]);
+
+    const updateLifecycle = async (rule: RuleCandidateRow, nextState: LearningLifecycleState, reason: string) => {
+        if (readOnly || !supabase || updatingId) return;
+        setUpdatingId(rule.id);
+        try {
+            const decisionType = decisionByTransition(rule.lifecycle_state, nextState);
+            await supabase
+                .from('ai_rule_candidates')
+                .update({
+                    lifecycle_state: nextState,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', rule.id);
+
+            await supabase.from('ai_learning_decisions').insert([{
+                rule_id: rule.id,
+                decision_type: decisionType,
+                reason,
+                metrics_snapshot: rule.metrics_snapshot || {},
+                context: {
+                    previous_state: rule.lifecycle_state,
+                    new_state: nextState,
+                    manual: true
+                }
+            }]);
+
+            setRules((prev) => prev.map((item) => (
+                item.id === rule.id
+                    ? { ...item, lifecycle_state: nextState }
+                    : item
+            )));
+        } finally {
+            setUpdatingId(null);
         }
     };
-
-    const handleSaveEdit = async (id: string) => {
-        if (!supabase) return;
-        const { error } = await supabase
-            .from('ai_improvement_lessons')
-            .update({ lesson_summary: editValue })
-            .eq('id', id);
-
-        if (!error) {
-            setLessons(lessons.map(l => l.id === id ? { ...l, lesson_summary: editValue } : l));
-            setEditingId(null);
-        }
-    };
-
-    const handleSaveComment = async (id: string) => {
-        if (!supabase) return;
-        const { error } = await supabase
-            .from('ai_improvement_lessons')
-            .update({ doctor_comment: commentValue })
-            .eq('id', id);
-
-        if (!error) {
-            setLessons(lessons.map(l => l.id === id ? { ...l, doctor_comment: commentValue } : l));
-            setCommentingId(null);
-        }
-    };
-
-    const getCategoryIcon = (category?: string) => {
-        switch (category) {
-            case 'hallucination': return <AlertTriangle size={16} className="text-red-500" />;
-            case 'missing_data': return <AlertTriangle size={16} className="text-orange-500" />;
-            case 'terminology': return <BookOpen size={16} className="text-blue-500" />;
-            case 'formatting': return <CheckCircle size={16} className="text-emerald-500" />;
-            default: return <Lightbulb size={16} className="text-amber-500" />;
-        }
-    };
-
-    const filteredLessons = lessons.filter(l => {
-        if (activeTab === 'active') return l.status === 'active';
-        if (activeTab === 'learning') return l.status === 'learning' || !l.status; // fallback for legacy
-        if (activeTab === 'rejected') return l.status === 'rejected';
-        return false;
-    });
 
     return (
-        <div className="lessons-container">
-            <div className="lessons-panel-modern">
-                <div className="lessons-header-modern">
-                    <div className="header-title">
-                        <div className="icon-pulse">
-                            <Sparkles size={20} />
-                        </div>
-                        <div>
-                            <h2>Panel de Aprendizaje</h2>
-                            <p className="dra-greeting">Hola, Dra. Gotxi. Aquí vive la memoria de tu asistente.</p>
-                        </div>
+        <div className="lessons-modal-backdrop">
+            <div className="lessons-modal-card">
+                <div className="lessons-header">
+                    <div>
+                        <h2>Control de Auto-Mejora IA</h2>
+                        <p>Reglas con trazabilidad, evidencia e impacto clínico.</p>
                     </div>
                     <div className="header-actions">
-                        <button onClick={loadLessons} className="btn-icon" title="Sincronizar">
-                            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                        <button onClick={() => void loadRules()} className="icon-btn" title="Recargar">
+                            <RefreshCw size={16} className={loading ? 'spin' : ''} />
                         </button>
-                        <button onClick={onClose} className="btn-close">✕</button>
+                        <button onClick={onClose} className="icon-btn" title="Cerrar">
+                            <X size={16} />
+                        </button>
                     </div>
                 </div>
 
-                <div className="tabs-bar">
-                    <button
-                        className={`tab-item ${activeTab === 'active' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('active')}
-                    >
-                        <CheckCircle size={16} /> Activas
-                        <span className="count-badge">{lessons.filter(l => l.status === 'active').length}</span>
-                    </button>
-                    <button
-                        className={`tab-item ${activeTab === 'learning' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('learning')}
-                    >
-                        <Info size={16} /> En Aprendizaje
-                        <span className="count-badge warning">{lessons.filter(l => !l.status || l.status === 'learning').length}</span>
-                    </button>
-                    <button
-                        className={`tab-item ${activeTab === 'rejected' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('rejected')}
-                    >
-                        <Trash2 size={16} /> Rechazadas
-                    </button>
+                <div className="tabs">
+                    {tabs.map((tab) => (
+                        <button
+                            key={tab}
+                            onClick={() => setActiveTab(tab)}
+                            className={`tab ${activeTab === tab ? 'active' : ''}`}
+                        >
+                            {tabLabel[tab]} <span>{rules.filter((r) => r.lifecycle_state === tab).length}</span>
+                        </button>
+                    ))}
                 </div>
 
-                <div className="lessons-content">
+                <div className="content">
                     {loading ? (
-                        <div className="loading-state-modern">
-                            <div className="spinner"></div>
-                            <p>Consultando memoria...</p>
-                        </div>
-                    ) : filteredLessons.length === 0 ? (
-                        <div className="empty-state-modern">
-                            <img src="https://illustrations.popsy.co/gray/brainstorming.svg" alt="Empty" width="200" />
-                            <h3>No hay reglas en esta sección</h3>
-                            <p>Tu asistente aprende de cada corrección que haces.</p>
-                        </div>
+                        <div className="state">Cargando reglas...</div>
+                    ) : filtered.length === 0 ? (
+                        <div className="state">Sin reglas en este estado.</div>
                     ) : (
-                        <div className="lessons-scroll">
-                            <AnimatePresence>
-                                {filteredLessons.map((lesson) => (
-                                    <motion.div
-                                        key={lesson.id}
-                                        initial={{ opacity: 0, y: 10 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        className={`lesson-card-modern ${expandedId === lesson.id ? 'expanded' : ''}`}
-                                    >
-                                        <div className="card-main" onClick={() => setExpandedId(expandedId === lesson.id ? null : lesson.id!)}>
-                                            <div className="card-top">
-                                                <div className="category-tag">
-                                                    {getCategoryIcon(lesson.improvement_category)}
-                                                    <span>{lesson.improvement_category}</span>
-                                                </div>
-                                                {lesson.recurrence_count > 1 && (
-                                                    <div className="recurrence-badge">
-                                                        Visto {lesson.recurrence_count}x
-                                                    </div>
-                                                )}
-                                                <span className="lesson-date-modern">
-                                                    {new Date(lesson.created_at!).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
-                                                </span>
-                                                <div style={{ marginLeft: '10px', display: 'flex', alignItems: 'center' }}>
-                                                    {expandedId === lesson.id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                                                </div>
-                                            </div>
+                        filtered.map((rule) => (
+                            <div key={rule.id} className="rule-card">
+                                <div className="rule-top">
+                                    <div className="rule-badges">
+                                        <span className="badge">{rule.category}</span>
+                                        <span className="badge">conf {rule.confidence_score.toFixed(2)}</span>
+                                        <span className="badge">ev {rule.evidence_count}</span>
+                                        <span className={`badge ${rule.contradiction_count > 0 ? 'warn' : ''}`}>contr {rule.contradiction_count}</span>
+                                    </div>
+                                    <small>{new Date(rule.last_seen_at).toLocaleString()}</small>
+                                </div>
 
-                                            {editingId === lesson.id ? (
-                                                <div className="edit-zone" onClick={e => e.stopPropagation()}>
-                                                    <input
-                                                        value={editValue}
-                                                        onChange={e => setEditValue(e.target.value)}
-                                                        autoFocus
-                                                    />
-                                                    <button className="btn-save" onClick={() => handleSaveEdit(lesson.id!)}><Check size={16} /></button>
-                                                    <button className="btn-cancel" onClick={() => setEditingId(null)}><X size={16} /></button>
-                                                </div>
-                                            ) : (
-                                                <div className="lesson-text">
-                                                    {lesson.lesson_summary}
-                                                </div>
-                                            )}
-                                        </div>
+                                <p className="rule-text">{rule.rule_text}</p>
 
-                                        <div className="card-actions-modern">
-                                            <div className="main-actions">
-                                                <button onClick={() => { setEditingId(lesson.id!); setEditValue(lesson.lesson_summary); }} className="action-link">
-                                                    <Edit3 size={14} /> Editar
-                                                </button>
-                                                <button onClick={() => { setCommentingId(lesson.id!); setCommentValue(lesson.doctor_comment || ''); }} className="action-link">
-                                                    <MessageSquare size={14} /> Nota
-                                                </button>
-                                            </div>
-                                            <div className="status-actions">
-                                                {activeTab !== 'rejected' && (
-                                                    <button onClick={() => handleUpdateStatus(lesson.id!, 'rejected')} className="btn-veto" title="Veto (Rechazar)">
-                                                        <Trash2 size={16} /> Rechazar
-                                                    </button>
-                                                )}
-                                                {activeTab === 'rejected' && (
-                                                    <button onClick={() => handleUpdateStatus(lesson.id!, 'active')} className="btn-restore">
-                                                        Restaurar
-                                                    </button>
-                                                )}
-                                                {activeTab === 'learning' && (
-                                                    <button onClick={() => handleUpdateStatus(lesson.id!, 'active')} className="btn-approve">
-                                                        Aprobar Manual
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
+                                <div className="impact-grid">
+                                    <span>score: {Number(rule.metrics_snapshot?.score || 0).toFixed(3)}</span>
+                                    <span>edit ?: {Number(rule.metrics_snapshot?.edit_delta || 0).toFixed(3)}</span>
+                                    <span>halluc ?: {Number(rule.metrics_snapshot?.hallucination_delta || 0).toFixed(3)}</span>
+                                    <span>incons ?: {Number(rule.metrics_snapshot?.inconsistency_delta || 0).toFixed(3)}</span>
+                                </div>
 
-                                        {commentingId === lesson.id && (
-                                            <div className="comment-overlay">
-                                                <textarea
-                                                    placeholder="Añade una nota personal (no visible para la IA)..."
-                                                    value={commentValue}
-                                                    onChange={e => setCommentValue(e.target.value)}
-                                                />
-                                                <div className="comment-btns">
-                                                    <button onClick={() => handleSaveComment(lesson.id!)}>Guardar Nota</button>
-                                                    <button className="cancel" onClick={() => setCommentingId(null)}>Cerrar</button>
-                                                </div>
-                                            </div>
+                                {!readOnly && (
+                                    <div className="actions">
+                                        <button
+                                            disabled={Boolean(updatingId)}
+                                            onClick={() => void updateLifecycle(rule, 'active', 'manual_approve')}
+                                            className="ok"
+                                        >
+                                            <ShieldCheck size={14} /> Aprobar
+                                        </button>
+                                        <button
+                                            disabled={Boolean(updatingId)}
+                                            onClick={() => void updateLifecycle(rule, 'shadow', 'manual_force_shadow')}
+                                        >
+                                            Forzar shadow
+                                        </button>
+                                        <button
+                                            disabled={Boolean(updatingId)}
+                                            onClick={() => void updateLifecycle(rule, 'blocked', 'manual_block')}
+                                            className="danger"
+                                        >
+                                            <AlertTriangle size={14} /> Bloquear
+                                        </button>
+                                        {(rule.lifecycle_state === 'deprecated' || rule.lifecycle_state === 'blocked') && (
+                                            <button
+                                                disabled={Boolean(updatingId)}
+                                                onClick={() => void updateLifecycle(rule, 'active', 'manual_resume')}
+                                            >
+                                                Reanudar
+                                            </button>
                                         )}
-
-                                        {lesson.doctor_comment && !commentingId && (
-                                            <div className="doctor-note-bubble">
-                                                <MessageSquare size={12} />
-                                                <span>Mi nota: {lesson.doctor_comment}</span>
-                                            </div>
-                                        )}
-                                    </motion.div>
-                                ))}
-                            </AnimatePresence>
-                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ))
                     )}
                 </div>
             </div>
 
             <style>{`
-                .lessons-container {
+                .lessons-modal-backdrop {
                     position: fixed;
                     inset: 0;
-                    background: rgba(15, 23, 42, 0.4);
-                    backdrop-filter: blur(8px);
                     z-index: 1000;
+                    background: rgba(15, 23, 42, 0.48);
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    padding: 2rem;
+                    padding: 1.5rem;
                 }
-                .lessons-panel-modern {
-                    background: #ffffff;
-                    width: 100%;
-                    max-width: 650px;
-                    border-radius: 24px;
-                    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+                .lessons-modal-card {
+                    width: min(980px, 100%);
+                    max-height: 88vh;
+                    overflow: hidden;
+                    border-radius: 16px;
+                    background: #fff;
+                    border: 1px solid #e2e8f0;
                     display: flex;
                     flex-direction: column;
-                    max-height: 85vh;
-                    overflow: hidden;
-                    border: 1px solid rgba(226, 232, 240, 0.8);
                 }
-                .lessons-header-modern {
-                    padding: 1.5rem 2rem;
+                .lessons-header {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    background: linear-gradient(to right, #f8fafc, #ffffff);
-                    border-bottom: 1px solid #f1f5f9;
-                }
-                .header-title {
-                    display: flex;
                     gap: 1rem;
-                    align-items: center;
+                    padding: 1rem 1.2rem;
+                    border-bottom: 1px solid #e2e8f0;
                 }
-                .icon-pulse {
-                    background: #f0fdf4;
-                    color: #22c55e;
-                    padding: 10px;
-                    border-radius: 12px;
-                    box-shadow: 0 0 0 4px #f0fdf4;
-                }
-                .header-title h2 {
+                .lessons-header h2 {
                     margin: 0;
-                    font-size: 1.25rem;
+                    font-size: 1.1rem;
                     color: #0f172a;
-                    font-weight: 700;
                 }
-                .dra-greeting {
-                    margin: 2px 0 0;
+                .lessons-header p {
+                    margin: 0.2rem 0 0;
+                    color: #64748b;
                     font-size: 0.85rem;
-                    color: #64748b;
                 }
-                .header-actions {
-                    display: flex;
-                    gap: 0.5rem;
-                }
-                .btn-icon {
-                    background: none;
-                    border: none;
-                    color: #94a3b8;
-                    cursor: pointer;
-                    padding: 8px;
+                .header-actions { display: flex; gap: 0.5rem; }
+                .icon-btn {
+                    border: 1px solid #e2e8f0;
+                    background: #fff;
                     border-radius: 8px;
-                    transition: all 0.2s;
-                }
-                .btn-icon:hover {
-                    background: #f1f5f9;
-                    color: #475569;
-                }
-                .btn-close {
-                    background: #f1f5f9;
-                    border: none;
-                    color: #64748b;
                     width: 32px;
                     height: 32px;
-                    border-radius: 8px;
                     cursor: pointer;
-                    font-weight: 700;
+                    color: #334155;
                 }
-                .tabs-bar {
+                .spin { animation: spin 1s linear infinite; }
+                @keyframes spin { to { transform: rotate(360deg); } }
+                .tabs {
                     display: flex;
-                    padding: 0 2rem;
+                    flex-wrap: wrap;
+                    gap: 0.4rem;
+                    padding: 0.8rem 1.2rem;
+                    border-bottom: 1px solid #e2e8f0;
+                }
+                .tab {
+                    border: 1px solid #dbeafe;
                     background: #f8fafc;
-                    border-bottom: 1px solid #f1f5f9;
-                    gap: 1.5rem;
-                }
-                .tab-item {
-                    background: none;
-                    border: none;
-                    padding: 1rem 0;
-                    font-size: 0.9rem;
-                    font-weight: 600;
-                    color: #94a3b8;
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    gap: 0.5rem;
-                    position: relative;
-                }
-                .tab-item.active {
-                    color: #0f766e;
-                }
-                .tab-item.active::after {
-                    content: '';
-                    position: absolute;
-                    bottom: 0;
-                    left: 0;
-                    right: 0;
-                    height: 2px;
-                    background: #0f172a;
-                    border-radius: 2px 2px 0 0;
-                }
-                .count-badge {
-                    background: #e2e8f0;
-                    color: #475569;
-                    padding: 1px 6px;
-                    border-radius: 6px;
-                    font-size: 0.7rem;
-                    font-weight: 700;
-                }
-                .count-badge.warning {
-                    background: #fef3c7;
-                    color: #92400e;
-                }
-                .lessons-scroll {
-                    padding: 1.5rem 2rem;
-                    overflow-y: auto;
-                    display: flex;
-                    flex-direction: column;
-                    gap: 1rem;
-                }
-                .lesson-card-modern {
-                    background: #ffffff;
-                    border: 1px solid #f1f5f9;
-                    border-radius: 16px;
-                    transition: all 0.2s;
-                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-                }
-                .lesson-card-modern:hover {
-                    border-color: #e2e8f0;
-                    transform: translateY(-2px);
-                    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-                }
-                .card-main {
-                    padding: 1.25rem;
+                    color: #334155;
+                    border-radius: 999px;
+                    padding: 0.35rem 0.65rem;
+                    font-size: 0.8rem;
                     cursor: pointer;
                 }
-                .card-top {
-                    display: flex;
-                    align-items: center;
-                    gap: 0.75rem;
-                    margin-bottom: 0.75rem;
-                }
-                .category-tag {
-                    display: flex;
-                    align-items: center;
-                    gap: 6px;
-                    background: #f8fafc;
-                    padding: 4px 10px;
-                    border-radius: 8px;
-                    font-size: 0.7rem;
-                    font-weight: 700;
-                    color: #475569;
-                    text-transform: uppercase;
-                    letter-spacing: 0.025em;
-                }
-                .recurrence-badge {
+                .tab.active {
                     background: #eff6ff;
-                    color: #2563eb;
-                    font-size: 0.7rem;
+                    border-color: #93c5fd;
+                    color: #1d4ed8;
+                }
+                .tab span {
+                    margin-left: 0.35rem;
                     font-weight: 700;
-                    padding: 4px 8px;
-                    border-radius: 6px;
                 }
-                .lesson-date-modern {
-                    margin-left: auto;
-                    font-size: 0.75rem;
-                    color: #94a3b8;
+                .content {
+                    overflow-y: auto;
+                    padding: 1rem 1.2rem;
+                    display: grid;
+                    gap: 0.75rem;
                 }
-                .lesson-text {
-                    font-size: 0.95rem;
-                    color: #1e293b;
-                    line-height: 1.5;
-                    font-weight: 500;
+                .state {
+                    color: #64748b;
+                    font-size: 0.9rem;
+                    padding: 0.8rem;
                 }
-                .card-actions-modern {
-                    padding: 0.75rem 1.25rem;
-                    background: #f8fafc;
-                    border-top: 1px solid #f1f5f9;
-                    border-radius: 0 0 16px 16px;
+                .rule-card {
+                    border: 1px solid #e2e8f0;
+                    border-radius: 12px;
+                    padding: 0.8rem;
+                    background: #fff;
+                    display: grid;
+                    gap: 0.6rem;
+                }
+                .rule-top {
                     display: flex;
                     justify-content: space-between;
-                    align-items: center;
-                }
-                .main-actions {
-                    display: flex;
                     gap: 1rem;
-                }
-                .action-link {
-                    background: none;
-                    border: none;
-                    color: #64748b;
-                    font-size: 0.8rem;
-                    font-weight: 600;
-                    cursor: pointer;
-                    display: flex;
                     align-items: center;
-                    gap: 4px;
-                    padding: 0;
                 }
-                .action-link:hover {
-                    color: #1e293b;
-                }
-                .status-actions {
+                .rule-badges {
                     display: flex;
-                    gap: 0.5rem;
+                    gap: 0.35rem;
+                    flex-wrap: wrap;
                 }
-                .btn-veto {
+                .badge {
+                    border-radius: 999px;
+                    background: #f1f5f9;
+                    color: #334155;
+                    font-size: 0.72rem;
+                    padding: 0.2rem 0.45rem;
+                }
+                .badge.warn {
                     background: #fff1f2;
-                    color: #e11d48;
-                    border: none;
-                    padding: 6px 12px;
-                    border-radius: 8px;
-                    font-size: 0.75rem;
-                    font-weight: 700;
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    gap: 4px;
+                    color: #be123c;
                 }
-                .btn-veto:hover {
-                    background: #ffe4e6;
-                }
-                .btn-approve {
-                    background: #f0fdf4;
-                    color: #16a34a;
-                    border: none;
-                    padding: 6px 12px;
-                    border-radius: 8px;
-                    font-size: 0.75rem;
-                    font-weight: 700;
-                    cursor: pointer;
-                }
-                .doctor-note-bubble {
-                    margin: 10px 20px 20px;
-                    background: #fefce8;
-                    border: 1px solid #fef08a;
-                    padding: 8px 12px;
-                    border-radius: 12px;
-                    font-size: 0.8rem;
-                    color: #854d0e;
-                    display: flex;
-                    align-items: flex-start;
-                    gap: 8px;
-                }
-                .edit-zone {
-                    display: flex;
-                    gap: 0.5rem;
-                    width: 100%;
-                }
-                .edit-zone input {
-                    flex: 1;
-                    border: 2px solid #0f172a;
-                    border-radius: 8px;
-                    padding: 6px 10px;
-                    font-size: 0.95rem;
-                }
-                .btn-save { background: #0f172a; color: white; border: none; border-radius: 8px; width: 32px; cursor: pointer; }
-                .btn-cancel { background: #f1f5f9; border: none; border-radius: 8px; width: 32px; cursor: pointer; }
-
-                .comment-overlay {
-                    padding: 1.25rem;
-                    background: #f8fafc;
-                    border-top: 1px solid #e2e8f0;
-                }
-                .comment-overlay textarea {
-                    width: 100%;
-                    height: 80px;
-                    border-radius: 12px;
-                    border: 1px solid #e2e8f0;
-                    padding: 10px;
+                .rule-text {
+                    margin: 0;
+                    color: #0f172a;
+                    line-height: 1.4;
                     font-size: 0.9rem;
-                    resize: none;
-                    margin-bottom: 10px;
                 }
-                .comment-btns {
+                .impact-grid {
+                    display: grid;
+                    grid-template-columns: repeat(4, minmax(0, 1fr));
+                    gap: 0.4rem;
+                    font-size: 0.78rem;
+                    color: #475569;
+                }
+                .actions {
                     display: flex;
-                    gap: 0.5rem;
+                    flex-wrap: wrap;
+                    gap: 0.45rem;
                 }
-                .comment-btns button {
-                    background: #0f172a;
-                    color: white;
-                    border: none;
-                    padding: 8px 16px;
+                .actions button {
+                    border: 1px solid #dbeafe;
+                    background: #eff6ff;
+                    color: #1e40af;
                     border-radius: 8px;
-                    font-size: 0.85rem;
+                    padding: 0.35rem 0.6rem;
+                    font-size: 0.76rem;
                     font-weight: 600;
                     cursor: pointer;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.3rem;
                 }
-                .comment-btns button.cancel {
-                    background: none;
-                    color: #64748b;
+                .actions button.ok {
+                    border-color: #86efac;
+                    background: #f0fdf4;
+                    color: #166534;
                 }
-
-                .loading-state-modern {
-                    text-align: center;
-                    padding: 4rem 0;
+                .actions button.danger {
+                    border-color: #fecdd3;
+                    background: #fff1f2;
+                    color: #be123c;
                 }
-                .spinner {
-                    width: 40px;
-                    height: 40px;
-                    border: 4px solid #f1f5f9;
-                    border-top-color: #0f172a;
-                    border-radius: 50%;
-                    margin: 0 auto 1.5rem;
-                    animation: spin 1s linear infinite;
-                }
-                @keyframes spin { to { transform: rotate(360deg); } }
-
-                .empty-state-modern {
-                    text-align: center;
-                    padding: 3rem 0;
-                }
-                .empty-state-modern h3 {
-                    margin: 1.5rem 0 0.5rem;
-                    color: #0f172a;
-                }
-                .empty-state-modern p {
-                    color: #64748b;
-                    margin: 0;
+                .actions button:disabled {
+                    opacity: 0.55;
+                    cursor: not-allowed;
                 }
             `}</style>
         </div>
     );
 }
+

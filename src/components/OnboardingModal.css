@@ -1,0 +1,168 @@
+.onboarding-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal, 9999);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.25rem;
+    background: rgba(15, 23, 42, 0.48);
+    backdrop-filter: blur(4px);
+}
+
+.onboarding-modal-card {
+    width: min(920px, 96vw);
+    max-height: 90vh;
+    overflow: auto;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fcfd 100%);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 1.2rem;
+    box-shadow: 0 30px 70px rgba(2, 6, 23, 0.25);
+    padding: 1.35rem;
+    display: grid;
+    gap: 1rem;
+}
+
+.onboarding-modal-header h2 {
+    margin: 0.1rem 0 0.35rem;
+    color: #0f172a;
+    line-height: 1.2;
+}
+
+.onboarding-modal-kicker {
+    margin: 0;
+    color: #0f766e;
+    font-weight: 700;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.onboarding-modal-subtitle {
+    margin: 0;
+    color: #475569;
+}
+
+.onboarding-modal-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.8rem;
+}
+
+.onboarding-feature {
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 0.85rem;
+    background: #ffffff;
+    padding: 0.8rem;
+    display: grid;
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 0.6rem;
+    align-items: start;
+}
+
+.onboarding-feature-icon {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 999px;
+    background: rgba(20, 184, 166, 0.14);
+    color: #0f766e;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.onboarding-feature h3 {
+    margin: 0 0 0.2rem;
+    font-size: 0.98rem;
+    color: #0f172a;
+}
+
+.onboarding-feature p {
+    margin: 0;
+    color: #475569;
+    font-size: 0.9rem;
+    line-height: 1.35;
+}
+
+.onboarding-workflow {
+    border: 1px solid rgba(20, 184, 166, 0.26);
+    border-radius: 0.85rem;
+    background: rgba(240, 253, 250, 0.8);
+    padding: 0.8rem;
+    display: grid;
+    gap: 0.2rem;
+}
+
+.onboarding-workflow h3 {
+    margin: 0 0 0.2rem;
+    color: #0f172a;
+    font-size: 0.95rem;
+}
+
+.onboarding-workflow p {
+    margin: 0;
+    color: #155e75;
+    font-size: 0.89rem;
+}
+
+.onboarding-modal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    justify-content: flex-end;
+}
+
+.onboarding-btn {
+    height: 2.5rem;
+    border-radius: 0.7rem;
+    border: 1px solid transparent;
+    padding: 0 0.9rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+}
+
+.onboarding-btn-secondary {
+    background: #ffffff;
+    color: #0f172a;
+    border-color: rgba(148, 163, 184, 0.4);
+}
+
+.onboarding-btn-secondary:hover {
+    background: #f8fafc;
+}
+
+.onboarding-btn-primary {
+    background: linear-gradient(135deg, #0f766e 0%, #0f766e 20%, #0ea5a4 100%);
+    color: #ffffff;
+    box-shadow: 0 10px 20px rgba(15, 118, 110, 0.25);
+}
+
+.onboarding-btn-primary:hover {
+    filter: brightness(1.02);
+}
+
+@media (max-width: 900px) {
+    .onboarding-modal-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 640px) {
+    .onboarding-modal-card {
+        padding: 1rem;
+        gap: 0.8rem;
+    }
+
+    .onboarding-modal-actions {
+        justify-content: stretch;
+    }
+
+    .onboarding-btn {
+        width: 100%;
+        justify-content: center;
+    }
+}

@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
+import { safeGetLocalStorage, safeSetLocalStorage } from '../utils/safeBrowser';
 
 const CLOUD_SYNC_KEY = 'maria_notes_cloud_sync_enabled';
 
 export const useCloudSync = () => {
     const [isCloudEnabled, setIsCloudEnabled] = useState<boolean>(() => {
         if (typeof window === 'undefined') return false;
-        return localStorage.getItem(CLOUD_SYNC_KEY) === 'true';
+        return safeGetLocalStorage(CLOUD_SYNC_KEY) === 'true';
     });
 
     useEffect(() => {
-        localStorage.setItem(CLOUD_SYNC_KEY, String(isCloudEnabled));
+        safeSetLocalStorage(CLOUD_SYNC_KEY, String(isCloudEnabled));
     }, [isCloudEnabled]);
 
     const toggleCloud = () => {
@@ -30,5 +31,5 @@ export const useCloudSync = () => {
 // Utility to check cloud sync status without hook
 export const isCloudSyncEnabled = (): boolean => {
     if (typeof window === 'undefined') return false;
-    return localStorage.getItem(CLOUD_SYNC_KEY) === 'true';
+    return safeGetLocalStorage(CLOUD_SYNC_KEY) === 'true';
 };

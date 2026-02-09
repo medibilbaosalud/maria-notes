@@ -36,14 +36,13 @@ export async function normalizeAndChunkAudio(blob: Blob): Promise<Blob[]> {
     // 3 mins @ 16kHz 16-bit Mono = ~5.7 MB
     const CHUNK_DURATION_SEC = 180;
     const chunks: Blob[] = [];
+    const MAX_CHUNK_BYTES = 20 * 1024 * 1024; // Hard guard below API limits
 
     const totalSamples = audioBuffer.length;
     const chunkSamples = CHUNK_DURATION_SEC * audioBuffer.sampleRate;
     const totalChunks = Math.ceil(totalSamples / chunkSamples);
 
-    for (let i = 0; i < totalChunks; i++) {
-        const startSample = i * chunkSamples;
-        const endSample = Math.min(startSample + chunkSamples, totalSamples);
+    const encodeRange = (startSample: number, endSample: number): Blob => {
         const frameCount = endSample - startSample;
 
         // Create new mono buffer for this chunk
@@ -66,10 +65,34 @@ export async function normalizeAndChunkAudio(blob: Blob): Promise<Blob[]> {
             }
         }
 
-        chunks.push(bufferToWav(chunkBuffer));
+        return bufferToWav(chunkBuffer);
+    };
+
+    const pushChunkWithSizeGuard = (startSample: number, endSample: number) => {
+        const encoded = encodeRange(startSample, endSample);
+        if (encoded.size <= MAX_CHUNK_BYTES || (endSample - startSample) <= audioBuffer.sampleRate * 30) {
+            chunks.push(encoded);
+            return;
+        }
+
+        // Oversized range: recursively split to guarantee safety for long/high-rate inputs.
+        const midpoint = startSample + Math.floor((endSample - startSample) / 2);
+        if (midpoint <= startSample || midpoint >= endSample) {
+            chunks.push(encoded);
+            return;
+        }
+        pushChunkWithSizeGuard(startSample, midpoint);
+        pushChunkWithSizeGuard(midpoint, endSample);
+    };
+
+    for (let i = 0; i < totalChunks; i++) {
+        const startSample = i * chunkSamples;
+        const endSample = Math.min(startSample + chunkSamples, totalSamples);
+        pushChunkWithSizeGuard(startSample, endSample);
     }
 
     console.log(`[AudioProcessor] Split into ${chunks.length} chunks`);
+    await audioContext.close();
     return chunks;
 }
 

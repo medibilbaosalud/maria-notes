@@ -7,53 +7,57 @@ import { MBSLogo } from './MBSLogo';
 import heroImage from '../assets/maria_notes_hero.png';
 
 interface RecorderProps {
-  onRecordingComplete: (blob: Blob, patientName: string, isPartialBatch?: boolean, batchIndex?: number) => void;
+  onRecordingComplete: (blob: Blob, patientName: string, isPartialBatch?: boolean, batchIndex?: number) => Promise<void> | void;
+  onConsultationStart?: (sessionId: string, patientName: string) => void;
+  canStart?: boolean;
+  startBlockReason?: string;
 }
 
-export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
+export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, onConsultationStart, canStart = true, startBlockReason = '' }) => {
   const [patientName, setPatientName] = useState('');
   const [processedBatches, setProcessedBatches] = useState<number[]>([]);
   const patientNameRef = useRef(patientName);
 
-  // Keep ref in sync with state for use in callbacks
   useEffect(() => {
     patientNameRef.current = patientName;
   }, [patientName]);
 
-  // Callback for when a batch is ready (every 10 mins)
-  const handleBatchReady = (blob: Blob, batchIndex: number) => {
+  const handleBatchReady = async ({ blob, batchIndex }: { blob: Blob; batchIndex: number }) => {
     console.log(`[RecorderUI] Batch ${batchIndex} ready (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
-    setProcessedBatches(prev => [...prev, batchIndex]);
-    // Send to parent for background processing (isPartialBatch = true)
-    onRecordingComplete(blob, patientNameRef.current, true, batchIndex);
+    setProcessedBatches((prev) => [...prev, batchIndex]);
+    await onRecordingComplete(blob, patientNameRef.current, true, batchIndex);
   };
 
   const {
     isRecording,
     duration,
-    batchCount,
     startRecording,
-    stopRecording,
-    audioBlob
+    stopRecording
   } = useAudioRecorder({
     onBatchReady: handleBatchReady,
-    batchIntervalMs: 10 * 60 * 1000 // 10 minutes
-    // batchIntervalMs: 20 * 1000 // DEBUG: 20 seconds for testing
+    onFinalReady: async ({ blob, lastBatchIndex }) => {
+      console.log(`[RecorderUI] Final segment ready (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
+      await onRecordingComplete(blob, patientNameRef.current, false, lastBatchIndex);
+      setProcessedBatches([]);
+    },
+    batchIntervalMs: 5 * 60 * 1000
   });
 
-  // Guard to prevent infinite loops if parent re-renders
-  const lastSubmittedBlob = useRef<Blob | null>(null);
+  const patientNameValid = patientNameRef.current.trim().length >= 2;
+  const canStartRecording = canStart && patientNameValid;
 
-  useEffect(() => {
-    if (audioBlob && audioBlob !== lastSubmittedBlob.current) {
-      lastSubmittedBlob.current = audioBlob;
-      // This is the FINAL segment after user presses Stop (isPartialBatch = false)
-      console.log(`[RecorderUI] Final segment ready (${(audioBlob.size / 1024 / 1024).toFixed(2)} MB)`);
-      onRecordingComplete(audioBlob, patientName, false, batchCount);
-      // Reset for next recording
-      setProcessedBatches([]);
+  const handleStart = async () => {
+    if (!canStartRecording) return;
+    const sessionId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+      ? crypto.randomUUID()
+      : `session_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    onConsultationStart?.(sessionId, patientNameRef.current);
+    try {
+      await startRecording();
+    } catch (error) {
+      console.error('[RecorderUI] Failed to start recording:', error);
     }
-  }, [audioBlob, onRecordingComplete, patientName, batchCount]);
+  };
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -84,13 +88,25 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
               <Stethoscope size={20} className="input-icon" style={{ color: 'var(--brand-primary)' }} />
               <input
                 type="text"
-                placeholder="Nombre y Apellidos..."
+                placeholder="Nombre y apellidos..."
                 value={patientName}
                 onChange={(e) => setPatientName(e.target.value)}
                 disabled={isRecording}
-                className="text-input"
+                className="recorder-text-input"
+                aria-label="Nombre del paciente"
               />
             </div>
+            <div className="hint-row">
+              <span className={`hint-chip ${canStart ? 'ok' : 'warn'}`}>
+                {canStart ? 'Preflight listo' : 'Preflight pendiente'}
+              </span>
+            </div>
+            {!patientNameValid && !isRecording && (
+              <small className="warning-text">Introduce al menos 2 caracteres para iniciar.</small>
+            )}
+            {!canStart && !isRecording && (
+              <small className="error-text">{startBlockReason || 'Preflight incompleto: revisa configuracion.'}</small>
+            )}
           </div>
         </div>
       </div>
@@ -105,7 +121,7 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
             }}
             transition={{ repeat: isRecording ? Infinity : 0, duration: 2 }}
           />
-          <span className="status-text">{isRecording ? "Grabando Consulta..." : "Listo para grabar"}</span>
+          <span className="status-text">{isRecording ? 'Grabando consulta...' : 'Listo para grabar'}</span>
         </div>
 
         <AnimatePresence>
@@ -121,7 +137,7 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
                     duration: 2.5,
                     repeat: Infinity,
                     delay: i * 1.2,
-                    ease: "easeOut"
+                    ease: 'easeOut'
                   }}
                 />
               ))}
@@ -129,14 +145,10 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
           )}
         </AnimatePresence>
 
-        <motion.div
-          className="timer-display"
-          animate={{ scale: isRecording ? 1.05 : 1 }}
-        >
+        <motion.div className="timer-display" animate={{ scale: isRecording ? 1.05 : 1 }}>
           {formatTime(duration)}
         </motion.div>
 
-        {/* Batch Processing Indicator */}
         <AnimatePresence>
           {processedBatches.length > 0 && (
             <motion.div
@@ -158,7 +170,10 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
             <motion.button
               key="start"
               className="action-btn start"
-              onClick={startRecording}
+              onClick={handleStart}
+              disabled={!canStartRecording}
+              title={!canStartRecording ? (startBlockReason || 'Completa el preflight antes de iniciar') : undefined}
+              aria-label="Iniciar consulta"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               initial={{ y: 10, opacity: 0 }}
@@ -172,6 +187,7 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
               key="stop"
               className="action-btn stop"
               onClick={stopRecording}
+              aria-label="Finalizar y generar historia"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               initial={{ y: 10, opacity: 0 }}
@@ -212,29 +228,29 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
           align-items: center;
           gap: 1.5rem;
         }
-        
+
         .logo-wrapper-absolute {
-            position: absolute;
-            top: -1rem;
-            left: 0;
-            opacity: 0.8;
+          position: absolute;
+          top: -1rem;
+          left: 0;
+          opacity: 0.8;
         }
 
         .hero-image-container {
-            width: 180px;
-            height: 180px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-top: 1rem;
-            margin-bottom: 1rem;
+          width: 180px;
+          height: 180px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-top: 1rem;
+          margin-bottom: 1rem;
         }
-        
+
         .hero-image {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            filter: drop-shadow(0 10px 15px rgba(38, 166, 154, 0.2));
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+          filter: drop-shadow(0 10px 15px rgba(38, 166, 154, 0.2));
         }
 
         .inputs-row {
@@ -246,8 +262,8 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
         .input-group {
           display: flex;
           flex-direction: column;
-          gap: 0.5rem;
-          max-width: 400px;
+          gap: 0.45rem;
+          max-width: 430px;
           width: 100%;
         }
 
@@ -272,23 +288,54 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
           pointer-events: none;
         }
 
-        .text-input {
+        .recorder-text-input {
           width: 100%;
           padding: 0.75rem 1rem 0.75rem 2.5rem;
           border-radius: 8px;
           border: none;
-          background: #F1F5F9;
+          background: #f1f5f9;
           color: var(--text-primary);
           font-size: 0.95rem;
-          transition: all 0.2s;
           box-sizing: border-box;
           font-family: var(--font-sans);
         }
 
-        .text-input:focus {
+        .recorder-text-input:focus {
           outline: none;
           background: white;
           box-shadow: 0 0 0 2px var(--brand-primary);
+        }
+
+        .hint-row {
+          margin-top: 0.15rem;
+          display: flex;
+          align-items: center;
+          gap: 0.35rem;
+        }
+
+        .hint-chip {
+          font-size: 0.72rem;
+          font-weight: 700;
+          border-radius: 999px;
+          padding: 0.15rem 0.55rem;
+        }
+
+        .hint-chip.ok {
+          color: #065f46;
+          background: #d1fae5;
+        }
+
+        .hint-chip.warn {
+          color: #92400e;
+          background: #fef3c7;
+        }
+
+        .warning-text {
+          color: #b45309;
+        }
+
+        .error-text {
+          color: #b91c1c;
         }
 
         .visualization-area {
@@ -379,7 +426,6 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
           cursor: pointer;
           box-shadow: var(--shadow-md);
           font-family: var(--font-sans);
-          transition: all 0.2s;
         }
 
         .action-btn.start {
@@ -387,9 +433,49 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
           color: white;
         }
 
+        .action-btn:disabled {
+          cursor: not-allowed;
+          opacity: 0.45;
+          transform: none !important;
+        }
+
         .action-btn.stop {
-          background-color: #26A69A !important;
+          background-color: #26a69a !important;
           color: white;
+        }
+
+        @media (max-width: 1024px) {
+          .recorder-card {
+            padding: 1.25rem;
+            border-radius: 20px;
+          }
+
+          .logo-wrapper-absolute {
+            left: auto;
+            right: 0;
+            top: -0.7rem;
+          }
+
+          .hero-image-container {
+            width: 145px;
+            height: 145px;
+            margin-top: 0.25rem;
+            margin-bottom: 0.75rem;
+          }
+
+          .visualization-area {
+            width: 220px;
+            height: 196px;
+          }
+
+          .timer-display {
+            font-size: 3.25rem;
+          }
+
+          .action-btn {
+            padding: 14px 26px;
+            font-size: 1rem;
+          }
         }
       `}</style>
     </motion.div>

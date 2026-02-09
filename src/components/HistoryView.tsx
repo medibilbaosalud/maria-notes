@@ -1,18 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Copy, Check, FileText, Sparkles, FileOutput, X, Printer, Plus, AlertTriangle, Edit2, Brain, Wand2, ThumbsDown } from 'lucide-react';
+import { Copy, Check, FileText, Sparkles, FileOutput, X, Printer, Plus, AlertTriangle, Edit2, Brain, Wand2, ThumbsDown, MoreHorizontal } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { MBSLogo } from './MBSLogo';
 import { AIAuditWidget } from './AIAuditWidget';
 import { processDoctorFeedback } from '../services/doctor-feedback';
 import type { ExtractionMeta, ConsultationClassification, UncertaintyFlag, FieldEvidence } from '../services/groq';
-import { saveFieldConfirmation, logQualityEvent } from '../services/supabase';
+import { saveFieldConfirmation, logQualityEvent, saveDoctorSatisfactionEvent } from '../services/supabase';
+import { evaluateAndPersistRuleImpact } from '../services/learning/rule-evaluator';
+import { safeCopyToClipboard } from '../utils/safeBrowser';
 
 interface HistoryViewProps {
   content: string;
   isLoading: boolean;
   patientName?: string;
+  originalContent?: string; // Raw AI output (baseline) if available
   transcription?: string; // Needed for learning context
   apiKey?: string; // Needed for Qwen3 analysis call
   onGenerateReport?: () => Promise<string>;
@@ -29,9 +32,17 @@ interface HistoryViewProps {
     classification?: ConsultationClassification;
     uncertaintyFlags?: UncertaintyFlag[];
     auditId?: string;
+    rulePackVersion?: number;
+    ruleIdsUsed?: string[];
+    learningApplied?: boolean;
+    qualityScore?: number;
+    criticalGaps?: { field: string; reason: string; severity: 'critical' | 'major' | 'minor' }[];
+    doctorNextActions?: string[];
+    qualityTriageModel?: string;
   };
   recordId?: string;
   onPersistMedicalHistory?: (newContent: string, options?: { autosave?: boolean }) => Promise<void> | void;
+  onRegenerateSection?: (sectionTitle: string, currentContent: string) => Promise<string>;
 }
 
 const LoadingMessages = () => {
@@ -94,6 +105,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   content,
   isLoading,
   patientName,
+  originalContent,
   transcription,
   apiKey,
   onGenerateReport,
@@ -101,8 +113,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onContentChange,
   metadata,
   recordId,
-  onPersistMedicalHistory
+  onPersistMedicalHistory,
+  onRegenerateSection
 }) => {
+  const doctorScoreEnabled = String(import.meta.env.VITE_DOCTOR_SCORE_ENABLED || 'true').toLowerCase() === 'true';
   // ... (existing state)
   const [copied, setCopied] = useState(false);
 
@@ -125,7 +139,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [isAutosaving, setIsAutosaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+  const [isRegeneratingSection, setIsRegeneratingSection] = useState(false);
+  const [selectedSection, setSelectedSection] = useState<string>('ENFERMEDAD ACTUAL');
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const moreActionsRef = useRef<HTMLDetailsElement | null>(null);
   const quickCommands = ['Niega', 'Sin cambios', 'Sin hallazgos relevantes'];
 
   const originalHistoryRef = useRef<string>('');
@@ -148,20 +165,21 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   useEffect(() => {
     if (recordId !== lastRecordIdRef.current) {
       lastRecordIdRef.current = recordId || null;
-      originalHistoryRef.current = historyText;
+      const baseline = (originalContent || historyText || '').trim();
+      originalHistoryRef.current = baseline;
       lastSavedValueRef.current = historyText;
       setVersions(
-        historyText
+        baseline
           ? [{
             id: `ai-${Date.now()}`,
             label: 'IA (original)',
-            content: historyText,
+            content: baseline,
             createdAt: new Date(),
             source: 'ai'
           }]
           : []
       );
-      setHasEdited(false);
+      setHasEdited(Boolean(historyText.trim()) && historyText.trim() !== baseline);
       setHasFinalized(false);
       setHasGeneratedReport(false);
       setHasExported(false);
@@ -171,18 +189,19 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   }, [recordId, historyText]);
 
   useEffect(() => {
-    if (!originalHistoryRef.current && historyText) {
-      originalHistoryRef.current = historyText;
+    if (!originalHistoryRef.current && (originalContent || historyText)) {
+      const baseline = (originalContent || historyText || '').trim();
+      originalHistoryRef.current = baseline;
       lastSavedValueRef.current = historyText;
       setVersions([{
         id: `ai-${Date.now()}`,
         label: 'IA (original)',
-        content: historyText,
+        content: baseline,
         createdAt: new Date(),
         source: 'ai'
       }]);
     }
-  }, [historyText]);
+  }, [historyText, originalContent]);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -259,11 +278,26 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         event.preventDefault();
         setShowVersionsModal(true);
       }
+
+      if (key === 'escape') {
+        moreActionsRef.current?.removeAttribute('open');
+      }
     };
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [metadata, evidenceByField]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      const node = moreActionsRef.current;
+      if (!node?.hasAttribute('open')) return;
+      if (node.contains(event.target as Node)) return;
+      node.removeAttribute('open');
+    };
+    window.addEventListener('mousedown', handlePointerDown);
+    return () => window.removeEventListener('mousedown', handlePointerDown);
+  }, []);
 
   const evidenceMap = useMemo(() => {
     const map = new Map<string, FieldEvidence[]>();
@@ -281,6 +315,43 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         value: flag.value?.trim() || '',
         reason: flag.reason
       }));
+  }, [metadata]);
+
+  const sectionHeadings = useMemo(() => {
+    const matches = Array.from(historyText.matchAll(/^##\s+(.+)$/gim));
+    const sections = matches.map((match) => (match[1] || '').trim()).filter(Boolean);
+    return sections.length > 0 ? sections : ['ENFERMEDAD ACTUAL'];
+  }, [historyText]);
+
+  useEffect(() => {
+    if (!sectionHeadings.includes(selectedSection)) {
+      setSelectedSection(sectionHeadings[0] || 'ENFERMEDAD ACTUAL');
+    }
+  }, [sectionHeadings, selectedSection]);
+
+  const fieldPathToSection = useCallback((fieldPath: string) => {
+    const value = (fieldPath || '').toLowerCase();
+    if (value.includes('antecedentes')) return 'ANTECEDENTES';
+    if (value.includes('enfermedad_actual') || value.includes('motivo') || value.includes('sintomas')) return 'ENFERMEDAD ACTUAL';
+    if (value.includes('exploraciones') || value.includes('pruebas')) return 'EXPLORACION / PRUEBAS';
+    if (value.includes('diagnostico')) return 'DIAGNOSTICO';
+    if (value.includes('plan')) return 'PLAN';
+    return 'OTROS';
+  }, []);
+
+  const uncertaintyBySection = useMemo(() => {
+    const groups = new Map<string, UncertaintyFlag[]>();
+    for (const flag of metadata?.uncertaintyFlags || []) {
+      const section = fieldPathToSection(flag.field_path);
+      const list = groups.get(section) || [];
+      list.push(flag);
+      groups.set(section, list);
+    }
+    return Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length);
+  }, [fieldPathToSection, metadata]);
+
+  const topDoctorActions = useMemo(() => {
+    return (metadata?.doctorNextActions || []).filter(Boolean).slice(0, 3);
   }, [metadata]);
 
   const openEvidence = useCallback((fieldPath: string) => {
@@ -319,6 +390,38 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     if (!confirmed && !isEditing) {
       handleEditClick();
     }
+  };
+
+  const handleConfirmSection = async (section: string) => {
+    const flags = (metadata?.uncertaintyFlags || []).filter((flag) => fieldPathToSection(flag.field_path) === section);
+    for (const flag of flags) {
+      if (flagDecisions[flag.field_path]) continue;
+      await handleFlagDecision(flag, true);
+    }
+  };
+
+  const handleRegenerateSelectedSection = async () => {
+    if (!onRegenerateSection || !selectedSection) return;
+    setIsRegeneratingSection(true);
+    try {
+      const nextContent = await onRegenerateSection(selectedSection, historyText);
+      await persistContent(nextContent, { autosave: false });
+      setHasEdited(nextContent !== originalHistoryRef.current);
+      setLastSavedAt(new Date());
+    } finally {
+      setIsRegeneratingSection(false);
+    }
+  };
+
+  const handleDoctorScore = async (score: number) => {
+    await saveDoctorSatisfactionEvent({
+      score,
+      record_id: recordId,
+      context: {
+        quality_score: metadata?.qualityScore || null,
+        uncertainty_flags: metadata?.uncertaintyFlags?.length || 0
+      }
+    });
   };
 
   const handleEditClick = () => {
@@ -362,15 +465,34 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     // TRIGGER LEARNING: If content changed, analyze why
     if (editValue !== historyText) {
       if (transcription && apiKey) {
-        processDoctorFeedback(
+        void processDoctorFeedback(
           transcription,
-          historyText, // Original AI version
+          originalHistoryRef.current || historyText, // Original AI baseline
           editValue,   // Doctor's edited version
           apiKey,
+          recordId,
           metadata?.auditId
-        ).then(lesson => {
-          if (lesson) {
-            console.log('[HistoryView] Aprendizaje registrado:', lesson.improvement_category);
+        ).then((learningResult) => {
+          if (learningResult) {
+            console.log('[HistoryView] Learning event registrado:', learningResult.event_ids.length);
+            const usedRuleIds = (metadata?.ruleIdsUsed && metadata.ruleIdsUsed.length > 0)
+              ? metadata.ruleIdsUsed
+              : learningResult.candidate_ids;
+            const hallucinationCount = (metadata?.remainingErrors || []).filter((err) => err.type === 'hallucination').length;
+            const inconsistencyCount = (metadata?.remainingErrors || []).filter((err) => err.type === 'inconsistency').length;
+
+            void evaluateAndPersistRuleImpact({
+              ruleIds: usedRuleIds,
+              aiOutput: originalHistoryRef.current || historyText,
+              doctorOutput: editValue,
+              hallucinationDelta: hallucinationCount > 0 ? 0.005 : 0,
+              inconsistencyDelta: inconsistencyCount > 0 ? 0.005 : 0,
+              metadata: {
+                record_id: recordId || null,
+                audit_id: metadata?.auditId || null,
+                learning_event_ids: learningResult.event_ids
+              }
+            });
           }
         });
       }
@@ -411,8 +533,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     saveEditRef.current = handleSaveEdit;
   }, [handleSaveEdit]);
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text.trim());
+  const handleCopy = async (text: string) => {
+    const copiedOk = await safeCopyToClipboard(text.trim());
+    if (!copiedOk) return;
     setCopied(true);
     setHasExported(true);
     setTimeout(() => setCopied(false), 2000);
@@ -696,50 +819,101 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         <Edit2 size={16} />
                         <span>Editar</span>
                       </button>
-                      {metadata?.extractionMeta && metadata.extractionMeta.length > 0 && (
-                        <button
-                          className="action-button secondary"
-                          onClick={() => setShowSourcesModal(true)}
-                          title="Ver fuentes"
-                        >
-                          <FileText size={16} />
-                          <span>Fuentes</span>
-                        </button>
-                      )}
-                      <button
-                        className="action-button secondary"
-                        onClick={() => setShowCompareModal(true)}
-                        title="Comparar IA vs editado"
-                      >
-                        <FileText size={16} />
-                        <span>Comparar</span>
-                      </button>
-                      <button
-                        className="action-button secondary"
-                        onClick={() => setShowVersionsModal(true)}
-                        title="Ver versiones"
-                      >
-                        <FileText size={16} />
-                        <span>Versiones</span>
-                      </button>
                       <button
                         className="action-button secondary"
                         onClick={handleOpenReport}
-                        title="Generar Informe Médico Formal"
+                        title="Generar informe medico formal"
                       >
                         <FileOutput size={16} />
                         <span>Informe</span>
                       </button>
-                      <button
-                        className={`action-button copy-btn ${copied ? 'success' : ''}`}
-                        onClick={() => handleCopy(historyText)} // Keep historyText here as we copy what is shown
-                      >
-                        {copied ? <Check size={16} /> : <Copy size={16} />}
-                        <span>{copied ? 'Copiado' : 'Copiar'}</span>
-                      </button>
+                      <details className="more-actions-menu" ref={moreActionsRef}>
+                        <summary className="action-button secondary more-actions-trigger" aria-label="Abrir mas acciones">
+                          <MoreHorizontal size={16} />
+                          <span>Mas acciones</span>
+                        </summary>
+                        <div className="more-actions-popover">
+                          {metadata?.extractionMeta && metadata.extractionMeta.length > 0 && (
+                            <button
+                              className="action-button secondary menu-item"
+                              onClick={() => {
+                                moreActionsRef.current?.removeAttribute('open');
+                                setShowSourcesModal(true);
+                              }}
+                              title="Ver fuentes"
+                            >
+                              <FileText size={16} />
+                              <span>Fuentes</span>
+                            </button>
+                          )}
+                          <button
+                            className="action-button secondary menu-item"
+                            onClick={() => {
+                              moreActionsRef.current?.removeAttribute('open');
+                              setShowCompareModal(true);
+                            }}
+                            title="Comparar IA vs editado"
+                          >
+                            <FileText size={16} />
+                            <span>Comparar</span>
+                          </button>
+                          <button
+                            className="action-button secondary menu-item"
+                            onClick={() => {
+                              moreActionsRef.current?.removeAttribute('open');
+                              setShowVersionsModal(true);
+                            }}
+                            title="Ver versiones"
+                          >
+                            <FileText size={16} />
+                            <span>Versiones</span>
+                          </button>
+                          {onRegenerateSection && (
+                            <div className="menu-item section-regen-item">
+                              <select
+                                className="section-regen-select"
+                                value={selectedSection}
+                                onChange={(event) => setSelectedSection(event.target.value)}
+                              >
+                                {sectionHeadings.map((section) => (
+                                  <option key={section} value={section}>{section}</option>
+                                ))}
+                              </select>
+                              <button
+                                className="action-button secondary menu-item"
+                                onClick={() => {
+                                  moreActionsRef.current?.removeAttribute('open');
+                                  void handleRegenerateSelectedSection();
+                                }}
+                                disabled={isRegeneratingSection}
+                                title="Regenerar solo la seccion seleccionada"
+                              >
+                                <Sparkles size={16} />
+                                <span>{isRegeneratingSection ? 'Regenerando...' : 'Regenerar seccion'}</span>
+                              </button>
+                            </div>
+                          )}
+                          <button
+                            className={`action-button copy-btn menu-item ${copied ? 'success' : ''}`}
+                            onClick={() => {
+                              moreActionsRef.current?.removeAttribute('open');
+                              void handleCopy(historyText);
+                            }}
+                          >
+                            {copied ? <Check size={16} /> : <Copy size={16} />}
+                            <span>{copied ? 'Copiado' : 'Copiar'}</span>
+                          </button>
+                        </div>
+                      </details>
                       <button
                         className={`action-button primary ${hasFinalized ? 'success' : ''}`}
-                        onClick={() => setHasFinalized(true)}
+                        onClick={() => {
+                          setHasFinalized(true);
+                          if (doctorScoreEnabled && metadata?.qualityScore) {
+                            const score10 = Math.max(1, Math.min(10, Math.round(metadata.qualityScore / 10)));
+                            void handleDoctorScore(score10);
+                          }
+                        }}
                         title="Finalizar historia"
                         id="finalize-btn"
                       >
@@ -788,6 +962,33 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <span className="classification-pill">{metadata.classification.visit_type}</span>
                 <span className="classification-pill">{metadata.classification.ent_area}</span>
                 <span className="classification-pill">{metadata.classification.urgency}</span>
+              </div>
+            )}
+
+            {(metadata?.qualityScore || topDoctorActions.length > 0 || (metadata?.criticalGaps?.length || 0) > 0) && (
+              <div className="quality-triage-panel">
+                <div className="quality-triage-header">
+                  <span className="quality-title">Acciones recomendadas</span>
+                  {typeof metadata?.qualityScore === 'number' && (
+                    <span className="quality-score">Calidad: {metadata.qualityScore}/100</span>
+                  )}
+                </div>
+                {topDoctorActions.length > 0 && (
+                  <ul className="quality-actions-list">
+                    {topDoctorActions.map((action, index) => (
+                      <li key={`${action}-${index}`}>{action}</li>
+                    ))}
+                  </ul>
+                )}
+                {(metadata?.criticalGaps?.length || 0) > 0 && (
+                  <div className="critical-gaps-row">
+                    {(metadata?.criticalGaps || []).slice(0, 3).map((gap, index) => (
+                      <span key={`${gap.field}-${index}`} className={`gap-chip ${gap.severity}`}>
+                        {gap.severity}: {gap.field.replace(/_/g, ' ')}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -903,6 +1104,20 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <p className="uncertainty-intro">
                   La IA no encontró en la transcripción evidencia directa de los siguientes datos. Por favor, confirma si son correctos o corrígelos.
                 </p>
+                {uncertaintyBySection.length > 0 && (
+                  <div className="uncertainty-bulk-actions">
+                    {uncertaintyBySection.map(([section, flags]) => (
+                      <button
+                        key={section}
+                        type="button"
+                        className="flag-action ghost"
+                        onClick={() => void handleConfirmSection(section)}
+                      >
+                        Confirmar todo {section} ({flags.length})
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <ul className="uncertainty-list">
                   {metadata.uncertaintyFlags.map((flag, i) => {
                     const decision = flagDecisions[flag.field_path];
@@ -995,7 +1210,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             >
               <div className="modal-header">
                 <h3>Informe Médico Formal</h3>
-                <button className="close-btn" onClick={() => setShowReportModal(false)}>
+                <button className="close-btn" onClick={() => setShowReportModal(false)} aria-label="Cerrar informe">
                   <X size={20} />
                 </button>
               </div>
@@ -1018,7 +1233,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               <div className="modal-footer">
                 {isGeneratingReport ? null : (
                   <>
-                    <button className="action-button primary" onClick={() => handleCopy(reportContent)}>
+                    <button className="action-button primary" onClick={() => void handleCopy(reportContent)}>
                       <Copy size={16} /> Copiar
                     </button>
                     <button className="action-button success" onClick={handlePrintReport}>
@@ -1049,7 +1264,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             >
               <div className="modal-header">
                 <h3>Fuentes y evidencia</h3>
-                <button className="close-btn" onClick={() => setShowSourcesModal(false)}>
+                <button className="close-btn" onClick={() => setShowSourcesModal(false)} aria-label="Cerrar fuentes">
                   <X size={20} />
                 </button>
               </div>
@@ -1096,7 +1311,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             >
               <div className="modal-header">
                 <h3>Evidencia guiada</h3>
-                <button className="close-btn" onClick={() => setShowEvidenceModal(false)}>
+                <button className="close-btn" onClick={() => setShowEvidenceModal(false)} aria-label="Cerrar evidencia">
                   <X size={20} />
                 </button>
               </div>
@@ -1174,7 +1389,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             >
               <div className="modal-header">
                 <h3>Comparar IA vs editado</h3>
-                <button className="close-btn" onClick={() => setShowCompareModal(false)}>
+                <button className="close-btn" onClick={() => setShowCompareModal(false)} aria-label="Cerrar comparativa">
                   <X size={20} />
                 </button>
               </div>
@@ -1236,7 +1451,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             >
               <div className="modal-header">
                 <h3>Versiones guardadas</h3>
-                <button className="close-btn" onClick={() => setShowVersionsModal(false)}>
+                <button className="close-btn" onClick={() => setShowVersionsModal(false)} aria-label="Cerrar versiones">
                   <X size={20} />
                 </button>
               </div>
@@ -1257,7 +1472,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                           </button>
                           <button
                             className="action-button primary"
-                            onClick={() => navigator.clipboard.writeText(version.content)}
+                            onClick={() => void safeCopyToClipboard(version.content)}
                           >
                             Copiar
                           </button>
@@ -1357,13 +1572,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           gap: 1rem;
         }
 
-        .action-buttons-group {
+        .history-view-container .action-buttons-group {
           display: flex;
           align-items: center;
           gap: 0.6rem;
         }
 
-        .action-button {
+        .history-view-container .action-button {
           display: flex;
           align-items: center;
           gap: 0.6rem;
@@ -1376,26 +1591,26 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
         }
 
-        .action-button.new-consultation {
+        .history-view-container .action-button.new-consultation {
           background: var(--brand-gradient);
           color: white;
           box-shadow: 0 4px 12px rgba(38, 166, 154, 0.3);
           font-weight: 600;
         }
         
-        .action-button.new-consultation:hover {
+        .history-view-container .action-button.new-consultation:hover {
           transform: translateY(-2px);
           box-shadow: 0 8px 20px rgba(38, 166, 154, 0.4);
         }
 
-        .action-button.copy-btn {
+        .history-view-container .action-button.copy-btn {
           background: white;
           color: var(--text-secondary);
           border: 1px solid var(--glass-border);
           box-shadow: var(--shadow-sm);
         }
         
-        .action-button.copy-btn:hover {
+        .history-view-container .action-button.copy-btn:hover {
           border-color: var(--brand-primary);
           color: var(--brand-primary);
           background: #f0fdfa;
@@ -1403,29 +1618,83 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           box-shadow: var(--shadow-md);
         }
 
-        .action-button.primary {
+        .history-view-container .action-button.primary {
           background: var(--bg-secondary);
           color: var(--text-primary);
           border: 1px solid var(--glass-border);
         }
 
-        .action-button.primary:hover {
+        .history-view-container .action-button.primary:hover {
           background: var(--bg-tertiary);
         }
 
-        .action-button.secondary {
+        .history-view-container .action-button.secondary {
           background: transparent;
           color: var(--brand-primary);
           border: 1px solid var(--brand-primary);
         }
         
-        .action-button.secondary:hover {
+        .history-view-container .action-button.secondary:hover {
           background: rgba(38, 166, 154, 0.05);
         }
 
-        .action-button.success {
+        .history-view-container .action-button.success {
           background: #10b981;
           color: white;
+        }
+
+        .more-actions-menu {
+          position: relative;
+        }
+
+        .more-actions-trigger {
+          list-style: none;
+          user-select: none;
+          cursor: pointer;
+        }
+
+        .more-actions-trigger::-webkit-details-marker {
+          display: none;
+        }
+
+        .more-actions-trigger:focus-visible {
+          box-shadow: var(--focus-ring);
+        }
+
+        .more-actions-popover {
+          position: absolute;
+          right: 0;
+          top: calc(100% + 0.35rem);
+          min-width: 190px;
+          border: 1px solid var(--border-soft);
+          background: white;
+          border-radius: 12px;
+          box-shadow: var(--shadow-lg);
+          padding: 0.45rem;
+          display: grid;
+          gap: 0.35rem;
+          z-index: 12;
+        }
+
+        .menu-item {
+          width: 100%;
+          justify-content: flex-start;
+        }
+
+        .section-regen-item {
+          display: grid;
+          gap: 0.5rem;
+          padding: 0.25rem 0;
+        }
+
+        .section-regen-select {
+          width: 100%;
+          border: 1px solid #cbd5e1;
+          border-radius: 8px;
+          font-size: 0.8rem;
+          padding: 0.35rem 0.5rem;
+          background: #ffffff;
+          color: #0f172a;
         }
 
         .document-content {
@@ -1437,17 +1706,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         }
 
         /* Markdown Styles */
-        .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+        .history-view-container .markdown-body h1, .history-view-container .markdown-body h2, .history-view-container .markdown-body h3 {
           margin-top: 1.5em;
           margin-bottom: 0.75em;
           color: #1e293b;
           font-family: var(--font-sans);
         }
         
-        .markdown-body h1 { font-size: 1.5em; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.3em; }
-        .markdown-body h2 { font-size: 1.25em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary); margin-top: 2em; }
-        .markdown-body p { margin-bottom: 1em; }
-        .markdown-body ul { padding-left: 1.5em; margin-bottom: 1em; }
+        .history-view-container .markdown-body h1 { font-size: 1.5em; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.3em; }
+        .history-view-container .markdown-body h2 { font-size: 1.25em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary); margin-top: 2em; }
+        .history-view-container .markdown-body p { margin-bottom: 1em; }
+        .history-view-container .markdown-body ul { padding-left: 1.5em; margin-bottom: 1em; }
 
         /* Remaining Errors Warning */
         .remaining-errors-warning {
@@ -1490,6 +1759,79 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           border-radius: 12px;
           background: #fefce8;
           border: 1px solid #fde68a;
+        }
+
+        .quality-triage-panel {
+          margin: 1rem 2rem 0;
+          border: 1px solid #bfdbfe;
+          background: #eff6ff;
+          border-radius: 12px;
+          padding: 0.9rem 1rem;
+          display: grid;
+          gap: 0.65rem;
+        }
+
+        .quality-triage-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 0.75rem;
+        }
+
+        .quality-title {
+          font-weight: 700;
+          color: #1e3a8a;
+          font-size: 0.9rem;
+        }
+
+        .quality-score {
+          font-size: 0.8rem;
+          color: #1d4ed8;
+          background: #dbeafe;
+          border-radius: 999px;
+          padding: 4px 10px;
+          font-weight: 600;
+        }
+
+        .quality-actions-list {
+          margin: 0;
+          padding-left: 1rem;
+          color: #1e3a8a;
+          font-size: 0.85rem;
+          display: grid;
+          gap: 0.35rem;
+        }
+
+        .critical-gaps-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+        }
+
+        .gap-chip {
+          font-size: 0.75rem;
+          border-radius: 999px;
+          padding: 0.3rem 0.55rem;
+          border: 1px solid transparent;
+          font-weight: 600;
+        }
+
+        .gap-chip.critical {
+          background: #fee2e2;
+          color: #b91c1c;
+          border-color: #fecaca;
+        }
+
+        .gap-chip.major {
+          background: #ffedd5;
+          color: #c2410c;
+          border-color: #fed7aa;
+        }
+
+        .gap-chip.minor {
+          background: #fef9c3;
+          color: #854d0e;
+          border-color: #fde68a;
         }
 
         .uncertainty-header {
@@ -1558,6 +1900,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           display: flex;
           gap: 0.5rem;
           align-items: center;
+        }
+
+        .uncertainty-bulk-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+          margin-bottom: 0.75rem;
         }
 
         .flag-action {
@@ -1722,7 +2071,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             66% { transform: translate(-20px, 20px) scale(0.9); }
         }
 
-        .spinner-wrapper {
+        .history-view-container .spinner-wrapper {
             position: relative;
             width: 100px;
             height: 100px;
@@ -1777,7 +2126,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         }
 
         /* Modal Styles */
-        .modal-overlay {
+        .history-view-container .modal-overlay {
           position: fixed;
           top: 0;
           left: 0;
@@ -1791,7 +2140,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           backdrop-filter: blur(4px);
         }
 
-        .modal-content {
+        .history-view-container .modal-content {
           background: white;
           width: 90%;
           max-width: 800px;
@@ -1802,7 +2151,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           box-shadow: var(--shadow-lg);
         }
 
-        .modal-header {
+        .history-view-container .modal-header {
           padding: 1.5rem;
           border-bottom: 1px solid var(--glass-border);
           display: flex;
@@ -1810,20 +2159,20 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           align-items: center;
         }
 
-        .modal-header h3 {
+        .history-view-container .modal-header h3 {
           margin: 0;
           font-family: var(--font-display);
           color: var(--text-primary);
         }
         
-        .close-btn {
+        .history-view-container .close-btn {
           background: none;
           border: none;
           cursor: pointer;
           color: var(--text-secondary);
         }
 
-        .modal-body {
+        .history-view-container .modal-body {
           flex: 1;
           padding: 1.5rem;
           overflow: hidden;
@@ -1849,7 +2198,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           border-color: var(--brand-primary);
         }
 
-        .modal-footer {
+        .history-view-container .modal-footer {
           padding: 1.5rem;
           border-top: 1px solid var(--glass-border);
           display: flex;
@@ -1857,14 +2206,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           gap: 1rem;
         }
 
-        .modal-content.evidence-modal,
-        .modal-content.compare-modal,
-        .modal-content.versions-modal {
+        .history-view-container .modal-content.evidence-modal,
+        .history-view-container .modal-content.compare-modal,
+        .history-view-container .modal-content.versions-modal {
           max-width: 880px;
         }
 
-        .modal-body.evidence-body,
-        .modal-body.versions-body {
+        .history-view-container .modal-body.evidence-body,
+        .history-view-container .modal-body.versions-body {
           max-height: 60vh;
           overflow-y: auto;
           display: flex;
@@ -2061,7 +2410,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           color: #0f172a;
         }
 
-        .loading-state {
+        .history-view-container .loading-state {
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -2071,7 +2420,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           color: var(--text-secondary);
         }
 
-        .spinner {
+        .history-view-container .spinner {
           width: 30px;
           height: 30px;
           border: 3px solid var(--bg-tertiary);
@@ -2085,13 +2434,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         }
 
         /* Markdown Styles for Medical Report */
-        .markdown-body {
+        .history-view-container .markdown-body {
             color: #334155;
             line-height: 1.7;
             font-size: 1rem;
         }
 
-        .markdown-body h2 {
+        .history-view-container .markdown-body h2 {
             font-size: 1.1rem;
             font-weight: 700;
             color: #0f766e; /* Teal-700 */
@@ -2103,7 +2452,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             padding-bottom: 0.25rem;
         }
 
-        .markdown-body h3 {
+        .history-view-container .markdown-body h3 {
             font-size: 1rem;
             font-weight: 600;
             color: #475569;
@@ -2111,32 +2460,101 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             margin-bottom: 0.5rem;
         }
 
-        .markdown-body p {
+        .history-view-container .markdown-body p {
             margin-bottom: 1rem;
             text-align: justify;
         }
 
-        .markdown-body ul {
+        .history-view-container .markdown-body ul {
             list-style-type: none; /* Removed bullets for clean "Form" look */
             padding-left: 0;       /* Align with headers */
             margin-bottom: 1rem;
         }
 
-        .markdown-body li {
+        .history-view-container .markdown-body li {
             margin-bottom: 0.5rem;
             border-bottom: 1px dashed #f1f5f9; /* Subtle separator line */
             padding-bottom: 0.25rem;
         }
         
-        .markdown-body li:last-child {
+        .history-view-container .markdown-body li:last-child {
             border-bottom: none;
         }
 
-        .markdown-body strong {
+        .history-view-container .markdown-body strong {
             color: #1e293b;
             font-weight: 600;
+        }
+
+        @media (max-width: 1200px) {
+          .history-layout {
+            gap: 1rem;
+            max-width: 100%;
+          }
+
+          .history-view-container .action-buttons-group {
+            gap: 0.4rem;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+          }
+
+          .history-view-container .action-button {
+            padding: 0.5rem 0.85rem;
+            font-size: 0.85rem;
+          }
+        }
+
+        @media (max-width: 1024px) {
+          .history-layout {
+            flex-direction: column;
+          }
+
+          .notes-column {
+            min-width: 0;
+            width: 100%;
+            position: static;
+          }
+
+          .history-view-container .document-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.8rem;
+          }
+
+          .history-view-container .action-buttons-group {
+            width: 100%;
+            justify-content: flex-start;
+          }
+
+          .document-content {
+            padding: 1.25rem;
+          }
+
+          .workflow-bar {
+            padding: 0 1.25rem 1rem;
+            flex-direction: column;
+            align-items: flex-start;
+          }
+
+          .classification-banner {
+            padding: 0.75rem 1.25rem;
+            flex-wrap: wrap;
+          }
+
+          .uncertainty-item {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+
+          .more-actions-popover {
+            left: 0;
+            right: auto;
+          }
         }
       `}</style>
     </div>
   );
 };
+
+
+

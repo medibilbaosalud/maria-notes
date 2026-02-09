@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { buildSupabaseFetch } from './net';
 
 // These should be environment variables in a real app
 // For now, we'll use placeholders that the user needs to fill
@@ -7,7 +8,16 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 // Create a dummy client or null if config is missing to prevent crash
 export const supabase = (SUPABASE_URL && SUPABASE_KEY && SUPABASE_URL !== 'YOUR_SUPABASE_URL')
-    ? createClient(SUPABASE_URL, SUPABASE_KEY)
+    ? createClient(SUPABASE_URL, SUPABASE_KEY, {
+        global: {
+            fetch: buildSupabaseFetch({
+                timeoutMs: 15_000,
+                retries: 2,
+                baseDelayMs: 250,
+                maxDelayMs: 2_000
+            })
+        }
+    })
     : null;
 
 export interface MedicalRecord {
@@ -330,6 +340,43 @@ export const logQualityEvent = async (event: {
     }
 };
 
+export const saveDoctorSatisfactionEvent = async (entry: {
+    score: number;
+    record_id?: string;
+    context?: Record<string, unknown>;
+}): Promise<void> => {
+    if (!supabase) return;
+    const score = Math.max(1, Math.min(10, Math.round(entry.score)));
+    const { error } = await supabase.from('doctor_satisfaction_events').insert([{
+        score,
+        record_id: entry.record_id || null,
+        context: entry.context || {},
+        created_at: new Date().toISOString()
+    }]);
+    if (error) console.error('Error saving doctor satisfaction event:', error);
+};
+
+export const upsertConsultationQualitySummary = async (summary: {
+    record_id: string;
+    quality_score: number;
+    critical_gaps_count: number;
+    corrected_count: number;
+}): Promise<void> => {
+    if (!supabase || !summary.record_id) return;
+    const { error } = await supabase
+        .from('consultation_quality_summary')
+        .upsert([{
+            record_id: summary.record_id,
+            quality_score: Math.max(0, Math.min(100, Math.round(summary.quality_score))),
+            critical_gaps_count: Math.max(0, Math.round(summary.critical_gaps_count || 0)),
+            corrected_count: Math.max(0, Math.round(summary.corrected_count || 0)),
+            created_at: new Date().toISOString()
+        }], {
+            onConflict: 'record_id'
+        });
+    if (error) console.error('Error upserting consultation quality summary:', error);
+};
+
 // ════════════════════════════════════════════════════════════════
 // ERROR LOGGING: Log errors to Supabase for debugging
 // ════════════════════════════════════════════════════════════════
@@ -341,6 +388,72 @@ export interface ErrorLogEntry {
     severity?: 'error' | 'warning' | 'info';
     url?: string;
 }
+
+export interface AppErrorEvent {
+    message: string;
+    stack?: string;
+    source?: string;
+    severity?: 'error' | 'warning' | 'info';
+    handled?: boolean;
+    session_id?: string;
+    route?: string;
+    context?: Record<string, any>;
+    breadcrumbs?: Array<{
+        at: string;
+        type: string;
+        message: string;
+        metadata?: Record<string, unknown>;
+    }>;
+    user_agent?: string;
+    app_version?: string;
+    release_channel?: string;
+    fingerprint?: string;
+}
+
+const buildErrorFingerprint = (event: AppErrorEvent): string => {
+    const base = [
+        (event.source || '').toLowerCase(),
+        (event.message || '').toLowerCase(),
+        (event.stack || '').split('\n')[0]?.toLowerCase() || ''
+    ].join('|');
+
+    let hash = 2166136261;
+    for (let i = 0; i < base.length; i++) {
+        hash ^= base.charCodeAt(i);
+        hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+    }
+    return `err_${(hash >>> 0).toString(16)}`;
+};
+
+export const logAppErrorEvent = async (event: AppErrorEvent): Promise<void> => {
+    if (!supabase) return;
+
+    const normalizedEvent = {
+        message: event.message,
+        stack: event.stack || null,
+        source: event.source || 'app',
+        severity: event.severity || 'error',
+        handled: Boolean(event.handled),
+        session_id: event.session_id || null,
+        route: event.route || (typeof window !== 'undefined' ? window.location.pathname : null),
+        fingerprint: event.fingerprint || buildErrorFingerprint(event),
+        context: event.context || {},
+        breadcrumbs: event.breadcrumbs || [],
+        user_agent: event.user_agent || (typeof navigator !== 'undefined' ? navigator.userAgent : null),
+        app_version: event.app_version || (import.meta.env.VITE_APP_VERSION || null),
+        release_channel: event.release_channel || (import.meta.env.MODE || 'unknown'),
+        created_at: new Date().toISOString()
+    };
+
+    try {
+        const { error } = await supabase.from('app_error_events').insert([normalizedEvent]);
+        if (error) {
+            console.error('[logAppErrorEvent] Failed to log app error:', error);
+        }
+    } catch (insertError) {
+        console.error('[logAppErrorEvent] Exception while logging app error:', insertError);
+    }
+};
 
 export const logError = async (error: ErrorLogEntry): Promise<void> => {
     if (!supabase) {
@@ -364,6 +477,15 @@ export const logError = async (error: ErrorLogEntry): Promise<void> => {
         } else {
             console.log('[logError] Error logged to Supabase:', error.message);
         }
+
+        await logAppErrorEvent({
+            message: error.message,
+            stack: error.stack,
+            source: error.source,
+            severity: error.severity,
+            handled: true,
+            context: error.context
+        });
     } catch (e) {
         console.error('[logError] Exception while logging error:', e);
     }

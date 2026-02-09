@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Search, FileText, ChevronRight, Copy, Check, Sparkles, Trash2, FileOutput, Printer, X, Calendar, User, Pencil, Save } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { searchMedicalRecords, MedicalRecord, deleteMedicalRecord as deleteFromSupabase, updateMedicalRecord as updateInSupabase } from '../services/supabase';
+import { searchMedicalRecords, type MedicalRecord, deleteMedicalRecord, updateMedicalRecord } from '../services/storage';
 import { AIService } from '../services/ai';
 import ReactMarkdown from 'react-markdown';
+import { safeCopyToClipboard } from '../utils/safeBrowser';
 
 
 interface SearchHistoryProps {
@@ -52,22 +53,23 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
     handleSearch({ preventDefault: () => { } } as React.FormEvent);
   }, []);
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const handleCopy = async (text: string) => {
+    const copiedOk = await safeCopyToClipboard(text);
+    if (!copiedOk) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
+  const handleDelete = async (recordUuid: string, e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
 
     if (window.confirm('¿Estás seguro de que quieres eliminar esta consulta?')) {
       try {
-        const success = await deleteFromSupabase(id);
+        const success = await deleteMedicalRecord(recordUuid);
         if (success) {
-          setResults(prevResults => prevResults.filter(r => r.id !== id));
-          if (selectedRecord?.id === id) {
+          setResults(prevResults => prevResults.filter(r => r.record_uuid !== recordUuid));
+          if (selectedRecord?.record_uuid === recordUuid) {
             setSelectedRecord(null);
           }
         } else {
@@ -100,14 +102,13 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
 
       setReportContent(report);
 
-      if (selectedRecord.id) {
-        console.log("Attempting to save report for ID:", selectedRecord.id);
-        const updated = await updateInSupabase(selectedRecord.id, { medical_report: report });
+      if (selectedRecord.record_uuid) {
+        const updated = await updateMedicalRecord(selectedRecord.record_uuid, { medical_report: report });
 
         if (updated) {
           console.log("Report saved to Supabase successfully:", updated);
           setSelectedRecord({ ...selectedRecord, medical_report: report });
-          setResults(results.map(r => r.id === selectedRecord.id ? { ...r, medical_report: report } : r));
+          setResults(results.map(r => r.record_uuid === selectedRecord.record_uuid ? { ...r, medical_report: report } : r));
           // alert("Informe guardado correctamente en la base de datos."); // Optional: Uncomment if user wants explicit confirmation
         } else {
           console.error("Failed to update record in Supabase. updateInSupabase returned null.");
@@ -201,12 +202,12 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
     if (!selectedRecord || !editedName.trim()) return;
 
     try {
-      const updated = await updateInSupabase(selectedRecord.id!, { patient_name: editedName });
+      const updated = await updateMedicalRecord(selectedRecord.record_uuid, { patient_name: editedName });
 
       if (updated && updated.length > 0) {
         const updatedRecord = { ...selectedRecord, patient_name: editedName };
         setSelectedRecord(updatedRecord);
-        setResults(results.map(r => r.id === selectedRecord.id ? updatedRecord : r));
+        setResults(results.map(r => r.record_uuid === selectedRecord.record_uuid ? updatedRecord : r));
         setIsEditingName(false);
       } else {
         console.error("Update returned empty array or null");
@@ -238,10 +239,10 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
       if (editedHistory !== selectedRecord.medical_history) {
         setIsSaving(true);
         try {
-          await updateInSupabase(selectedRecord.id!, { medical_history: editedHistory });
+          await updateMedicalRecord(selectedRecord.record_uuid, { medical_history: editedHistory });
           const updatedRecord = { ...selectedRecord, medical_history: editedHistory };
           setSelectedRecord(updatedRecord);
-          setResults(prev => prev.map(r => r.id === selectedRecord.id ? updatedRecord : r));
+          setResults(prev => prev.map(r => r.record_uuid === selectedRecord.record_uuid ? updatedRecord : r));
           setLastSaved(new Date());
         } catch (error) {
           console.error("Autosave failed:", error);
@@ -261,11 +262,11 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
     if (!selectedRecord) return;
     setIsSaving(true);
     try {
-      const updated = await updateInSupabase(selectedRecord.id!, { medical_history: editedHistory });
+      const updated = await updateMedicalRecord(selectedRecord.record_uuid, { medical_history: editedHistory });
       if (updated && updated.length > 0) {
         const updatedRecord = { ...selectedRecord, medical_history: editedHistory };
         setSelectedRecord(updatedRecord);
-        setResults(results.map(r => r.id === selectedRecord.id ? updatedRecord : r));
+        setResults(results.map(r => r.record_uuid === selectedRecord.record_uuid ? updatedRecord : r));
         setIsEditingHistory(false);
         setLastSaved(new Date());
       } else {
@@ -284,10 +285,10 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
     if (!selectedRecord) return;
 
     try {
-      const updated = await updateInSupabase(selectedRecord.id!, { medical_report: reportContent });
+      const updated = await updateMedicalRecord(selectedRecord.record_uuid, { medical_report: reportContent });
       if (updated && updated.length > 0) {
         setSelectedRecord({ ...selectedRecord, medical_report: reportContent });
-        setResults(results.map(r => r.id === selectedRecord.id ? { ...r, medical_report: reportContent } : r));
+        setResults(results.map(r => r.record_uuid === selectedRecord.record_uuid ? { ...r, medical_report: reportContent } : r));
         setIsEditingReport(false);
       } else {
         alert("No se pudo guardar el informe.");
@@ -375,7 +376,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
             placeholder="Buscar por paciente, diagnóstico..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="search-input"
+            className="history-search-input"
           />
         </form>
       </div>
@@ -383,8 +384,8 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
       <div className="content-grid">
         <div className="list-column">
           {isLoading ? (
-            <div className="loading-state">
-              <div className="spinner"></div>
+            <div className="search-history-loading-state">
+              <div className="search-history-spinner"></div>
             </div>
           ) : results.length === 0 ? (
             <div className="empty-state">
@@ -394,9 +395,9 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
             <div className="cards-list">
               {results.map((record) => (
                 <motion.div
-                  key={record.id}
+                  key={record.record_uuid}
 
-                  className={`patient-card ${selectedRecord?.id === record.id ? 'active' : ''}`}
+                  className={`patient-card ${selectedRecord?.record_uuid === record.record_uuid ? 'active' : ''}`}
                   onClick={() => {
                     setSelectedRecord(record);
                     if (onLoadRecord) onLoadRecord(record);
@@ -424,8 +425,9 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
 
                   <div className="card-actions">
                     <button
-                      className="icon-btn delete"
-                      onClick={(e) => handleDelete(record.id!, e)}
+                      className="search-icon-btn delete"
+                      onClick={(e) => handleDelete(record.record_uuid, e)}
+                      aria-label="Eliminar consulta"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -441,7 +443,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           <AnimatePresence mode="wait">
             {selectedRecord ? (
               <motion.div
-                key={selectedRecord.id}
+                key={selectedRecord.record_uuid}
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
@@ -467,17 +469,17 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
                                   className="name-edit-input"
                                   autoFocus
                                 />
-                                <button className="icon-btn save-name" onClick={handleSaveName}>
+                                <button className="search-icon-btn save-name" onClick={handleSaveName} aria-label="Guardar nombre">
                                   <Save size={18} />
                                 </button>
-                                <button className="icon-btn cancel-name" onClick={() => setIsEditingName(false)}>
+                                <button className="search-icon-btn cancel-name" onClick={() => setIsEditingName(false)} aria-label="Cancelar edicion de nombre">
                                   <X size={18} />
                                 </button>
                               </div>
                             ) : (
                               <div className="name-display-wrapper">
                                 <h1>{selectedRecord.patient_name}</h1>
-                                <button className="icon-btn edit-name" onClick={handleStartEditingName}>
+                                <button className="search-icon-btn edit-name" onClick={handleStartEditingName} aria-label="Editar nombre">
                                   <Pencil size={16} />
                                 </button>
                               </div>
@@ -492,7 +494,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
                         </div>
 
                         <div className="header-actions">
-                          <button className="btn-secondary" onClick={handleOpenReport}>
+                          <button className="search-history-btn-secondary" onClick={handleOpenReport}>
                             <FileOutput size={16} />
                             <span>Informe Formal</span>
                           </button>
@@ -508,25 +510,25 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
                               {!isSaving && lastSaved && isEditingHistory && <span style={{ fontSize: '0.8rem', color: '#16a34a', marginRight: '1rem', alignSelf: 'center' }}>Guardado</span>}
                               {!isEditingHistory && (
                                 <>
-                                  <button className="icon-btn copy-doc" onClick={() => handleCopy(history || '')} title="Copiar">
+                                  <button className="search-icon-btn copy-doc" onClick={() => void handleCopy(history || '')} title="Copiar" aria-label="Copiar historia">
                                     {copied ? <Check size={16} /> : <Copy size={16} />}
                                   </button>
-                                  <button className="icon-btn print-doc" onClick={() => handlePrintHistory(history || '', selectedRecord.patient_name)} title="Imprimir">
+                                  <button className="search-icon-btn print-doc" onClick={() => handlePrintHistory(history || '', selectedRecord.patient_name)} title="Imprimir" aria-label="Imprimir historia">
                                     <Printer size={16} />
                                   </button>
                                 </>
                               )}
                               {isEditingHistory ? (
                                 <div className="edit-actions">
-                                  <button className="icon-btn save-history" onClick={handleSaveHistory}>
+                                  <button className="search-icon-btn save-history" onClick={handleSaveHistory} aria-label="Guardar historia">
                                     <Save size={16} />
                                   </button>
-                                  <button className="icon-btn cancel-history" onClick={() => setIsEditingHistory(false)}>
+                                  <button className="search-icon-btn cancel-history" onClick={() => setIsEditingHistory(false)} aria-label="Cancelar edicion de historia">
                                     <X size={16} />
                                   </button>
                                 </div>
                               ) : (
-                                <button className="icon-btn edit-doc" onClick={handleStartEditingHistory} title="Editar">
+                                <button className="search-icon-btn edit-doc" onClick={handleStartEditingHistory} title="Editar" aria-label="Editar historia">
                                   <Pencil size={16} />
                                 </button>
                               )}
@@ -579,25 +581,25 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
       <AnimatePresence>
         {showReportModal && (
           <motion.div
-            className="modal-overlay"
+            className="search-history-modal-overlay"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
             <motion.div
-              className="modal-content"
+              className="search-history-modal-content"
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
             >
-              <div className="modal-header">
+              <div className="search-history-modal-header">
                 <h3>Informe Médico Formal</h3>
-                <button className="close-btn" onClick={() => setShowReportModal(false)}>
+                <button className="search-history-close-btn" onClick={() => setShowReportModal(false)} aria-label="Cerrar modal de informe">
                   <X size={20} />
                 </button>
               </div>
 
-              <div className="modal-body">
+              <div className="search-history-modal-body">
                 {isGeneratingReport ? (
                   <div className="loading-state premium-loading">
                     <div className="loading-visual">
@@ -653,25 +655,25 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
                 )}
               </div>
 
-              <div className="modal-footer">
+              <div className="search-history-modal-footer">
                 {!isGeneratingReport && (
                   <>
                     {isEditingReport ? (
-                      <button className="btn-primary" onClick={handleSaveReport}>
+                      <button className="search-history-btn-primary" onClick={handleSaveReport}>
                         <Save size={16} />
                         <span>Guardar Cambios</span>
                       </button>
                     ) : (
-                      <button className="btn-secondary" onClick={() => setIsEditingReport(true)}>
+                      <button className="search-history-btn-secondary" onClick={() => setIsEditingReport(true)}>
                         <Pencil size={16} />
                         <span>Editar</span>
                       </button>
                     )}
-                    <button className="btn-secondary" onClick={() => handleCopy(reportContent)}>
+                    <button className="search-history-btn-secondary" onClick={() => void handleCopy(reportContent)}>
                       {copied ? <Check size={16} /> : <Copy size={16} />}
                       <span>{copied ? 'Copiado' : 'Copiar Texto'}</span>
                     </button>
-                    <button className="btn-primary" onClick={handlePrintReport}>
+                    <button className="search-history-btn-primary" onClick={handlePrintReport}>
                       <Printer size={16} />
                       <span>Imprimir PDF</span>
                     </button>
@@ -706,7 +708,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           max-width: 480px;
         }
 
-        .search-input {
+        .history-search-input {
           width: 100%;
           padding: 1rem 1rem 1rem 3rem;
           border-radius: var(--radius-full);
@@ -719,7 +721,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           transition: all 0.2s ease;
         }
 
-        .search-input:focus {
+        .history-search-input:focus {
           outline: none;
           box-shadow: var(--shadow-glow);
           border-color: var(--brand-primary);
@@ -856,7 +858,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           opacity: 1;
         }
 
-        .icon-btn {
+        .search-icon-btn {
           background: white;
           border: 1px solid rgba(0,0,0,0.1);
           padding: 6px;
@@ -869,13 +871,13 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           justify-content: center;
         }
         
-        .icon-btn:hover {
+        .search-icon-btn:hover {
             background: #F8FAFC;
             color: var(--text-primary);
             border-color: rgba(0,0,0,0.2);
         }
         
-        .icon-btn.delete:hover {
+        .search-icon-btn.delete:hover {
             color: #ef4444;
             background: #FEF2F2;
             border-color: #FECACA;
@@ -1143,7 +1145,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           line-height: 1.7;
         }
 
-        .btn-primary {
+        .search-history-btn-primary {
           background: linear-gradient(135deg, #e0f7f5 0%, #d4f0ed 100%);
           color: var(--brand-primary);
           border: 1px solid rgba(38, 166, 154, 0.25);
@@ -1158,14 +1160,14 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           box-shadow: none;
         }
 
-        .btn-primary:hover {
+        .search-history-btn-primary:hover {
           background: linear-gradient(135deg, #d4f0ed 0%, #c8ebe8 100%);
           border-color: var(--brand-primary);
           transform: translateY(-1px);
           box-shadow: 0 2px 8px rgba(38, 166, 154, 0.15);
         }
 
-        .btn-secondary {
+        .search-history-btn-secondary {
           background: white;
           color: var(--text-secondary);
           border: 1px solid rgba(0,0,0,0.08);
@@ -1179,7 +1181,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           transition: all 0.2s;
         }
 
-        .btn-secondary:hover {
+        .search-history-btn-secondary:hover {
           background: #f8fafb;
           border-color: rgba(38, 166, 154, 0.3);
           color: var(--brand-primary);
@@ -1205,7 +1207,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
         }
 
         /* Modal */
-        .modal-overlay {
+        .search-history-modal-overlay {
           position: fixed;
           top: 0; left: 0; right: 0; bottom: 0;
           background: rgba(0, 0, 0, 0.4);
@@ -1216,7 +1218,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           justify-content: center;
         }
 
-        .modal-content {
+        .search-history-modal-content {
           background: white;
           width: 90%;
           max-width: 800px;
@@ -1227,7 +1229,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           box-shadow: var(--shadow-lg);
         }
 
-        .modal-header {
+        .search-history-modal-header {
           padding: 1.5rem 2rem;
           border-bottom: 1px solid rgba(0,0,0,0.05);
           display: flex;
@@ -1235,19 +1237,27 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           align-items: center;
         }
 
-        .modal-header h3 {
+        .search-history-modal-header h3 {
           margin: 0;
           font-family: var(--font-display);
           font-weight: 700;
         }
 
-        .close-btn {
+        .search-history-close-btn {
           background: transparent;
           border: none;
           cursor: pointer;
         }
 
-        .modal-footer {
+        .search-history-modal-body {
+          flex: 1;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          padding: 1.25rem 1.5rem;
+        }
+
+        .search-history-modal-footer {
           padding: 1.5rem 2rem;
           border-top: 1px solid rgba(0,0,0,0.05);
           display: flex;
@@ -1257,7 +1267,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           border-radius: 0 0 var(--radius-lg) var(--radius-lg);
         }
 
-        .loading-state {
+        .search-history-loading-state {
           height: 100%;
           display: flex;
           flex-direction: column;
@@ -1267,7 +1277,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           color: var(--text-secondary);
         }
 
-        .spinner {
+        .search-history-spinner {
           width: 24px;
           height: 24px;
           border: 3px solid rgba(0, 105, 92, 0.1);
@@ -1346,16 +1356,66 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
             gap: 0.5rem;
         }
 
-        .icon-btn.copy-doc,
-        .icon-btn.print-doc {
+        .search-icon-btn.copy-doc,
+        .search-icon-btn.print-doc {
             background: #f8fafc;
             color: var(--brand-primary);
         }
 
-        .icon-btn.copy-doc:hover,
-        .icon-btn.print-doc:hover {
+        .search-icon-btn.copy-doc:hover,
+        .search-icon-btn.print-doc:hover {
             background: var(--brand-primary);
             color: white;
+        }
+
+        @media (max-width: 1200px) {
+          .content-grid {
+            grid-template-columns: 300px 1fr;
+            gap: 1rem;
+          }
+
+          .paper-document {
+            padding: 1.6rem;
+          }
+        }
+
+        @media (max-width: 1024px) {
+          .history-container {
+            gap: 1rem;
+          }
+
+          .content-grid {
+            grid-template-columns: 1fr;
+            overflow: auto;
+          }
+
+          .list-column {
+            max-height: 260px;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-soft);
+          }
+
+          .detail-header {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: var(--bg-app);
+            padding-top: 0.5rem;
+          }
+
+          .detail-scroll-area {
+            padding-right: 0;
+          }
+
+          .name-edit-input {
+            width: 220px;
+            font-size: 1.25rem;
+          }
+
+          .search-history-modal-content {
+            width: 96%;
+            height: 92vh;
+          }
         }
       `}</style>
     </div>
@@ -1393,3 +1453,5 @@ const LoadingMessages = () => {
     </motion.div>
   );
 };
+
+

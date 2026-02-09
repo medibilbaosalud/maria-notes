@@ -19,7 +19,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, onOpen
         className="sidebar"
         initial={{ x: -20, opacity: 0 }}
         animate={{ x: 0, opacity: 1 }}
-        transition={{ duration: 0.4, ease: "easeOut" }}
+        transition={{ duration: 0.4, ease: 'easeOut' }}
       >
         <div className="brand-area">
           <div className="brand-lockup">
@@ -34,7 +34,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, onOpen
           </div>
         </div>
 
-        <nav className="nav-menu">
+        <nav className="nav-menu" aria-label="Navegacion principal">
           <NavItem
             icon={<Mic size={20} />}
             label="Consulta"
@@ -54,7 +54,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, onOpen
             onClick={() => onNavigate('reports')}
           />
           <NavItem
-            icon={<FlaskConical size={20} />} // Lab icon
+            icon={<FlaskConical size={20} />}
             label="Zona Test"
             isActive={currentView === 'test-lab'}
             onClick={() => onNavigate('test-lab')}
@@ -63,14 +63,14 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, onOpen
 
         <div className="sidebar-footer">
           {onOpenLessons && (
-            <button className="settings-btn lessons-btn" onClick={onOpenLessons}>
+            <button className="settings-btn lessons-btn" onClick={onOpenLessons} aria-label="Abrir lecciones IA">
               <Lightbulb size={20} />
               <span>Lecciones IA</span>
             </button>
           )}
-          <button className="settings-btn" onClick={onOpenSettings}>
+          <button className="settings-btn" onClick={onOpenSettings} aria-label="Abrir configuracion">
             <Settings size={20} />
-            <span>Configuración</span>
+            <span>Configuracion</span>
           </button>
         </div>
       </motion.aside>
@@ -95,14 +95,13 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, onOpen
           overflow: hidden;
         }
 
-        /* Sidebar Styles - Clean & Solid */
         .sidebar {
-          width: 260px;
+          width: 268px;
           background-color: var(--bg-sidebar);
           display: flex;
           flex-direction: column;
-          padding: 2rem 1.5rem;
-          border-right: 1px solid rgba(0,0,0,0.05);
+          padding: 1.6rem 1.15rem;
+          border-right: 1px solid var(--border-soft);
           flex-shrink: 0;
           z-index: 10;
         }
@@ -127,11 +126,11 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, onOpen
           margin: 0;
           line-height: 1.1;
         }
-        
+
         .brand-sub-row {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
         }
 
         .brand-by {
@@ -141,57 +140,60 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, onOpen
           letter-spacing: 0.05em;
           text-transform: uppercase;
         }
-        
+
         .brand-logo-group {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        
-        .brand-company {
-            font-size: 0.8rem;
-            color: var(--brand-primary);
-            font-weight: 600;
-            letter-spacing: -0.01em;
+          display: flex;
+          align-items: center;
+          gap: 6px;
         }
 
-        /* Navigation */
+        .brand-company {
+          font-size: 0.8rem;
+          color: var(--brand-primary);
+          font-weight: 600;
+          letter-spacing: -0.01em;
+        }
+
         .nav-menu {
           display: flex;
           flex-direction: column;
-          gap: 0.5rem;
+          gap: 0.45rem;
           flex: 1;
         }
 
         .sidebar-footer {
           margin-top: auto;
           padding-top: 1rem;
-          border-top: 1px solid rgba(0,0,0,0.05);
-        }
-        
-        .settings-btn {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            width: 100%;
-            padding: 0.75rem 1rem;
-            background: transparent;
-            border: none;
-            color: var(--text-secondary);
-            font-family: var(--font-body);
-            font-size: 0.95rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            border-radius: var(--radius-md);
-        }
-        
-        .settings-btn:hover {
-            background-color: rgba(0,0,0,0.03);
-            color: var(--text-primary);
+          border-top: 1px solid var(--border-soft);
+          display: grid;
+          gap: 0.3rem;
         }
 
-        /* Main Content */
+        .settings-btn {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          width: 100%;
+          padding: 0.75rem 1rem;
+          background: transparent;
+          border: none;
+          color: var(--text-secondary);
+          font-family: var(--font-body);
+          font-size: 0.95rem;
+          font-weight: 500;
+          cursor: pointer;
+          border-radius: var(--radius-md);
+        }
+
+        .settings-btn:hover {
+          background-color: rgba(0, 0, 0, 0.03);
+          color: var(--text-primary);
+        }
+
+        .settings-btn:focus-visible {
+          box-shadow: var(--focus-ring);
+        }
+
         .main-content {
           flex: 1;
           position: relative;
@@ -204,6 +206,53 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, onOpen
           width: 100%;
           overflow: hidden;
           padding: 2rem;
+        }
+
+        @media (max-width: 1200px) {
+          .sidebar {
+            width: 226px;
+            padding: 1.3rem 0.95rem;
+          }
+
+          .app-name {
+            font-size: 1.34rem;
+          }
+        }
+
+        @media (max-width: 1024px) {
+          .sidebar {
+            width: 92px;
+            padding: 1rem 0.6rem;
+            align-items: center;
+          }
+
+          .brand-area {
+            margin-bottom: 1.5rem;
+            padding-left: 0;
+            text-align: center;
+          }
+
+          .app-name,
+          .brand-sub-row,
+          .settings-btn span,
+          .nav-label {
+            display: none;
+          }
+
+          .nav-menu,
+          .sidebar-footer {
+            width: 100%;
+          }
+
+          .settings-btn {
+            justify-content: center;
+            padding: 0.75rem;
+            border-radius: 12px;
+          }
+
+          .content-wrapper {
+            padding: 1.25rem;
+          }
         }
       `}</style>
     </div>
@@ -219,10 +268,7 @@ interface NavItemProps {
 
 const NavItem: React.FC<NavItemProps> = ({ icon, label, isActive, onClick }) => {
   return (
-    <button
-      className={`nav-item ${isActive ? 'active' : ''}`}
-      onClick={onClick}
-    >
+    <button className={`nav-item ${isActive ? 'active' : ''}`} onClick={onClick} aria-label={label} title={label}>
       <span className="nav-icon">{icon}</span>
       <span className="nav-label">{label}</span>
 
@@ -235,25 +281,36 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, isActive, onClick }) => 
           padding: 0.85rem 1.25rem;
           background: transparent;
           border: none;
-          border-radius: var(--radius-full); /* Pill shape */
+          border-radius: var(--radius-full);
           cursor: pointer;
-          transition: all 0.2s ease;
           color: var(--text-secondary);
           font-family: var(--font-body);
           font-size: 0.95rem;
           font-weight: 500;
           text-align: left;
+          position: relative;
         }
 
         .nav-item:hover {
-          background-color: rgba(0,0,0,0.03);
+          background-color: rgba(0, 0, 0, 0.03);
           color: var(--text-primary);
         }
 
         .nav-item.active {
-          background-color: rgba(38, 166, 154, 0.1); /* Light teal background */
+          background-color: rgba(38, 166, 154, 0.1);
           color: var(--brand-dark);
           font-weight: 600;
+        }
+
+        .nav-item.active::before {
+          content: '';
+          position: absolute;
+          left: 0.4rem;
+          top: 20%;
+          bottom: 20%;
+          width: 3px;
+          border-radius: 999px;
+          background: var(--brand-primary);
         }
 
         .nav-icon {
@@ -262,10 +319,14 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, isActive, onClick }) => 
           justify-content: center;
           opacity: 0.8;
         }
-        
+
         .nav-item.active .nav-icon {
-            opacity: 1;
-            color: var(--brand-primary);
+          opacity: 1;
+          color: var(--brand-primary);
+        }
+
+        .nav-item:focus-visible {
+          box-shadow: var(--focus-ring);
         }
       `}</style>
     </button>
