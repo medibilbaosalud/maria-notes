@@ -1162,7 +1162,7 @@ const AppContent = () => {
             setProcessingStatus('Guardando consulta de prueba en Historial...');
             const savedRecord = await persistPipelineRecord({
                 patientName,
-                consultationType: 'test_text',
+                consultationType: 'Simulación Texto',
                 transcription: text,
                 medicalHistory: result.data,
                 auditId: result.audit_id,

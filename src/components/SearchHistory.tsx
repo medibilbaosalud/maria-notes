@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Search, FileText, ChevronRight, Copy, Check, Sparkles, Trash2, FileOutput, Printer, X, Calendar, User, Pencil, Save } from 'lucide-react';
+import { Search, FileText, ChevronRight, Copy, Check, Sparkles, Trash2, FileOutput, Printer, X, Calendar, User, Pencil, Save, RefreshCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { searchMedicalRecords, type MedicalRecord, deleteMedicalRecord, updateMedicalRecord } from '../services/storage';
+import { searchMedicalRecords, type MedicalRecord, deleteMedicalRecord, updateMedicalRecord, syncFromCloud } from '../services/storage';
+import { isCloudSyncEnabled } from '../hooks/useCloudSync';
 import { AIService } from '../services/ai';
 import ReactMarkdown from 'react-markdown';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
@@ -35,12 +36,14 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
   // History Editing State
   const [isEditingHistory, setIsEditingHistory] = useState(false);
   const [editedHistory, setEditedHistory] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSearch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setIsLoading(true);
     try {
       const data = await searchMedicalRecords(query);
+      console.log(`[SearchHistory] Fetched ${data.length} records from local DB.`);
       setResults(data || []);
     } catch (error) {
       console.error('Search error:', error);
@@ -49,8 +52,34 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
     }
   };
 
+  const handleRefresh = async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    try {
+      if (isCloudSyncEnabled()) {
+        console.log('[SearchHistory] Refreshing from cloud...');
+        await syncFromCloud();
+      }
+      await handleSearch();
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   useEffect(() => {
-    handleSearch({ preventDefault: () => { } } as React.FormEvent);
+    const init = async () => {
+      // Auto-sync from cloud on mount if enabled
+      if (isCloudSyncEnabled()) {
+        setIsSyncing(true);
+        try {
+          await syncFromCloud();
+        } finally {
+          setIsSyncing(false);
+        }
+      }
+      handleSearch();
+    };
+    init();
   }, []);
 
   const handleCopy = async (text: string) => {
@@ -370,14 +399,24 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
       <div className="search-section">
         <h2 className="section-title">Historial de Consultas</h2>
         <form onSubmit={handleSearch} className="search-bar-wrapper">
-          <Search size={20} className="search-icon" />
-          <input
-            type="text"
-            placeholder="Buscar por paciente, diagnóstico..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="history-search-input"
-          />
+          <div style={{ position: 'relative', flex: 1 }}>
+            <Search size={20} className="search-icon" />
+            <input
+              type="text"
+              placeholder="Buscar por paciente, diagnóstico..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="history-search-input"
+            />
+          </div>
+          <button
+            type="button"
+            className={`refresh-btn ${isSyncing ? 'syncing' : ''}`}
+            onClick={handleRefresh}
+            title="Sincronizar con la nube"
+          >
+            <RefreshCcw size={20} />
+          </button>
         </form>
       </div>
 
@@ -705,7 +744,45 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
 
         .search-bar-wrapper {
           position: relative;
-          max-width: 480px;
+          max-width: 520px;
+          display: flex;
+          gap: 0.75rem;
+          align-items: center;
+        }
+
+        .refresh-btn {
+          background: white;
+          border: 1px solid rgba(0,0,0,0.08);
+          color: var(--text-secondary);
+          width: 44px;
+          height: 44px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all 0.2s;
+          box-shadow: var(--shadow-sm);
+        }
+
+        .refresh-btn:hover {
+          border-color: var(--brand-primary);
+          color: var(--brand-primary);
+          background: #F0FDF4;
+          transform: translateY(-1px);
+        }
+
+        .refresh-btn.syncing {
+          color: var(--brand-primary);
+        }
+
+        .refresh-btn.syncing svg {
+          animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
 
         .history-search-input {
@@ -1284,10 +1361,6 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           border-top-color: var(--brand-primary);
           border-radius: 50%;
           animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-          to { transform: rotate(360deg); }
         }
 
         /* Premium Loading Styles */
