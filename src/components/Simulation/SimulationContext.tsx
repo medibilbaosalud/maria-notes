@@ -82,7 +82,8 @@ const SCRIPT: SimulationStep[] = [
         },
         caption: "Validamos el dato correcto."
     },
-    // Phase 3: Learning loop
+    // Phase 3: Learning loop (Active Learning Simulation)
+    // This phase demonstrates how the system adapts to user preferences over time.
     {
         id: 'move_to_edit',
         targetId: 'edit-mode-btn',
