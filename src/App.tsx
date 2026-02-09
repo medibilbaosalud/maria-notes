@@ -56,20 +56,14 @@ const FAST_PATH_ADAPTIVE_VALIDATION = String(import.meta.env.VITE_FAST_PATH_ADAP
 const FAST_PATH_TOKEN_BUDGETS = String(import.meta.env.VITE_FAST_PATH_TOKEN_BUDGETS || 'true').toLowerCase() === 'true';
 const FAST_PATH_RETRY_TUNING = String(import.meta.env.VITE_FAST_PATH_RETRY_TUNING || 'true').toLowerCase() === 'true';
 const FAST_PATH_ASYNC_TRIAGE = String(import.meta.env.VITE_FAST_PATH_ASYNC_TRIAGE || 'true').toLowerCase() === 'true';
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Helper to get key array
-const getApiKeys = (userKey: string) => {
-    const envKeys = (import.meta.env.VITE_GROQ_API_KEYS || import.meta.env.VITE_GROQ_API_KEY || '')
-        .split(',')
-        .map((value: string) => value.trim())
-        .filter(Boolean);
-
-    const merged = [
-        ...(userKey ? [userKey.trim()] : []),
-        ...envKeys
-    ].filter(Boolean);
-
-    return Array.from(new Set(merged));
+const getApiKeys = (userKey?: string) => {
+    const source = userKey || GROQ_API_KEY;
+    return source.includes(',')
+        ? source.split(',').map((k: string) => k.trim())
+        : [source];
 };
 
 const getInitialApiKey = () => {
@@ -113,6 +107,11 @@ const AppContent = () => {
         earlyStopReason?: 'clean_consensus' | 'low_risk_remaining' | 'max_rounds_reached';
         riskLevel?: 'low' | 'medium' | 'high';
         phaseTimingsMs?: { extract: number; generate: number; validate: number; corrections: number; total: number };
+        resultStatus?: 'completed' | 'provisional' | 'failed_recoverable' | 'failed_final';
+        provisionalReason?: string;
+        logicalCallsUsed?: number;
+        physicalCallsUsed?: number;
+        fallbackHops?: number;
         fastPathConfig?: {
             adaptiveValidation: boolean;
             tokenBudgets: boolean;
@@ -173,16 +172,7 @@ const AppContent = () => {
         currentPatientRef.current = currentPatientName;
     }, [currentPatientName]);
 
-    const pickBestClassification = (items: ConsultationClassification[]) => {
-        if (!items || items.length === 0) {
-            return { visit_type: 'unknown', ent_area: 'unknown', urgency: 'unknown', confidence: 0 };
-        }
-        return items.reduce((best, current) => {
-            const bestScore = best?.confidence ?? 0;
-            const currentScore = current?.confidence ?? 0;
-            return currentScore > bestScore ? current : best;
-        }, items[0]);
-    };
+
 
     const buildValidationLabel = (validations?: { validator: string }[]) => {
         if (!validations || validations.length === 0) return 'unknown';
@@ -238,6 +228,17 @@ const AppContent = () => {
                 ...classificationPartsRef.current.keys()
             ])
         ).sort((a, b) => a - b);
+    };
+
+    const buildTranscriptFromStoredSegments = async (sessionId: string): Promise<string> => {
+        if (!sessionId) return '';
+        const recovered = await resumeSession(sessionId);
+        if (!recovered?.transcript_segments || recovered.transcript_segments.length === 0) return '';
+        return recovered.transcript_segments
+            .sort((a, b) => a.batch_index - b.batch_index)
+            .map((segment) => segment.text || '')
+            .join(' ')
+            .trim();
     };
 
     // ════════════════════════════════════════════════════════════════
@@ -377,14 +378,15 @@ const AppContent = () => {
     const buildTextPipelineIdempotencyKey = (patientName: string, text: string) => {
         const normalizedPatient = patientName.trim().toLowerCase();
         const normalizedText = text.trim().replace(/\s+/g, ' ');
-        const base = `${normalizedPatient}|${normalizedText.slice(0, 1200)}`;
+        const timestampMs = Date.now();
+        const base = `${normalizedPatient}|${normalizedText}|${timestampMs}`;
         let hash = 2166136261;
         for (let i = 0; i < base.length; i++) {
             hash ^= base.charCodeAt(i);
             hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
         }
-        const minuteBucket = Math.floor(Date.now() / 60_000);
-        return `text_${minuteBucket}_${(hash >>> 0).toString(16)}`;
+        const randomPart = Math.floor(Math.random() * 1e9).toString(16);
+        return `text_${timestampMs}_${(hash >>> 0).toString(16)}_${randomPart}`;
     };
 
     const replaceHistorySection = (historyText: string, sectionTitle: string, newSectionContent: string) => {
@@ -440,7 +442,7 @@ const AppContent = () => {
                 await upsertConsultationSession({
                     session_id: sessionId,
                     patient_name: orchestratorRef.current?.getStatus().patientName || '',
-                    status: 'extracting',
+                    status: 'transcribing_partial',
                     last_batch_index: batchIndex,
                     idempotency_key: sessionId
                 });
@@ -449,15 +451,14 @@ const AppContent = () => {
 
             const safeBlobs = await splitBlobForSafeProcessing(blob);
             const transcriptParts: string[] = [];
-            const extractionParts: ExtractionResult[] = [];
-            const metaParts: ExtractionMeta[] = [];
-            const classificationParts: ConsultationClassification[] = [];
 
             for (let i = 0; i < safeBlobs.length; i++) {
                 const partBlob = safeBlobs[i];
                 const partBatchIndex = safeBlobs.length > 1 ? (batchIndex * 1000) + i : batchIndex;
                 const transcriptResult = await aiService.transcribeAudio(partBlob);
                 transcriptParts.push(transcriptResult.data);
+                // DEFERRED EXTRACTION: We only transcribe here to save tokens.
+                // Extraction will happen once at the end with the full transcript.
                 await saveSegment({
                     session_id: sessionId,
                     batch_index: partBatchIndex,
@@ -465,31 +466,13 @@ const AppContent = () => {
                     text: transcriptResult.data,
                     status: 'completed'
                 });
-
-                const extraction = await aiService.extractOnly(transcriptResult.data);
-                const normalizedMeta = prefixExtractionMeta(extraction.meta, partBatchIndex);
-                extractionParts.push(extraction.data);
-                metaParts.push(...normalizedMeta);
-                classificationParts.push(extraction.classification);
-                await saveSegment({
-                    session_id: sessionId,
-                    batch_index: partBatchIndex,
-                    type: 'extraction',
-                    extraction: extraction.data,
-                    classification: extraction.classification,
-                    meta: normalizedMeta,
-                    status: 'completed'
-                });
             }
 
             const mergedTranscript = transcriptParts.join(' ').trim();
-            const mergedExtraction = extractionParts[extractionParts.length - 1] || buildFallbackExtraction(`partial_batch_${batchIndex}_empty`);
-            const mergedClassification = classificationParts[classificationParts.length - 1] || { visit_type: 'unknown', ent_area: 'unknown', urgency: 'unknown', confidence: 0 };
+            // Extraction parts are now empty during partial processing
 
             transcriptionPartsRef.current.set(batchIndex, mergedTranscript);
-            extractionPartsRef.current.set(batchIndex, mergedExtraction);
-            extractionMetaPartsRef.current.set(batchIndex, metaParts);
-            classificationPartsRef.current.set(batchIndex, mergedClassification);
+            // We no longer set extraction parts here
             await markSegmentStatus({ session_id: sessionId, batch_index: batchIndex, type: 'audio', status: 'completed' });
             if (sessionId) {
                 await upsertConsultationSession({
@@ -582,10 +565,6 @@ const AppContent = () => {
         await markSegmentStatus({ session_id: sessionId, batch_index: batchIndex, type: 'audio', status: 'processing' });
         const safeFinalBlobs = await splitBlobForSafeProcessing(blob);
         const finalTranscriptParts: string[] = [];
-        let finalExtractionResult: ExtractionResult | null = null;
-        let finalClassification: ConsultationClassification | null = null;
-        const finalMetaParts: ExtractionMeta[] = [];
-
         for (let i = 0; i < safeFinalBlobs.length; i++) {
             const subBlob = safeFinalBlobs[i];
             const subBatchIndex = safeFinalBlobs.length > 1 ? (batchIndex * 1000) + i : batchIndex;
@@ -598,29 +577,11 @@ const AppContent = () => {
                 text: transcriptResult.data,
                 status: 'completed'
             });
-
-            setProcessingStatus('Extrayendo datos clinicos finales...');
-            const extracted = await aiService.extractOnly(transcriptResult.data);
-            const normalizedFinalMeta = prefixExtractionMeta(extracted.meta, subBatchIndex);
-            finalExtractionResult = extracted.data;
-            finalClassification = extracted.classification;
-            finalMetaParts.push(...normalizedFinalMeta);
-            await saveSegment({
-                session_id: sessionId,
-                batch_index: subBatchIndex,
-                type: 'extraction',
-                extraction: extracted.data,
-                classification: extracted.classification,
-                meta: normalizedFinalMeta,
-                status: 'completed'
-            });
         }
 
         const mergedFinalTranscript = finalTranscriptParts.join(' ').trim();
         transcriptionPartsRef.current.set(batchIndex, mergedFinalTranscript);
-        extractionPartsRef.current.set(batchIndex, finalExtractionResult || buildFallbackExtraction('final_extraction_empty'));
-        extractionMetaPartsRef.current.set(batchIndex, finalMetaParts);
-        classificationPartsRef.current.set(batchIndex, finalClassification || { visit_type: 'unknown', ent_area: 'unknown', urgency: 'unknown', confidence: 0 });
+        // Deferred extraction means we don't set extraction parts yet
         await markSegmentStatus({ session_id: sessionId, batch_index: batchIndex, type: 'audio', status: 'completed' });
 
         if (missingBatches.length > 0) {
@@ -652,22 +613,52 @@ const AppContent = () => {
         const sortedIndexes = getSortedBatchIndexes();
         const fullTranscription = sortedIndexes.map((index) => transcriptionPartsRef.current.get(index) || '').join(' ').trim();
         setTranscription(fullTranscription);
-        const orderedExtractions = sortedIndexes
-            .map((index) => extractionPartsRef.current.get(index))
-            .filter((value): value is ExtractionResult => Boolean(value));
-        const orderedMeta = sortedIndexes.flatMap((index) => extractionMetaPartsRef.current.get(index) || []);
-        const orderedClassifications = sortedIndexes
-            .map((index) => classificationPartsRef.current.get(index))
-            .filter((value): value is ConsultationClassification => Boolean(value));
 
-        setProcessingStatus(`Fusionando ${orderedExtractions.length} segmentos y generando historia...`);
+        // SINGLE EXTRACTION CALL on the full transcript
+        setProcessingStatus('Extrayendo datos clinicos de toda la consulta (Gemini)...');
+        aiService.resetInvocationCounters(sessionId || undefined);
+        let extractionInput = fullTranscription;
+        let fullExtraction;
+        try {
+            fullExtraction = await aiService.extractOnly(extractionInput);
+        } catch (firstError) {
+            console.warn('[App] Final extraction failed, retrying from stored transcript segments...', firstError);
+            const recoveredTranscript = await buildTranscriptFromStoredSegments(sessionId);
+            if (recoveredTranscript && recoveredTranscript.length > extractionInput.length) {
+                extractionInput = recoveredTranscript;
+                setTranscription(extractionInput);
+            }
+            await sleep(700);
+            try {
+                fullExtraction = await aiService.extractOnly(extractionInput);
+            } catch (secondError: any) {
+                if (sessionId) {
+                    await upsertConsultationSession({
+                        session_id: sessionId,
+                        patient_name: patientName,
+                        status: 'awaiting_budget',
+                        result_status: 'failed_recoverable',
+                        last_batch_index: batchIndex,
+                        error_reason: secondError?.message || 'final_extraction_failed',
+                        idempotency_key: sessionId
+                    });
+                }
+                throw secondError;
+            }
+        }
+
+        const orderedExtractions = [fullExtraction.data];
+        const orderedMeta = prefixExtractionMeta(fullExtraction.meta, 0); // usage index 0 as it's full
+        const bestClassification = fullExtraction.classification;
+
+        setProcessingStatus(`Generando historia clinica final (${orderedExtractions.length} bloque)...`);
 
         const result = await aiService.generateFromMergedExtractions(
             orderedExtractions,
-            fullTranscription,
+            extractionInput,
             patientName,
             orderedMeta,
-            pickBestClassification(orderedClassifications),
+            bestClassification,
             sessionId
         );
 
@@ -705,6 +696,11 @@ const AppContent = () => {
             earlyStopReason: result.early_stop_reason,
             riskLevel: result.risk_level,
             phaseTimingsMs: result.phase_timings_ms,
+            resultStatus: result.result_status,
+            provisionalReason: result.provisional_reason,
+            logicalCallsUsed: result.logical_calls_used,
+            physicalCallsUsed: result.physical_calls_used,
+            fallbackHops: result.fallback_hops,
             fastPathConfig: {
                 adaptiveValidation: FAST_PATH_ADAPTIVE_VALIDATION,
                 tokenBudgets: FAST_PATH_TOKEN_BUDGETS,
@@ -725,7 +721,10 @@ const AppContent = () => {
                 metadata: {
                     missing_batches: missingBatches,
                     corrections_applied: result.corrections_applied || 0,
-                    remaining_errors: remainingErrors.length
+                    remaining_errors: remainingErrors.length,
+                    pipeline_status: runStatus,
+                    result_status: resultStatus,
+                    provisional_reason: result.provisional_reason || null
                 },
                 error_reason: resultStatus === 'provisional' ? (result.remaining_errors?.[0]?.reason || pipelineRuntimeReason) : undefined
             });
@@ -749,13 +748,13 @@ const AppContent = () => {
                 started_at: new Date(finalizeStartedAt).toISOString(),
                 finished_at: new Date().toISOString(),
                 duration_ms: Date.now() - finalizeStartedAt,
-                metadata: {
-                    blob_size: blob.size,
-                    missing_batches: missingBatches,
-                    transcript_length: fullTranscription.length,
-                    retry_after_ms: result.retry_after_ms || 0
-                }
-            });
+                    metadata: {
+                        blob_size: blob.size,
+                        missing_batches: missingBatches,
+                        transcript_length: extractionInput.length,
+                        retry_after_ms: result.retry_after_ms || 0
+                    }
+                });
         }
 
         setProcessingStatus('Guardando en base de datos...');
@@ -763,7 +762,7 @@ const AppContent = () => {
             const savedRecord = await persistPipelineRecord({
                 patientName,
                 consultationType: result.classification?.visit_type || 'unknown',
-                transcription: fullTranscription,
+                transcription: extractionInput,
                 medicalHistory: result.data,
                 auditId: result.audit_id,
                 aiModel: result.model,
@@ -1115,6 +1114,7 @@ const AppContent = () => {
         });
 
         try {
+            aiService.resetInvocationCounters(textSessionId);
             const extraction = await aiService.extractOnly(text);
             const normalizedMeta = prefixExtractionMeta(extraction.meta, 0);
             const result = await aiService.generateFromMergedExtractions(
@@ -1151,6 +1151,11 @@ const AppContent = () => {
                 earlyStopReason: result.early_stop_reason,
                 riskLevel: result.risk_level,
                 phaseTimingsMs: result.phase_timings_ms,
+                resultStatus: result.result_status,
+                provisionalReason: result.provisional_reason,
+                logicalCallsUsed: result.logical_calls_used,
+                physicalCallsUsed: result.physical_calls_used,
+                fallbackHops: result.fallback_hops,
                 fastPathConfig: {
                     adaptiveValidation: FAST_PATH_ADAPTIVE_VALIDATION,
                     tokenBudgets: FAST_PATH_TOKEN_BUDGETS,
@@ -1162,7 +1167,7 @@ const AppContent = () => {
             setProcessingStatus('Guardando consulta de prueba en Historial...');
             const savedRecord = await persistPipelineRecord({
                 patientName,
-                consultationType: 'Simulación Texto',
+                consultationType: 'test_text',
                 transcription: text,
                 medicalHistory: result.data,
                 auditId: result.audit_id,
@@ -1188,7 +1193,9 @@ const AppContent = () => {
                     input_type: 'text',
                     corrections_applied: result.corrections_applied || 0,
                     remaining_errors: result.remaining_errors?.length || 0,
-                    result_status: result.result_status || (runStatus === 'completed' ? 'completed' : 'provisional')
+                    result_status: result.result_status || (runStatus === 'completed' ? 'completed' : 'provisional'),
+                    pipeline_status: runStatus,
+                    provisional_reason: result.provisional_reason || null
                 }
             });
             void enqueueAuditEvent('pipeline_attempt', {
@@ -1416,7 +1423,7 @@ const AppContent = () => {
             </Layout>
         </div >
     );
-}
+};
 
 const App = () => {
     return (
@@ -1427,4 +1434,3 @@ const App = () => {
 };
 
 export default App;
-
