@@ -637,16 +637,20 @@ const AppContent = () => {
             try {
                 fullExtraction = await aiService.extractOnly(extractionInput);
             } catch (secondError: any) {
-                if (sessionId) {
-                    await upsertConsultationSession({
-                        session_id: sessionId,
-                        patient_name: patientName,
-                        status: 'awaiting_budget',
-                        result_status: 'failed_recoverable',
-                        last_batch_index: batchIndex,
-                        error_reason: secondError?.message || 'final_extraction_failed',
-                        idempotency_key: sessionId
-                    });
+                try {
+                    if (sessionId) {
+                        await upsertConsultationSession({
+                            session_id: sessionId,
+                            patient_name: patientName,
+                            status: 'awaiting_budget',
+                            result_status: 'failed_recoverable',
+                            last_batch_index: batchIndex,
+                            error_reason: secondError?.message || 'final_extraction_failed',
+                            idempotency_key: sessionId
+                        });
+                    }
+                } catch (auditErr) {
+                    console.error('[App] Failed to persist extraction failure audit:', auditErr);
                 }
                 throw secondError;
             }
@@ -1065,23 +1069,27 @@ const AppContent = () => {
                     }
                 });
             }
-            await logError({
-                message: error?.message || 'Unknown error processing recording (v4)',
-                stack: error?.stack,
-                context: { patientName, blobSize: blob?.size, isPartialBatch, batchIndex, reason: pipelineRuntimeReason },
-                source: 'App.handleRecordingComplete.v4',
-                severity: 'error'
-            });
-            if (sessionId) {
-                await upsertConsultationSession({
-                    session_id: sessionId,
-                    patient_name: patientName,
-                    status: 'awaiting_budget',
-                    result_status: 'failed_recoverable',
-                    last_batch_index: batchIndex,
-                    error_reason: error?.message || 'v4_pipeline_failed',
-                    idempotency_key: sessionId
+            try {
+                await logError({
+                    message: error?.message || 'Unknown error processing recording (v4)',
+                    stack: error?.stack,
+                    context: { patientName, blobSize: blob?.size, isPartialBatch, batchIndex, reason: pipelineRuntimeReason },
+                    source: 'App.handleRecordingComplete.v4',
+                    severity: 'error'
                 });
+                if (sessionId) {
+                    await upsertConsultationSession({
+                        session_id: sessionId,
+                        patient_name: patientName,
+                        status: 'awaiting_budget',
+                        result_status: 'failed_recoverable',
+                        last_batch_index: batchIndex,
+                        error_reason: error?.message || 'v4_pipeline_failed',
+                        idempotency_key: sessionId
+                    });
+                }
+            } catch (auditError) {
+                console.error('[App] Failed to persist v4 pipeline failure audit:', auditError);
             }
             clearPipelineBuffers();
             setCurrentView('record');
