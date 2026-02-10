@@ -36,6 +36,7 @@ const toCloudRecord = (record: MedicalRecord) => {
         consultation_type: record.consultation_type,
         transcription: record.transcription,
         medical_history: record.medical_history,
+        original_medical_history: record.original_medical_history || null,
         medical_report: record.medical_report || null,
         ai_model: record.ai_model || null,
         created_at: record.created_at
