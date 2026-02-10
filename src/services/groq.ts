@@ -1029,6 +1029,38 @@ ${schemaHint}`;
     }
 
     async transcribeAudio(audioBlob: Blob): Promise<{ text: string; model: string }> {
+        try {
+            return await this._transcribeWithBlob(audioBlob);
+        } catch (firstError: any) {
+            // If HTTP 400 and the blob is webm, try converting to WAV format
+            const status = this.getErrorStatus(firstError);
+            const isWebm = audioBlob.type?.includes('webm') || !audioBlob.type;
+            if (status === 400 && isWebm) {
+                console.warn('[Groq] Whisper returned 400 for webm, retrying with WAV conversion...');
+                try {
+                    const { normalizeAndChunkAudio } = await import('../utils/audioProcessing');
+                    const wavChunks = await normalizeAndChunkAudio(audioBlob);
+                    if (wavChunks.length > 0) {
+                        const combinedParts: string[] = [];
+                        let lastModel = '';
+                        for (const chunk of wavChunks) {
+                            const result = await this._transcribeWithBlob(chunk);
+                            combinedParts.push(result.text);
+                            lastModel = result.model;
+                        }
+                        return { text: combinedParts.join(' ').trim(), model: lastModel };
+                    }
+                } catch (convError) {
+                    console.error('[Groq] WAV conversion fallback also failed:', convError);
+                }
+            }
+            throw firstError;
+        }
+    }
+
+    private async _transcribeWithBlob(audioBlob: Blob): Promise<{ text: string; model: string }> {
+        const isWav = audioBlob.type?.includes('wav');
+        const fileName = isWav ? 'audio.wav' : 'audio.webm';
         return this.executeWithFallback(async (apiKey) => {
             const allModels = [...WHISPER_MODELS];
             let innerError = null;
@@ -1042,7 +1074,7 @@ ${schemaHint}`;
                     this.assertAllowedModel(routeKey);
                     budgetManager.consume(routeKey, { requests: 1, audioSeconds: estimatedAudioSeconds });
                     const formData = new FormData();
-                    formData.append('file', audioBlob, 'audio.webm');
+                    formData.append('file', audioBlob, fileName);
                     formData.append('model', modelName);
                     formData.append('language', 'es');
                     formData.append('response_format', 'text');
@@ -1112,8 +1144,8 @@ ${schemaHint}`;
                     if (error instanceof BudgetExceededError) {
                         throw error;
                     }
-                    const status = this.getErrorStatus(error);
-                    if (status === 401 || status === 429) {
+                    const errorStatus = this.getErrorStatus(error);
+                    if (errorStatus === 401 || errorStatus === 429) {
                         throw error;
                     }
                     await this.delay(500);

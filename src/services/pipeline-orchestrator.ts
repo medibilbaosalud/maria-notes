@@ -188,9 +188,9 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
                         this.state = 'processing_partials';
                         this.touch();
                     } catch (error) {
-                        this.pending.set(currentBatch, nextBlob);
                         const budgetRetryMs = this.readBudgetRetryMs(error);
                         if (budgetRetryMs > 0) {
+                            this.pending.set(currentBatch, nextBlob);
                             this.state = 'awaiting_budget';
                             this.touch((error as Error)?.message || 'awaiting_budget_partial');
                             setTimeout(() => {
@@ -198,9 +198,13 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
                             }, budgetRetryMs);
                             break;
                         }
-                        this.state = 'failed';
-                        this.touch((error as Error)?.message || 'partial_batch_failed');
-                        throw error;
+                        // Graceful degradation: skip this batch instead of killing the pipeline
+                        console.error(`[Orchestrator] Partial batch ${currentBatch} failed, skipping:`, error);
+                        this.processed.add(currentBatch);
+                        this.missingBatches.add(currentBatch);
+                        this.nextExpectedBatch++;
+                        this.state = 'processing_partials';
+                        this.touch((error as Error)?.message || 'partial_batch_skipped');
                     }
                     continue;
                 }

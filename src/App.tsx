@@ -509,31 +509,36 @@ const AppContent = () => {
                 field_evidence: []
             }]);
             classificationPartsRef.current.set(batchIndex, { visit_type: 'unknown', ent_area: 'unknown', urgency: 'unknown', confidence: 0 });
-            if (sessionId) {
-                await upsertConsultationSession({
-                    session_id: sessionId,
-                    patient_name: orchestratorRef.current?.getStatus().patientName || '',
-                    status: 'awaiting_budget',
-                    result_status: 'failed_recoverable',
-                    last_batch_index: batchIndex,
-                    error_reason: error?.message || 'partial_batch_failed',
-                    idempotency_key: sessionId
+            // All audit/persistence calls wrapped so they NEVER escape the catch block
+            try {
+                if (sessionId) {
+                    await upsertConsultationSession({
+                        session_id: sessionId,
+                        patient_name: orchestratorRef.current?.getStatus().patientName || '',
+                        status: 'awaiting_budget',
+                        result_status: 'failed_recoverable',
+                        last_batch_index: batchIndex,
+                        error_reason: error?.message || 'partial_batch_failed',
+                        idempotency_key: sessionId
+                    });
+                    await markSegmentStatus({
+                        session_id: sessionId,
+                        batch_index: batchIndex,
+                        type: 'audio',
+                        status: 'failed',
+                        error_reason: error?.message || 'partial_batch_failed'
+                    });
+                }
+                await logError({
+                    message: error?.message || `Partial batch ${batchIndex} failed`,
+                    stack: error?.stack,
+                    context: { batchIndex, blobSize: blob.size },
+                    source: 'App.processPartialBatch',
+                    severity: 'warning'
                 });
-                await markSegmentStatus({
-                    session_id: sessionId,
-                    batch_index: batchIndex,
-                    type: 'audio',
-                    status: 'failed',
-                    error_reason: error?.message || 'partial_batch_failed'
-                });
+            } catch (auditError) {
+                console.error('[App] Failed to persist partial batch failure audit:', auditError);
             }
-            await logError({
-                message: error?.message || `Partial batch ${batchIndex} failed`,
-                stack: error?.stack,
-                context: { batchIndex, blobSize: blob.size },
-                source: 'App.processPartialBatch',
-                severity: 'warning'
-            });
             if (sessionId) {
                 void enqueueAuditEvent('pipeline_attempt', {
                     session_id: sessionId,
@@ -748,13 +753,13 @@ const AppContent = () => {
                 started_at: new Date(finalizeStartedAt).toISOString(),
                 finished_at: new Date().toISOString(),
                 duration_ms: Date.now() - finalizeStartedAt,
-                    metadata: {
-                        blob_size: blob.size,
-                        missing_batches: missingBatches,
-                        transcript_length: extractionInput.length,
-                        retry_after_ms: result.retry_after_ms || 0
-                    }
-                });
+                metadata: {
+                    blob_size: blob.size,
+                    missing_batches: missingBatches,
+                    transcript_length: extractionInput.length,
+                    retry_after_ms: result.retry_after_ms || 0
+                }
+            });
         }
 
         setProcessingStatus('Guardando en base de datos...');
