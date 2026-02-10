@@ -26,30 +26,47 @@ const generateUuid = (): string => {
     return `uuid_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 };
 
+// Map Dexie MedicalRecord fields to Supabase column names.
+// Dexie uses record_uuid / original_medical_history / audit_id / idempotency_key / updated_at
+// but Supabase table has uuid and may not have the extra Dexie-only columns.
+const toCloudRecord = (record: MedicalRecord) => {
+    return {
+        uuid: record.record_uuid,
+        patient_name: record.patient_name,
+        consultation_type: record.consultation_type,
+        transcription: record.transcription,
+        medical_history: record.medical_history,
+        medical_report: record.medical_report || null,
+        ai_model: record.ai_model || null,
+        created_at: record.created_at
+    };
+};
+
 // Helper to sync a record to Supabase (fire-and-forget)
 const syncToCloud = async (record: MedicalRecord, operation: 'insert' | 'update' | 'delete') => {
     const client = getCloudClient();
     if (!client) return;
 
     try {
-        if (operation === 'insert') {
-            // For cloud, we don't send the local auto-increment id
-            const { id, ...cloudRecord } = record;
-            await client
+        if (operation === 'insert' || operation === 'update') {
+            const cloudRecord = toCloudRecord(record);
+            const { error } = await client
                 .from('medical_records')
-                .upsert([cloudRecord], { onConflict: 'record_uuid' });
-            console.log('[Cloud Sync] Record inserted');
-        } else if (operation === 'update') {
-            const { id, ...cloudRecord } = record;
-            await client
-                .from('medical_records')
-                .upsert([cloudRecord], { onConflict: 'record_uuid' });
-            console.log('[Cloud Sync] Record updated');
+                .upsert([cloudRecord], { onConflict: 'uuid' });
+            if (error) {
+                console.error(`[Cloud Sync] Upsert error (${operation}):`, error.message, error.details);
+                throw error;
+            }
+            console.log(`[Cloud Sync] Record ${operation === 'insert' ? 'inserted' : 'updated'}:`, cloudRecord.uuid);
         } else if (operation === 'delete') {
-            await client.from('medical_records')
+            const { error } = await client.from('medical_records')
                 .delete()
-                .eq('record_uuid', record.record_uuid);
-            console.log('[Cloud Sync] Record deleted');
+                .eq('uuid', record.record_uuid);
+            if (error) {
+                console.error('[Cloud Sync] Delete error:', error.message);
+                throw error;
+            }
+            console.log('[Cloud Sync] Record deleted:', record.record_uuid);
         }
     } catch (error) {
         console.warn('[Cloud Sync] Failed:', error);
