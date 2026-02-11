@@ -1,9 +1,10 @@
-import React, { useState, useRef } from 'react';
-import { Mic, Upload, Square, Activity, FileAudio, FileText, Brain, ChevronRight } from 'lucide-react';
+import React, { useMemo, useRef, useState } from 'react';
+import { Mic, Upload, Square, Activity, FileAudio, FileText, Brain, ChevronRight, ClipboardList, Download } from 'lucide-react';
 import { TestLogDetailModal } from './TestLogDetailModal';
 import { AnimatePresence } from 'framer-motion';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { normalizeAndChunkAudio } from '../utils/audioProcessing';
+import type { LabTestLog } from '../services/db';
 
 interface AudioTestLabProps {
   onClose: () => void;
@@ -11,32 +12,64 @@ interface AudioTestLabProps {
   onRunTextPipeline: (text: string, patientName: string) => Promise<void>;
 }
 
+type TestMode = 'mic' | 'upload' | 'text' | 'diagnostic' | 'history';
+
+const DIAGNOSTIC_SCENARIOS = [
+  {
+    id: 'single_chunk_clean',
+    label: 'Single Chunk Limpio',
+    transcript: 'Paciente refiere dolor de garganta de 3 dias, sin fiebre. Niega alergias. Exploracion faringea con hiperemia leve. Diagnostico de faringitis catarral. Plan: hidratacion, analgesia y control evolutivo en 48 horas.'
+  },
+  {
+    id: 'multi_chunk_clean',
+    label: 'Multi Chunk Limpio',
+    transcript: 'Paciente con obstruccion nasal cronica y rinorrea acuosa intermitente. Antecedentes de rinitis alergica estacional. Exploracion con cornetes hipertroficos bilaterales y sin datos de complicacion. Se pauta corticoide intranasal diario y lavado con suero salino. Se explica seguimiento clinico y signos de alarma.'
+  },
+  {
+    id: 'final_stage_failure',
+    label: 'Final Stage Failure',
+    transcript: 'Texto de prueba deliberadamente incompleto para estresar validaciones y forzar gaps criticos en secciones clinicas. Sin datos suficientes de plan ni diagnostico definitivo.'
+  }
+] as const;
+
+const isDiagnosticLog = (log: LabTestLog) => Boolean(log.metadata?.diagnostics);
+
 export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPipeline, onRunTextPipeline }) => {
-  const [mode, setMode] = useState<'mic' | 'upload' | 'text' | 'history'>('mic');
-  const [historyLogs, setHistoryLogs] = useState<any[]>([]);
-  const [selectedLog, setSelectedLog] = useState<any | null>(null);
+  const [mode, setMode] = useState<TestMode>('mic');
+  const [historyLogs, setHistoryLogs] = useState<LabTestLog[]>([]);
+  const [selectedLog, setSelectedLog] = useState<LabTestLog | null>(null);
   const [uploadChunks, setUploadChunks] = useState<Blob[]>([]);
   const [fileName, setFileName] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [normalizationStatus, setNormalizationStatus] = useState('');
   const [processingStep, setProcessingStep] = useState('');
   const [manualText, setManualText] = useState('');
+  const [diagnosticScenarioId, setDiagnosticScenarioId] = useState<string>(DIAGNOSTIC_SCENARIOS[0].id);
+  const [latestDiagnostic, setLatestDiagnostic] = useState<LabTestLog | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { isRecording, startRecording, stopRecording, audioBlob: micBlob, duration } = useAudioRecorder({
     batchIntervalMs: 0
   });
 
+  const selectedScenario = useMemo(
+    () => DIAGNOSTIC_SCENARIOS.find((scenario) => scenario.id === diagnosticScenarioId) || DIAGNOSTIC_SCENARIOS[0],
+    [diagnosticScenarioId]
+  );
+
+  const loadLogs = React.useCallback(async () => {
+    const { getLabTestLogs } = await import('../services/storage');
+    const logs = await getLabTestLogs();
+    setHistoryLogs(logs);
+    const latest = logs.find((log) => isDiagnosticLog(log)) || null;
+    setLatestDiagnostic(latest);
+  }, []);
+
   React.useEffect(() => {
-    if (mode === 'history') {
-      const fetchLogs = async () => {
-        const { getLabTestLogs } = await import('../services/storage');
-        const logs = await getLabTestLogs();
-        setHistoryLogs(logs);
-      };
-      void fetchLogs();
+    if (mode === 'history' || mode === 'diagnostic') {
+      void loadLogs();
     }
-  }, [mode]);
+  }, [mode, loadLogs]);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -83,6 +116,7 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
         await onRunTextPipeline(manualText, dummyName);
         setProcessingStep('Proceso completado');
       }
+      await loadLogs();
     } catch (error) {
       console.error(error);
       setProcessingStep('Error durante la simulacion');
@@ -91,8 +125,41 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
     }
   };
 
+  const handleRunDiagnostic = async () => {
+    const diagName = `DIAG_${selectedScenario.id}_${Date.now()}`;
+    setIsProcessing(true);
+    setProcessingStep('Preparando escenario de diagnostico...');
+    try {
+      await onRunTextPipeline(selectedScenario.transcript, diagName);
+      setProcessingStep('Diagnostico completado');
+      await loadLogs();
+    } catch (error) {
+      console.error(error);
+      setProcessingStep('Diagnostico fallido');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const exportDiagnostics = (log: LabTestLog | null) => {
+    if (!log?.metadata?.diagnostics) return;
+    const payload = {
+      exported_at: new Date().toISOString(),
+      test_name: log.test_name,
+      created_at: log.created_at,
+      diagnostics: log.metadata.diagnostics
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `lab-diagnostics-${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <div className="audio-lab-container">
+    <div className="audio-lab-container" data-testid="audio-test-lab">
       <div className="audio-lab-header">
         <h2>Laboratorio de Pruebas</h2>
         <button onClick={onClose} className="audio-lab-close-btn" aria-label="Cerrar zona test">Cerrar</button>
@@ -107,6 +174,9 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
         </button>
         <button className={`audio-lab-tab ${mode === 'text' ? 'active' : ''}`} onClick={() => setMode('text')}>
           <FileText size={18} /> Transcripcion Pasada
+        </button>
+        <button className={`audio-lab-tab ${mode === 'diagnostic' ? 'active' : ''}`} onClick={() => setMode('diagnostic')}>
+          <ClipboardList size={18} /> Diagnostico E2E
         </button>
         <button className={`audio-lab-tab ${mode === 'history' ? 'active' : ''}`} onClick={() => setMode('history')}>
           <Activity size={18} /> Historial Auditoria
@@ -191,29 +261,81 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
               {isProcessing ? processingStep : 'Procesar y Guardar en Historias'}
             </button>
           </div>
+        ) : mode === 'diagnostic' ? (
+          <div className="audio-lab-mode-block" data-testid="diagnostic-mode">
+            <div className="audio-lab-config-card">
+              <p><strong>Diagnostico E2E (simulacion deterministica):</strong></p>
+              <p className="audio-lab-helper">Ejecuta pipeline completo y genera insights de salud por etapa.</p>
+            </div>
+            <label className="audio-lab-label">Escenario</label>
+            <select
+              value={diagnosticScenarioId}
+              onChange={(e) => setDiagnosticScenarioId(e.target.value)}
+              className="audio-lab-select"
+              aria-label="Escenario de diagnostico"
+              data-testid="diagnostic-scenario"
+            >
+              {DIAGNOSTIC_SCENARIOS.map((scenario) => (
+                <option key={scenario.id} value={scenario.id}>{scenario.label}</option>
+              ))}
+            </select>
+            <button className="audio-lab-run-btn" onClick={handleRunDiagnostic} disabled={isProcessing} data-testid="run-diagnostic-btn">
+              <ClipboardList size={18} />
+              {isProcessing ? processingStep : 'Ejecutar diagnostico'}
+            </button>
+
+            {latestDiagnostic?.metadata?.diagnostics && (
+              <div className="audio-lab-diagnostic-summary" data-testid="diagnostic-summary">
+                <h3>Ultimo diagnostico</h3>
+                <p><strong>Estado:</strong> {latestDiagnostic.metadata.diagnostics.status}</p>
+                <p><strong>Escenario:</strong> {latestDiagnostic.metadata.diagnostics.scenario_id || 'n/a'}</p>
+                <p><strong>Etapas:</strong> {latestDiagnostic.metadata.diagnostics.stage_results.length}</p>
+                <p><strong>Insights:</strong> {(latestDiagnostic.metadata.diagnostics.insights || []).join(' | ') || 'Sin observaciones'}</p>
+                <div className="audio-lab-diagnostic-actions">
+                  <button className="audio-lab-export-btn" onClick={() => exportDiagnostics(latestDiagnostic)}>
+                    <Download size={16} /> Exportar JSON
+                  </button>
+                  <button className="audio-lab-export-btn" onClick={() => setSelectedLog(latestDiagnostic)}>
+                    Ver detalle
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         ) : (
           <div className="audio-lab-history-area">
             <div className="audio-lab-history-header">
               <h3>Historial de pruebas de auditoria</h3>
-              <button
-                className="audio-lab-clear-btn"
-                onClick={async () => {
-                  if (confirm('Borrar todo el historial de pruebas?')) {
-                    const { clearLabTestLogs } = await import('../services/storage');
-                    await clearLabTestLogs();
-                    setHistoryLogs([]);
-                  }
-                }}
-              >
-                Limpiar Historial
-              </button>
+              <div className="audio-lab-history-actions">
+                <button
+                  className="audio-lab-export-btn"
+                  onClick={() => exportDiagnostics(selectedLog || latestDiagnostic)}
+                  disabled={!(selectedLog?.metadata?.diagnostics || latestDiagnostic?.metadata?.diagnostics)}
+                >
+                  <Download size={16} /> Exportar diagnostico
+                </button>
+                <button
+                  className="audio-lab-clear-btn"
+                  onClick={async () => {
+                    if (confirm('Borrar todo el historial de pruebas?')) {
+                      const { clearLabTestLogs } = await import('../services/storage');
+                      await clearLabTestLogs();
+                      setHistoryLogs([]);
+                      setLatestDiagnostic(null);
+                    }
+                  }}
+                >
+                  Limpiar Historial
+                </button>
+              </div>
             </div>
             <div className="audio-lab-table-wrap">
-              <table className="audio-lab-table">
+              <table className="audio-lab-table" data-testid="diagnostic-history-table">
                 <thead>
                   <tr>
                     <th>Hora</th>
                     <th>Prueba</th>
+                    <th>Estado</th>
                     <th>Ciclos</th>
                     <th>Errores</th>
                     <th>Modelo</th>
@@ -224,7 +346,12 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                   {historyLogs.map((log) => (
                     <tr key={log.id} className="audio-lab-log-row" onClick={() => setSelectedLog(log)}>
                       <td>{new Date(log.created_at).toLocaleTimeString()}</td>
-                      <td title={log.test_name}>{log.test_name.replace('TEST_LAB_', '')}</td>
+                      <td title={log.test_name}>{log.test_name.replace('TEST_LAB_', '').replace('DIAG_', '')}</td>
+                      <td>
+                        <span className={`audio-lab-badge-status ${(log.metadata.diagnostics?.status || 'legacy').toLowerCase()}`}>
+                          {log.metadata.diagnostics?.status || 'legacy'}
+                        </span>
+                      </td>
                       <td><span className="audio-lab-badge-cycles">{log.metadata.versionsCount}</span></td>
                       <td><span className="audio-lab-badge-errors">{log.metadata.errorsFixed}</span></td>
                       <td><code className="audio-lab-model-code">{log.metadata.models.generation}</code></td>
@@ -240,7 +367,7 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                   ))}
                   {historyLogs.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="audio-lab-no-logs">No hay pruebas registradas aun.</td>
+                      <td colSpan={7} className="audio-lab-no-logs">No hay pruebas registradas aun.</td>
                     </tr>
                   )}
                 </tbody>
@@ -292,10 +419,6 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
           cursor: pointer;
         }
 
-        .audio-lab-close-btn:hover {
-          background: #f8fafc;
-        }
-
         .audio-lab-tabs {
           display: flex;
           gap: 0.55rem;
@@ -341,6 +464,20 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
           border: 1px solid #e2e8f0;
         }
 
+        .audio-lab-label {
+          font-size: 0.85rem;
+          font-weight: 700;
+          color: #334155;
+        }
+
+        .audio-lab-select {
+          height: 42px;
+          border-radius: 10px;
+          border: 1px solid #cbd5e1;
+          padding: 0 0.7rem;
+          font-size: 0.95rem;
+        }
+
         .audio-lab-config-card ul {
           margin-top: 0.65rem;
           margin-left: 1rem;
@@ -348,15 +485,8 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
           gap: 0.3rem;
         }
 
-        .tag-on {
-          color: #16a34a;
-          font-weight: bold;
-        }
-
-        .tag-off {
-          color: #dc2626;
-          font-weight: bold;
-        }
+        .tag-on { color: #16a34a; font-weight: bold; }
+        .tag-off { color: #dc2626; font-weight: bold; }
 
         .audio-lab-record-btn,
         .audio-lab-stop-btn,
@@ -375,25 +505,10 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
           font-weight: 700;
         }
 
-        .audio-lab-record-btn {
-          background: #0f766e;
-          color: white;
-        }
-
-        .audio-lab-stop-btn {
-          background: #ef4444;
-          color: white;
-        }
-
-        .audio-lab-run-btn {
-          background: #2563eb;
-          color: white;
-        }
-
-        .audio-lab-run-btn:disabled {
-          background: #94a3b8;
-          cursor: not-allowed;
-        }
+        .audio-lab-record-btn { background: #0f766e; color: white; }
+        .audio-lab-stop-btn { background: #ef4444; color: white; }
+        .audio-lab-run-btn { background: #2563eb; color: white; }
+        .audio-lab-run-btn:disabled { background: #94a3b8; cursor: not-allowed; }
 
         .audio-lab-playback-area {
           margin-top: 0.3rem;
@@ -401,10 +516,7 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
           border-top: 1px solid #e2e8f0;
         }
 
-        .audio-lab-playback-area audio {
-          width: 100%;
-          margin: 0.7rem 0;
-        }
+        .audio-lab-playback-area audio { width: 100%; margin: 0.7rem 0; }
 
         .audio-lab-upload-box {
           border: 2px dashed #cbd5e1;
@@ -416,38 +528,13 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
           background: #fdfefe;
         }
 
-        .audio-lab-upload-box:hover {
-          border-color: #0f766e;
-          background: #f0fdfa;
-        }
+        .audio-lab-upload-box:hover { border-color: #0f766e; background: #f0fdfa; }
 
-        .audio-lab-upload-icon {
-          color: #64748b;
-          margin-bottom: 1rem;
-        }
-
-        .audio-lab-subtext {
-          font-size: 0.85rem;
-          color: #94a3b8;
-          display: block;
-          margin-top: 0.5rem;
-        }
-
-        .audio-lab-file-info .filename {
-          font-weight: 700;
-          color: #0f172a;
-        }
-
-        .audio-lab-file-info .status {
-          font-size: 0.9rem;
-          color: #475569;
-        }
-
-        .audio-lab-helper {
-          font-size: 0.9rem;
-          color: #64748b;
-          margin-top: 0.35rem;
-        }
+        .audio-lab-upload-icon { color: #64748b; margin-bottom: 1rem; }
+        .audio-lab-subtext { font-size: 0.85rem; color: #94a3b8; display: block; margin-top: 0.5rem; }
+        .audio-lab-file-info .filename { font-weight: 700; color: #0f172a; }
+        .audio-lab-file-info .status { font-size: 0.9rem; color: #475569; }
+        .audio-lab-helper { font-size: 0.9rem; color: #64748b; margin-top: 0.35rem; }
 
         .audio-lab-text-input {
           width: 100%;
@@ -459,32 +546,53 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
           resize: vertical;
         }
 
-        .audio-lab-text-input:focus {
-          outline: 2px solid #0f766e;
-          border-color: transparent;
+        .audio-lab-text-input:focus { outline: 2px solid #0f766e; border-color: transparent; }
+
+        .audio-lab-diagnostic-summary {
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          padding: 1rem;
+          display: grid;
+          gap: 0.35rem;
         }
 
-        .audio-lab-history-area {
-          margin-top: 0.35rem;
-          display: grid;
-          gap: 0.9rem;
+        .audio-lab-diagnostic-summary h3 { margin: 0; }
+
+        .audio-lab-diagnostic-actions,
+        .audio-lab-history-actions {
+          display: flex;
+          gap: 0.5rem;
+          flex-wrap: wrap;
         }
+
+        .audio-lab-export-btn,
+        .audio-lab-clear-btn {
+          padding: 0.45rem 0.8rem;
+          border-radius: 8px;
+          font-size: 0.84rem;
+          cursor: pointer;
+          border: 1px solid #cbd5e1;
+          background: white;
+          color: #1e293b;
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+        }
+
+        .audio-lab-clear-btn {
+          background: #fee2e2;
+          color: #991b1b;
+          border-color: #fecaca;
+        }
+
+        .audio-lab-history-area { margin-top: 0.35rem; display: grid; gap: 0.9rem; }
 
         .audio-lab-history-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
           gap: 1rem;
-        }
-
-        .audio-lab-clear-btn {
-          padding: 0.45rem 0.8rem;
-          background: #fee2e2;
-          color: #991b1b;
-          border: 1px solid #fecaca;
-          border-radius: 8px;
-          font-size: 0.84rem;
-          cursor: pointer;
         }
 
         .audio-lab-table-wrap {
@@ -518,29 +626,24 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
           vertical-align: middle;
         }
 
-        .audio-lab-log-row {
-          cursor: pointer;
-        }
+        .audio-lab-log-row { cursor: pointer; }
+        .audio-lab-log-row:hover { background: #f1f5f9; }
 
-        .audio-lab-log-row:hover {
-          background: #f1f5f9;
-        }
-
-        .audio-lab-badge-cycles {
-          background: #e0f2fe;
-          color: #0369a1;
-          padding: 2px 6px;
-          border-radius: 10px;
-          font-weight: 600;
-        }
-
+        .audio-lab-badge-status,
+        .audio-lab-badge-cycles,
         .audio-lab-badge-errors {
-          background: #ecfdf5;
-          color: #047857;
           padding: 2px 6px;
           border-radius: 10px;
           font-weight: 600;
         }
+
+        .audio-lab-badge-status { background: #e2e8f0; color: #334155; }
+        .audio-lab-badge-status.passed { background: #dcfce7; color: #166534; }
+        .audio-lab-badge-status.failed { background: #fee2e2; color: #991b1b; }
+        .audio-lab-badge-status.degraded { background: #fef3c7; color: #92400e; }
+
+        .audio-lab-badge-cycles { background: #e0f2fe; color: #0369a1; }
+        .audio-lab-badge-errors { background: #ecfdf5; color: #047857; }
 
         .audio-lab-model-code {
           background: #f1f5f9;
@@ -550,10 +653,7 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
           font-size: 0.75rem;
         }
 
-        .audio-lab-memory-flag {
-          color: #ca8a04;
-          margin-right: 0.25rem;
-        }
+        .audio-lab-memory-flag { color: #ca8a04; margin-right: 0.25rem; }
 
         .audio-lab-no-logs {
           text-align: center;
@@ -563,14 +663,8 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
         }
 
         @media (max-width: 1024px) {
-          .audio-lab-container {
-            padding: 1rem;
-          }
-
-          .audio-lab-history-header {
-            flex-direction: column;
-            align-items: flex-start;
-          }
+          .audio-lab-container { padding: 1rem; }
+          .audio-lab-history-header { flex-direction: column; align-items: flex-start; }
         }
       `}</style>
     </div>

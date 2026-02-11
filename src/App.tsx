@@ -31,6 +31,13 @@ import { MemoryService } from './services/memory';
 import { ConsultationPipelineOrchestrator } from './services/pipeline-orchestrator';
 import { enqueueAuditEvent, startAuditWorker, stopAuditWorker } from './services/audit-worker';
 import { startErrorMonitoring } from './services/error-monitor';
+import {
+    buildQualityGateFromHistory,
+    finalizeDiagnosticRun,
+    recordDiagnosticEvent,
+    startDiagnosticRun,
+    type DiagnosticSummary
+} from './services/diagnostics';
 import { WhatsNewModal } from './components/WhatsNewModal';
 import { OnboardingModal } from './components/OnboardingModal';
 import { SimulationProvider, useSimulation } from './components/Simulation/SimulationContext';
@@ -163,6 +170,8 @@ const AppContent = () => {
     const processingLockRef = useRef(false);
     const currentViewRef = useRef(currentView);
     const currentPatientRef = useRef(currentPatientName);
+    const diagnosticRunBySessionRef = useRef<Map<string, string>>(new Map());
+    const diagnosticSummaryBySessionRef = useRef<Map<string, DiagnosticSummary>>(new Map());
 
     useEffect(() => {
         currentViewRef.current = currentView;
@@ -171,6 +180,37 @@ const AppContent = () => {
     useEffect(() => {
         currentPatientRef.current = currentPatientName;
     }, [currentPatientName]);
+
+    const isLabRun = (patientName: string) => patientName.startsWith('TEST_LAB_') || patientName.startsWith('DIAG_');
+
+    const normalizeDiagnosticError = (error: unknown): string => {
+        const message = ((error as Error)?.message || '').toLowerCase();
+        if (message.includes('budget_limit') || message.includes('awaiting_budget')) return 'budget_limit';
+        if (message.includes('timeout') || message.includes('abort')) return 'timeout';
+        if (message.includes('400')) return 'http_400';
+        if (message.includes('401')) return 'http_401';
+        if (message.includes('403')) return 'http_403';
+        if (message.includes('404')) return 'http_404';
+        if (message.includes('408')) return 'http_408';
+        if (message.includes('409')) return 'http_409';
+        if (message.includes('413')) return 'http_413';
+        if (message.includes('422')) return 'http_422';
+        if (message.includes('429')) return 'http_429';
+        if (message.includes('500')) return 'http_500';
+        if (message.includes('502')) return 'http_502';
+        if (message.includes('503')) return 'http_503';
+        if (message.includes('504')) return 'http_504';
+        if (message.includes('decode') || message.includes('wav conversion')) return 'decode_error';
+        return 'unknown_error';
+    };
+
+    const sanitizeTranscriptForExtraction = (raw: string) => {
+        if (!raw) return raw;
+        return raw
+            .replace(/\[(MISSING_BATCH|PARTIAL_BATCH)_[^\]]+\]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    };
 
 
 
@@ -201,13 +241,48 @@ const AppContent = () => {
         notas_calidad: [{ tipo: 'AMBIGUO', seccion: 'pipeline', descripcion: reason }]
     });
 
-    const splitBlobForSafeProcessing = async (blob: Blob): Promise<Blob[]> => {
-        if (blob.size <= MAX_SAFE_AUDIO_BLOB_BYTES) return [blob];
+    const splitBlobForSafeProcessing = async (
+        blob: Blob,
+        options?: { sessionId?: string; stageName?: string; batchIndex?: number }
+    ): Promise<Blob[]> => {
+        const runId = options?.sessionId ? diagnosticRunBySessionRef.current.get(options.sessionId) : undefined;
+        const splitStage = options?.stageName || 'split_blob';
+        if (runId) {
+            recordDiagnosticEvent(runId, { type: 'stage_start', stage: splitStage });
+        }
+        if (blob.size <= MAX_SAFE_AUDIO_BLOB_BYTES) {
+            if (runId) {
+                recordDiagnosticEvent(runId, {
+                    type: 'stage_end',
+                    stage: splitStage,
+                    status: 'passed'
+                });
+            }
+            return [blob];
+        }
         try {
             const chunks = await normalizeAndChunkAudio(blob);
-            if (chunks.length > 0) return chunks;
+            if (chunks.length > 0) {
+                if (runId) {
+                    recordDiagnosticEvent(runId, {
+                        type: 'stage_end',
+                        stage: splitStage,
+                        status: 'passed'
+                    });
+                }
+                return chunks;
+            }
         } catch (error) {
             console.warn('[App] normalizeAndChunkAudio failed, falling back to binary split:', error);
+            if (runId) {
+                recordDiagnosticEvent(runId, {
+                    type: 'stage_end',
+                    stage: splitStage,
+                    status: 'degraded',
+                    error_code: normalizeDiagnosticError(error),
+                    error_message: (error as Error)?.message || 'normalize_and_chunk_failed'
+                });
+            }
         }
         const chunks: Blob[] = [];
         let start = 0;
@@ -215,6 +290,13 @@ const AppContent = () => {
             const end = Math.min(blob.size, start + MAX_SAFE_AUDIO_BLOB_BYTES);
             chunks.push(blob.slice(start, end, blob.type));
             start = end;
+        }
+        if (runId) {
+            recordDiagnosticEvent(runId, {
+                type: 'stage_end',
+                stage: splitStage,
+                status: 'passed'
+            });
         }
         return chunks;
     };
@@ -437,7 +519,11 @@ const AppContent = () => {
     ) => {
         const partialStartedAt = Date.now();
         const sessionId = orchestratorRef.current?.getStatus().sessionId || '';
+        const runId = sessionId ? diagnosticRunBySessionRef.current.get(sessionId) : undefined;
         try {
+            if (runId) {
+                recordDiagnosticEvent(runId, { type: 'stage_start', stage: `partial_${batchIndex}` });
+            }
             if (sessionId) {
                 await upsertConsultationSession({
                     session_id: sessionId,
@@ -449,23 +535,53 @@ const AppContent = () => {
             }
             await markSegmentStatus({ session_id: sessionId, batch_index: batchIndex, type: 'audio', status: 'processing' });
 
-            const safeBlobs = await splitBlobForSafeProcessing(blob);
+            const safeBlobs = await splitBlobForSafeProcessing(blob, {
+                sessionId,
+                stageName: `partial_${batchIndex}_split`,
+                batchIndex
+            });
             const transcriptParts: string[] = [];
 
             for (let i = 0; i < safeBlobs.length; i++) {
                 const partBlob = safeBlobs[i];
                 const partBatchIndex = safeBlobs.length > 1 ? (batchIndex * 1000) + i : batchIndex;
-                const transcriptResult = await aiService.transcribeAudio(partBlob);
-                transcriptParts.push(transcriptResult.data);
+                const chunkStartedAt = Date.now();
+                try {
+                    const transcriptResult = await aiService.transcribeAudio(partBlob);
+                    transcriptParts.push(transcriptResult.data);
+                    if (runId) {
+                        recordDiagnosticEvent(runId, {
+                            type: 'chunk_result',
+                            batch_index: partBatchIndex,
+                            size_bytes: partBlob.size,
+                            duration_ms: Date.now() - chunkStartedAt,
+                            status: 'passed'
+                        });
+                    }
+                    await saveSegment({
+                        session_id: sessionId,
+                        batch_index: partBatchIndex,
+                        type: 'transcript',
+                        text: transcriptResult.data,
+                        status: 'completed'
+                    });
+                    continue;
+                } catch (error) {
+                    if (runId) {
+                        recordDiagnosticEvent(runId, {
+                            type: 'chunk_result',
+                            batch_index: partBatchIndex,
+                            size_bytes: partBlob.size,
+                            duration_ms: Date.now() - chunkStartedAt,
+                            status: 'failed',
+                            error_code: normalizeDiagnosticError(error),
+                            error_message: (error as Error)?.message || 'transcription_failed'
+                        });
+                    }
+                    throw error;
+                }
                 // DEFERRED EXTRACTION: We only transcribe here to save tokens.
                 // Extraction will happen once at the end with the full transcript.
-                await saveSegment({
-                    session_id: sessionId,
-                    batch_index: partBatchIndex,
-                    type: 'transcript',
-                    text: transcriptResult.data,
-                    status: 'completed'
-                });
             }
 
             const mergedTranscript = transcriptParts.join(' ').trim();
@@ -497,6 +613,14 @@ const AppContent = () => {
                         blob_size: blob.size,
                         transcript_length: mergedTranscript.length
                     }
+                });
+            }
+            if (runId) {
+                recordDiagnosticEvent(runId, {
+                    type: 'stage_end',
+                    stage: `partial_${batchIndex}`,
+                    status: 'passed',
+                    duration_ms: Date.now() - partialStartedAt
                 });
             }
         } catch (error: any) {
@@ -554,6 +678,16 @@ const AppContent = () => {
                     }
                 });
             }
+            if (runId) {
+                recordDiagnosticEvent(runId, {
+                    type: 'stage_end',
+                    stage: `partial_${batchIndex}`,
+                    status: 'failed',
+                    duration_ms: Date.now() - partialStartedAt,
+                    error_code: normalizeDiagnosticError(error),
+                    error_message: error?.message || 'partial_batch_failed'
+                });
+            }
         }
     };
 
@@ -566,22 +700,56 @@ const AppContent = () => {
     ) => {
         const finalizeStartedAt = Date.now();
         const sessionId = orchestratorRef.current?.getStatus().sessionId || '';
+        const runId = sessionId ? diagnosticRunBySessionRef.current.get(sessionId) : undefined;
+        if (runId) {
+            recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'finalize' });
+        }
         setProcessingStatus('Transcribiendo segmento final...');
         await markSegmentStatus({ session_id: sessionId, batch_index: batchIndex, type: 'audio', status: 'processing' });
-        const safeFinalBlobs = await splitBlobForSafeProcessing(blob);
+        const safeFinalBlobs = await splitBlobForSafeProcessing(blob, {
+            sessionId,
+            stageName: 'final_split',
+            batchIndex
+        });
         const finalTranscriptParts: string[] = [];
         for (let i = 0; i < safeFinalBlobs.length; i++) {
             const subBlob = safeFinalBlobs[i];
             const subBatchIndex = safeFinalBlobs.length > 1 ? (batchIndex * 1000) + i : batchIndex;
-            const transcriptResult = await aiService.transcribeAudio(subBlob);
-            finalTranscriptParts.push(transcriptResult.data);
-            await saveSegment({
-                session_id: sessionId,
-                batch_index: subBatchIndex,
-                type: 'transcript',
-                text: transcriptResult.data,
-                status: 'completed'
-            });
+            const chunkStartedAt = Date.now();
+            try {
+                const transcriptResult = await aiService.transcribeAudio(subBlob);
+                finalTranscriptParts.push(transcriptResult.data);
+                if (runId) {
+                    recordDiagnosticEvent(runId, {
+                        type: 'chunk_result',
+                        batch_index: subBatchIndex,
+                        size_bytes: subBlob.size,
+                        duration_ms: Date.now() - chunkStartedAt,
+                        status: 'passed'
+                    });
+                }
+                await saveSegment({
+                    session_id: sessionId,
+                    batch_index: subBatchIndex,
+                    type: 'transcript',
+                    text: transcriptResult.data,
+                    status: 'completed'
+                });
+                continue;
+            } catch (error) {
+                if (runId) {
+                    recordDiagnosticEvent(runId, {
+                        type: 'chunk_result',
+                        batch_index: subBatchIndex,
+                        size_bytes: subBlob.size,
+                        duration_ms: Date.now() - chunkStartedAt,
+                        status: 'failed',
+                        error_code: normalizeDiagnosticError(error),
+                        error_message: (error as Error)?.message || 'transcription_failed'
+                    });
+                }
+                throw error;
+            }
         }
 
         const mergedFinalTranscript = finalTranscriptParts.join(' ').trim();
@@ -622,21 +790,40 @@ const AppContent = () => {
         // SINGLE EXTRACTION CALL on the full transcript
         setProcessingStatus('Extrayendo datos clinicos de toda la consulta (Gemini)...');
         aiService.resetInvocationCounters(sessionId || undefined);
-        let extractionInput = fullTranscription;
+        const sanitizedTranscription = sanitizeTranscriptForExtraction(fullTranscription);
+        let extractionInput = sanitizedTranscription;
         let fullExtraction;
+        if (runId) {
+            recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'extract_full' });
+        }
         try {
             fullExtraction = await aiService.extractOnly(extractionInput);
+            if (runId) {
+                recordDiagnosticEvent(runId, { type: 'stage_end', stage: 'extract_full', status: 'passed' });
+            }
         } catch (firstError) {
             console.warn('[App] Final extraction failed, retrying from stored transcript segments...', firstError);
             const recoveredTranscript = await buildTranscriptFromStoredSegments(sessionId);
             if (recoveredTranscript && recoveredTranscript.length > extractionInput.length) {
-                extractionInput = recoveredTranscript;
+                extractionInput = sanitizeTranscriptForExtraction(recoveredTranscript);
                 setTranscription(extractionInput);
             }
             await sleep(700);
             try {
                 fullExtraction = await aiService.extractOnly(extractionInput);
+                if (runId) {
+                    recordDiagnosticEvent(runId, { type: 'stage_end', stage: 'extract_full', status: 'degraded' });
+                }
             } catch (secondError: any) {
+                if (runId) {
+                    recordDiagnosticEvent(runId, {
+                        type: 'stage_end',
+                        stage: 'extract_full',
+                        status: 'failed',
+                        error_code: normalizeDiagnosticError(secondError),
+                        error_message: secondError?.message || 'final_extraction_failed'
+                    });
+                }
                 try {
                     if (sessionId) {
                         await upsertConsultationSession({
@@ -662,6 +849,9 @@ const AppContent = () => {
 
         setProcessingStatus(`Generando historia clinica final (${orderedExtractions.length} bloque)...`);
 
+        if (runId) {
+            recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'generate_history' });
+        }
         const result = await aiService.generateFromMergedExtractions(
             orderedExtractions,
             extractionInput,
@@ -670,6 +860,13 @@ const AppContent = () => {
             bestClassification,
             sessionId
         );
+        if (runId) {
+            recordDiagnosticEvent(runId, {
+                type: 'stage_end',
+                stage: 'generate_history',
+                status: result.pipeline_status === 'completed' ? 'passed' : 'degraded'
+            });
+        }
 
         const missingWarnings = missingBatches.map((idx) => ({
             type: 'missing_batch',
@@ -792,8 +989,75 @@ const AppContent = () => {
                     purgeArtifacts: true
                 });
             }
+
+            const qualityGate = buildQualityGateFromHistory({
+                medical_history: result.data,
+                result_status: result.result_status,
+                critical_gaps_count: result.critical_gaps?.length || 0
+            });
+            if (runId) {
+                recordDiagnosticEvent(runId, { type: 'quality_gate', gate: qualityGate });
+                const finalizeStageStatus = !qualityGate.required_sections_ok || result.result_status === 'provisional'
+                    ? 'failed'
+                    : (result.pipeline_status === 'degraded' ? 'degraded' : 'passed');
+                recordDiagnosticEvent(runId, {
+                    type: 'stage_end',
+                    stage: 'finalize',
+                    status: finalizeStageStatus,
+                    duration_ms: Date.now() - finalizeStartedAt
+                });
+                const diagnostics = finalizeDiagnosticRun(runId, {
+                    quality_gate: qualityGate
+                });
+                if (diagnostics) {
+                    diagnosticSummaryBySessionRef.current.set(sessionId, diagnostics);
+                }
+            }
+
+            if (isLabRun(patientName)) {
+                const diagnostics = diagnosticSummaryBySessionRef.current.get(sessionId);
+                await saveLabTestLog({
+                    test_name: patientName,
+                    input_type: 'audio',
+                    transcription: extractionInput,
+                    medical_history: result.data,
+                    metadata: {
+                        corrections: result.corrections_applied || 0,
+                        models: { generation: result.model, validation: buildValidationLabel(result.validations) },
+                        versionsCount: (result.corrections_applied || 0) + 1,
+                        errorsFixed: 0,
+                        active_memory_used: Boolean(result.active_memory_used),
+                        validationHistory: result.validations?.flatMap((v) => v.errors),
+                        remainingErrors: result.remaining_errors,
+                        diagnostics: diagnostics ? {
+                            run_id: diagnostics.run_id,
+                            mode: diagnostics.mode,
+                            scenario_id: diagnostics.scenario_id,
+                            status: diagnostics.status,
+                            stage_results: diagnostics.stage_results,
+                            audio_stats: diagnostics.audio_stats,
+                            quality_gate: diagnostics.quality_gate ? {
+                                required_sections_ok: diagnostics.quality_gate.required_sections_ok,
+                                result_status: diagnostics.quality_gate.result_status,
+                                critical_gaps_count: diagnostics.quality_gate.critical_gaps_count
+                            } : undefined,
+                            insights: diagnostics.insights
+                        } : undefined
+                    }
+                });
+            }
         } catch (saveError) {
             console.error('[App] Error saving record:', saveError);
+            if (runId) {
+                recordDiagnosticEvent(runId, {
+                    type: 'stage_end',
+                    stage: 'finalize',
+                    status: 'failed',
+                    duration_ms: Date.now() - finalizeStartedAt,
+                    error_code: normalizeDiagnosticError(saveError),
+                    error_message: (saveError as Error)?.message || 'save_failed'
+                });
+            }
         }
     };
 
@@ -887,6 +1151,17 @@ const AppContent = () => {
         const orchestrator = ensureOrchestrator(aiService);
         activeSessionIdRef.current = sessionId;
         orchestrator.startConsultation(sessionId, patientName);
+        if (isLabRun(patientName) && !diagnosticRunBySessionRef.current.has(sessionId)) {
+            const runId = startDiagnosticRun({
+                mode: 'hybrid',
+                source: 'audio',
+                patient_name: patientName,
+                scenario_id: patientName.replace('TEST_LAB_', '').replace('DIAG_', '').trim() || undefined
+            });
+            diagnosticRunBySessionRef.current.set(sessionId, runId);
+            recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'session_start' });
+            recordDiagnosticEvent(runId, { type: 'stage_end', stage: 'session_start', status: 'passed', duration_ms: 1 });
+        }
         MemoryService.setPipelineBusy(true);
         setPipelineRuntimeReason('');
         void upsertConsultationSession({
@@ -982,6 +1257,15 @@ const AppContent = () => {
                 : `session_${Date.now()}_${Math.random().toString(16).slice(2)}`;
             activeSessionIdRef.current = sessionId;
             orchestrator.startConsultation(sessionId, patientName);
+            if (isLabRun(patientName) && !diagnosticRunBySessionRef.current.has(sessionId)) {
+                const runId = startDiagnosticRun({
+                    mode: 'hybrid',
+                    source: 'audio',
+                    patient_name: patientName,
+                    scenario_id: patientName.replace('TEST_LAB_', '').replace('DIAG_', '').trim() || undefined
+                });
+                diagnosticRunBySessionRef.current.set(sessionId, runId);
+            }
             MemoryService.setPipelineBusy(true);
             await upsertConsultationSession({
                 session_id: sessionId,
@@ -1046,6 +1330,28 @@ const AppContent = () => {
             setProcessingStatus('Error en el procesamiento.');
             const sessionId = orchestrator.getStatus().sessionId || '';
             if (sessionId) {
+                const runId = diagnosticRunBySessionRef.current.get(sessionId);
+                if (runId) {
+                    recordDiagnosticEvent(runId, {
+                        type: 'stage_end',
+                        stage: 'finalize',
+                        status: 'failed',
+                        error_code: normalizeDiagnosticError(error),
+                        error_message: error?.message || 'v4_pipeline_failed'
+                    });
+                    const diagnostics = finalizeDiagnosticRun(runId, {
+                        quality_gate: {
+                            required_sections_ok: false,
+                            result_status: 'failed_recoverable',
+                            critical_gaps_count: 1
+                        }
+                    });
+                    if (diagnostics) {
+                        diagnosticSummaryBySessionRef.current.set(sessionId, diagnostics);
+                    }
+                }
+            }
+            if (sessionId) {
                 void enqueueAuditEvent('pipeline_run_update', {
                     session_id: sessionId,
                     patient_name: patientName,
@@ -1098,6 +1404,10 @@ const AppContent = () => {
             if (!isPartialBatch) {
                 setIsLoading(false);
                 MemoryService.setPipelineBusy(false);
+                const sessionId = orchestrator.getStatus().sessionId || '';
+                if (sessionId && isLabRun(patientName) && diagnosticRunBySessionRef.current.has(sessionId)) {
+                    diagnosticRunBySessionRef.current.delete(sessionId);
+                }
             }
         }
     };
@@ -1125,11 +1435,20 @@ const AppContent = () => {
                 transcription_length: text.length
             }
         });
+        const diagnosticRunId = startDiagnosticRun({
+            mode: 'hybrid',
+            source: 'text',
+            patient_name: patientName,
+            scenario_id: patientName.replace('TEST_LAB_', '').replace('DIAG_', '').trim() || undefined
+        });
 
         try {
             aiService.resetInvocationCounters(textSessionId);
+            recordDiagnosticEvent(diagnosticRunId, { type: 'stage_start', stage: 'extract_text' });
             const extraction = await aiService.extractOnly(text);
+            recordDiagnosticEvent(diagnosticRunId, { type: 'stage_end', stage: 'extract_text', status: 'passed' });
             const normalizedMeta = prefixExtractionMeta(extraction.meta, 0);
+            recordDiagnosticEvent(diagnosticRunId, { type: 'stage_start', stage: 'generate_text_history' });
             const result = await aiService.generateFromMergedExtractions(
                 [extraction.data],
                 text,
@@ -1138,6 +1457,11 @@ const AppContent = () => {
                 extraction.classification,
                 textSessionId
             );
+            recordDiagnosticEvent(diagnosticRunId, {
+                type: 'stage_end',
+                stage: 'generate_text_history',
+                status: result.pipeline_status === 'completed' ? 'passed' : 'degraded'
+            });
 
             setHistory(result.data);
             setOriginalHistory(result.data);
@@ -1226,6 +1550,22 @@ const AppContent = () => {
                 }
             });
 
+            const qualityGate = buildQualityGateFromHistory({
+                medical_history: result.data,
+                result_status: result.result_status,
+                critical_gaps_count: result.critical_gaps?.length || 0
+            });
+            recordDiagnosticEvent(diagnosticRunId, { type: 'quality_gate', gate: qualityGate });
+            recordDiagnosticEvent(diagnosticRunId, {
+                type: 'stage_end',
+                stage: 'text_pipeline',
+                status: qualityGate.required_sections_ok && (result.result_status || 'completed') === 'completed'
+                    ? 'passed'
+                    : 'failed'
+            });
+            const diagnostics = finalizeDiagnosticRun(diagnosticRunId, {
+                quality_gate: qualityGate
+            });
             await saveLabTestLog({
                 test_name: patientName,
                 input_type: 'text',
@@ -1236,13 +1576,72 @@ const AppContent = () => {
                     models: { generation: result.model, validation: buildValidationLabel(result.validations) },
                     versionsCount: (result.corrections_applied || 0) + 1,
                     errorsFixed: 0,
-                    active_memory_used: Boolean(result.active_memory_used)
+                    active_memory_used: Boolean(result.active_memory_used),
+                    validationHistory: result.validations?.flatMap((v) => v.errors),
+                    remainingErrors: result.remaining_errors,
+                    diagnostics: diagnostics ? {
+                        run_id: diagnostics.run_id,
+                        mode: diagnostics.mode,
+                        scenario_id: diagnostics.scenario_id,
+                        status: diagnostics.status,
+                        stage_results: diagnostics.stage_results,
+                        audio_stats: diagnostics.audio_stats,
+                        quality_gate: diagnostics.quality_gate ? {
+                            required_sections_ok: diagnostics.quality_gate.required_sections_ok,
+                            result_status: diagnostics.quality_gate.result_status,
+                            critical_gaps_count: diagnostics.quality_gate.critical_gaps_count
+                        } : undefined,
+                        insights: diagnostics.insights
+                    } : undefined
                 }
             });
             setProcessingStatus('Consulta de prueba guardada en Historial');
         } catch (e: any) {
             console.error(e);
             setProcessingStatus('Error procesando texto');
+            recordDiagnosticEvent(diagnosticRunId, {
+                type: 'stage_end',
+                stage: 'text_pipeline',
+                status: 'failed',
+                error_code: normalizeDiagnosticError(e),
+                error_message: e?.message || 'text_pipeline_failed'
+            });
+            const diagnostics = finalizeDiagnosticRun(diagnosticRunId, {
+                quality_gate: {
+                    required_sections_ok: false,
+                    result_status: 'failed_recoverable',
+                    critical_gaps_count: 1
+                }
+            });
+            if (diagnostics) {
+                await saveLabTestLog({
+                    test_name: patientName,
+                    input_type: 'text',
+                    transcription: text,
+                    medical_history: '',
+                    metadata: {
+                        corrections: 0,
+                        models: { generation: 'failed', validation: 'failed' },
+                        versionsCount: 0,
+                        errorsFixed: 0,
+                        active_memory_used: false,
+                        diagnostics: {
+                            run_id: diagnostics.run_id,
+                            mode: diagnostics.mode,
+                            scenario_id: diagnostics.scenario_id,
+                            status: diagnostics.status,
+                            stage_results: diagnostics.stage_results,
+                            audio_stats: diagnostics.audio_stats,
+                            quality_gate: diagnostics.quality_gate ? {
+                                required_sections_ok: diagnostics.quality_gate.required_sections_ok,
+                                result_status: diagnostics.quality_gate.result_status,
+                                critical_gaps_count: diagnostics.quality_gate.critical_gaps_count
+                            } : undefined,
+                            insights: diagnostics.insights
+                        }
+                    }
+                });
+            }
             void enqueueAuditEvent('pipeline_run_update', {
                 session_id: textSessionId,
                 patient_name: patientName,

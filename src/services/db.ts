@@ -31,6 +31,31 @@ export interface LabTestLog {
         validationHistory?: { type: string; field: string; reason: string }[];
         remainingErrors?: { type: string; field: string; reason: string }[];
         active_memory_used?: boolean;
+        diagnostics?: {
+            run_id: string;
+            mode: 'simulated' | 'real' | 'hybrid';
+            scenario_id?: string;
+            status: 'passed' | 'failed' | 'degraded' | 'skipped';
+            stage_results: Array<{
+                stage: string;
+                status: 'passed' | 'failed' | 'degraded' | 'skipped';
+                duration_ms: number;
+                error_code?: string;
+                error_message?: string;
+            }>;
+            audio_stats?: {
+                chunk_count: number;
+                failed_chunks: number;
+                avg_chunk_bytes: number;
+                transcription_p95_ms: number;
+            };
+            quality_gate?: {
+                required_sections_ok: boolean;
+                result_status?: string;
+                critical_gaps_count: number;
+            };
+            insights?: string[];
+        };
     };
 }
 
