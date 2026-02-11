@@ -190,6 +190,31 @@ const AppContent = () => {
     }, [currentPatientName]);
 
     const isLabRun = (patientName: string) => patientName.startsWith('TEST_LAB_') || patientName.startsWith('DIAG_');
+    const extractDiagnosticContext = (patientName: string): {
+        scenarioId?: string;
+        executionMode?: 'deterministic' | 'real';
+    } => {
+        const stripped = patientName
+            .replace(/^TEST_LAB_/, '')
+            .replace(/^DIAG_/, '')
+            .trim();
+        if (!stripped) return {};
+        const tokens = stripped.split('_').filter(Boolean);
+        if (tokens.length === 0) return {};
+        let executionMode: 'deterministic' | 'real' | undefined;
+        if (tokens[0] === 'det') executionMode = 'deterministic';
+        if (tokens[0] === 'real') executionMode = 'real';
+        const startIndex = executionMode ? 1 : 0;
+        const coreTokens = tokens.slice(startIndex);
+        const maybeTimestamp = coreTokens[coreTokens.length - 1];
+        const scenarioTokens = /^\d{10,}$/.test(maybeTimestamp || '')
+            ? coreTokens.slice(0, -1)
+            : coreTokens;
+        return {
+            scenarioId: scenarioTokens.join('_') || stripped,
+            executionMode
+        };
+    };
 
     const normalizeDiagnosticError = (error: unknown): string => {
         const message = ((error as Error)?.message || '').toLowerCase();
@@ -249,6 +274,9 @@ const AppContent = () => {
             inputType?: 'audio' | 'text';
             codeOverride?: string;
             messageOverride?: string;
+            phase?: 'raw_guard' | 'final_guard' | 'stt' | 'extract' | 'generate' | 'quality_gate';
+            origin?: 'model_output' | 'sanitizer' | 'validator' | 'pipeline_policy';
+            blocking?: boolean;
         } = {}
     ): DiagnosticErrorDetail => {
         const anyError = error as {
@@ -279,6 +307,9 @@ const AppContent = () => {
                 input_type: params.inputType,
                 mime_type: params.mimeType || (metadata?.input_type as string | undefined),
                 chunk_bytes: params.chunkBytes,
+                phase: params.phase,
+                origin: params.origin,
+                blocking: params.blocking,
                 notes: [
                     typeof metadata?.retry_after_ms === 'number' ? `retry_after_ms=${metadata.retry_after_ms}` : '',
                     typeof metadata?.transcription_length === 'number' ? `transcription_length=${metadata.transcription_length}` : ''
@@ -303,11 +334,30 @@ const AppContent = () => {
         return unique.join(' + ');
     };
 
+    const hasInsufficientClinicalSignal = (params: {
+        stillBlocking?: string[];
+        remainingErrors?: { type: string; field: string; reason: string }[];
+    }): boolean => {
+        const joined = [
+            ...(params.stillBlocking || []),
+            ...((params.remainingErrors || []).map((item) => `${item.field}:${item.reason}`))
+        ].join(' ').toLowerCase();
+        return (
+            joined.includes('transcripcion')
+            && (
+                joined.includes('ambiguo')
+                || joined.includes('inaudible')
+                || joined.includes('no se identifican datos clinicos')
+            )
+        );
+    };
+
     const toLogDiagnostics = (diagnostics?: DiagnosticSummary | null) => {
         if (!diagnostics) return undefined;
         return {
             run_id: diagnostics.run_id,
             mode: diagnostics.mode,
+            execution_mode: diagnostics.execution_mode,
             input_source: diagnostics.source,
             scenario_id: diagnostics.scenario_id,
             status: diagnostics.status,
@@ -319,6 +369,10 @@ const AppContent = () => {
                 pipeline_status: diagnostics.quality_gate.pipeline_status,
                 critical_gaps_count: diagnostics.quality_gate.critical_gaps_count
             } : undefined,
+            status_reason_primary: diagnostics.status_reason_primary,
+            status_reason_chain: diagnostics.status_reason_chain,
+            reconciliation: diagnostics.reconciliation,
+            debug: diagnostics.debug,
             root_causes: diagnostics.root_causes,
             error_catalog: diagnostics.error_catalog,
             failure_timeline: diagnostics.failure_timeline,
@@ -394,7 +448,10 @@ const AppContent = () => {
                 mimeType: blob.type,
                 chunkBytes: blob.size,
                 inputType: 'audio',
-                codeOverride: 'unsafe_binary_split_blocked'
+                codeOverride: 'unsafe_binary_split_blocked',
+                phase: 'stt',
+                origin: 'pipeline_policy',
+                blocking: true
             });
             if (runId) {
                 recordDiagnosticEvent(runId, {
@@ -423,7 +480,10 @@ const AppContent = () => {
             operation: 'split_blob_fallback',
             mimeType: blob.type,
             chunkBytes: blob.size,
-            inputType: 'audio'
+            inputType: 'audio',
+            phase: 'stt',
+            origin: 'sanitizer',
+            blocking: false
         });
         if (runId) {
             recordDiagnosticEvent(runId, {
@@ -712,7 +772,10 @@ const AppContent = () => {
                         operation: 'transcribeAudio',
                         mimeType: partBlob.type,
                         chunkBytes: partBlob.size,
-                        inputType: 'audio'
+                        inputType: 'audio',
+                        phase: 'stt',
+                        origin: 'model_output',
+                        blocking: true
                     });
                     if (runId) {
                         recordDiagnosticEvent(runId, {
@@ -836,7 +899,10 @@ const AppContent = () => {
                     mimeType: blob.type,
                     chunkBytes: blob.size,
                     inputType: 'audio',
-                    messageOverride: error?.message || 'partial_batch_failed'
+                    messageOverride: error?.message || 'partial_batch_failed',
+                    phase: 'stt',
+                    origin: 'pipeline_policy',
+                    blocking: true
                 });
                 recordDiagnosticEvent(runId, {
                     type: 'stage_end',
@@ -905,7 +971,10 @@ const AppContent = () => {
                     operation: 'transcribeAudio',
                     mimeType: subBlob.type,
                     chunkBytes: subBlob.size,
-                    inputType: 'audio'
+                    inputType: 'audio',
+                    phase: 'stt',
+                    origin: 'model_output',
+                    blocking: true
                 });
                 if (runId) {
                     recordDiagnosticEvent(runId, {
@@ -988,7 +1057,10 @@ const AppContent = () => {
                         stage: 'extract_full',
                         provider: 'gemini',
                         operation: 'extractOnly_retry_success',
-                        inputType: 'text'
+                        inputType: 'text',
+                        phase: 'extract',
+                        origin: 'model_output',
+                        blocking: false
                     });
                     recordDiagnosticEvent(runId, {
                         type: 'stage_end',
@@ -1006,7 +1078,10 @@ const AppContent = () => {
                         provider: 'gemini',
                         operation: 'extractOnly',
                         inputType: 'text',
-                        messageOverride: secondError?.message || 'final_extraction_failed'
+                        messageOverride: secondError?.message || 'final_extraction_failed',
+                        phase: 'extract',
+                        origin: 'model_output',
+                        blocking: true
                     });
                     recordDiagnosticEvent(runId, {
                         type: 'stage_end',
@@ -1191,6 +1266,27 @@ const AppContent = () => {
             });
             if (runId) {
                 recordDiagnosticEvent(runId, { type: 'quality_gate', gate: qualityGate });
+                if (result.reconciliation) {
+                    recordDiagnosticEvent(runId, {
+                        type: 'reconciliation',
+                        reconciliation: result.reconciliation
+                    });
+                }
+                recordDiagnosticEvent(runId, {
+                    type: 'debug_context',
+                    debug: {
+                        remaining_errors: (result.remaining_errors || []).map((item) => ({
+                            type: item.type,
+                            field: item.field,
+                            reason: item.reason,
+                            severity: (item as { severity?: string }).severity
+                        })),
+                        provisional_reason: result.provisional_reason,
+                        quality_score: result.quality_score,
+                        pipeline_status: result.pipeline_status,
+                        result_status: result.result_status
+                    }
+                });
                 const finalizeStageStatus = (
                     !qualityGate.required_sections_ok
                     || qualityGate.placeholder_detected
@@ -1203,10 +1299,18 @@ const AppContent = () => {
                         provider: 'pipeline',
                         operation: 'quality_gate',
                         inputType: 'audio',
-                        codeOverride: qualityGate.placeholder_detected
-                            ? 'placeholder_detected'
-                            : (!qualityGate.required_sections_ok ? 'required_sections_missing' : 'pipeline_not_completed'),
-                        messageOverride: `quality_gate_failed(required_sections_ok=${String(qualityGate.required_sections_ok)}, pipeline_status=${qualityGate.pipeline_status || 'n/a'}, result_status=${qualityGate.result_status || 'n/a'})`
+                        codeOverride: hasInsufficientClinicalSignal({
+                            stillBlocking: result.still_blocking_after_sanitization,
+                            remainingErrors: result.remaining_errors
+                        })
+                            ? 'insufficient_clinical_signal'
+                            : qualityGate.placeholder_detected
+                                ? 'placeholder_detected'
+                                : (!qualityGate.required_sections_ok ? 'required_sections_missing' : 'pipeline_not_completed'),
+                        messageOverride: `quality_gate_failed(required_sections_ok=${String(qualityGate.required_sections_ok)}, pipeline_status=${qualityGate.pipeline_status || 'n/a'}, result_status=${qualityGate.result_status || 'n/a'})`,
+                        phase: 'quality_gate',
+                        origin: 'pipeline_policy',
+                        blocking: true
                     })
                     : undefined;
                 recordDiagnosticEvent(runId, {
@@ -1254,7 +1358,10 @@ const AppContent = () => {
                     operation: 'persistPipelineRecord',
                     inputType: 'audio',
                     codeOverride: normalizeDiagnosticError(saveError),
-                    messageOverride: (saveError as Error)?.message || 'save_failed'
+                    messageOverride: (saveError as Error)?.message || 'save_failed',
+                    phase: 'quality_gate',
+                    origin: 'pipeline_policy',
+                    blocking: true
                 });
                 recordDiagnosticEvent(runId, {
                     type: 'stage_end',
@@ -1360,11 +1467,13 @@ const AppContent = () => {
         activeSessionIdRef.current = sessionId;
         orchestrator.startConsultation(sessionId, patientName);
         if (isLabRun(patientName) && !diagnosticRunBySessionRef.current.has(sessionId)) {
+            const diagnosticContext = extractDiagnosticContext(patientName);
             const runId = startDiagnosticRun({
                 mode: 'hybrid',
                 source: 'audio',
                 patient_name: patientName,
-                scenario_id: patientName.replace('TEST_LAB_', '').replace('DIAG_', '').trim() || undefined
+                scenario_id: diagnosticContext.scenarioId,
+                execution_mode: diagnosticContext.executionMode
             });
             diagnosticRunBySessionRef.current.set(sessionId, runId);
             recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'session_start' });
@@ -1466,11 +1575,13 @@ const AppContent = () => {
             activeSessionIdRef.current = sessionId;
             orchestrator.startConsultation(sessionId, patientName);
             if (isLabRun(patientName) && !diagnosticRunBySessionRef.current.has(sessionId)) {
+                const diagnosticContext = extractDiagnosticContext(patientName);
                 const runId = startDiagnosticRun({
                     mode: 'hybrid',
                     source: 'audio',
                     patient_name: patientName,
-                    scenario_id: patientName.replace('TEST_LAB_', '').replace('DIAG_', '').trim() || undefined
+                    scenario_id: diagnosticContext.scenarioId,
+                    execution_mode: diagnosticContext.executionMode
                 });
                 diagnosticRunBySessionRef.current.set(sessionId, runId);
             }
@@ -1548,7 +1659,10 @@ const AppContent = () => {
                         mimeType: blob.type,
                         chunkBytes: blob.size,
                         codeOverride: normalizeDiagnosticError(error),
-                        messageOverride: error?.message || 'v4_pipeline_failed'
+                        messageOverride: error?.message || 'v4_pipeline_failed',
+                        phase: 'quality_gate',
+                        origin: 'pipeline_policy',
+                        blocking: true
                     });
                     recordDiagnosticEvent(runId, {
                         type: 'stage_end',
@@ -1557,6 +1671,19 @@ const AppContent = () => {
                         error_code: v4ErrorDetail.code,
                         error_message: v4ErrorDetail.message,
                         error_detail: v4ErrorDetail
+                    });
+                    recordDiagnosticEvent(runId, {
+                        type: 'debug_context',
+                        debug: {
+                            remaining_errors: [{
+                                type: 'error',
+                                field: 'pipeline',
+                                reason: error?.message || 'v4_pipeline_failed'
+                            }],
+                            provisional_reason: error?.message || 'v4_pipeline_failed',
+                            pipeline_status: 'failed',
+                            result_status: 'failed_recoverable'
+                        }
                     });
                     const diagnostics = finalizeDiagnosticRun(runId, {
                         quality_gate: {
@@ -1659,7 +1786,8 @@ const AppContent = () => {
             mode: 'hybrid',
             source: 'text',
             patient_name: patientName,
-            scenario_id: patientName.replace('TEST_LAB_', '').replace('DIAG_', '').trim() || undefined
+            scenario_id: extractDiagnosticContext(patientName).scenarioId,
+            execution_mode: extractDiagnosticContext(patientName).executionMode
         });
 
         try {
@@ -1777,6 +1905,27 @@ const AppContent = () => {
                 critical_gaps_count: result.critical_gaps?.length || 0
             });
             recordDiagnosticEvent(diagnosticRunId, { type: 'quality_gate', gate: qualityGate });
+            if (result.reconciliation) {
+                recordDiagnosticEvent(diagnosticRunId, {
+                    type: 'reconciliation',
+                    reconciliation: result.reconciliation
+                });
+            }
+            recordDiagnosticEvent(diagnosticRunId, {
+                type: 'debug_context',
+                debug: {
+                    remaining_errors: (result.remaining_errors || []).map((item) => ({
+                        type: item.type,
+                        field: item.field,
+                        reason: item.reason,
+                        severity: (item as { severity?: string }).severity
+                    })),
+                    provisional_reason: result.provisional_reason,
+                    quality_score: result.quality_score,
+                    pipeline_status: result.pipeline_status,
+                    result_status: result.result_status
+                }
+            });
             const textPipelineStageStatus = (
                 qualityGate.required_sections_ok
                 && !qualityGate.placeholder_detected
@@ -1792,7 +1941,10 @@ const AppContent = () => {
                     codeOverride: qualityGate.placeholder_detected
                         ? 'placeholder_detected'
                         : (!qualityGate.required_sections_ok ? 'required_sections_missing' : 'pipeline_not_completed'),
-                    messageOverride: `text_quality_gate_failed(required_sections_ok=${String(qualityGate.required_sections_ok)}, pipeline_status=${qualityGate.pipeline_status || 'n/a'}, result_status=${qualityGate.result_status || 'n/a'})`
+                    messageOverride: `text_quality_gate_failed(required_sections_ok=${String(qualityGate.required_sections_ok)}, pipeline_status=${qualityGate.pipeline_status || 'n/a'}, result_status=${qualityGate.result_status || 'n/a'})`,
+                    phase: 'quality_gate',
+                    origin: 'pipeline_policy',
+                    blocking: true
                 })
                 : undefined;
             recordDiagnosticEvent(diagnosticRunId, {
@@ -1832,7 +1984,10 @@ const AppContent = () => {
                 operation: 'text_pipeline',
                 inputType: 'text',
                 codeOverride: normalizeDiagnosticError(e),
-                messageOverride: e?.message || 'text_pipeline_failed'
+                messageOverride: e?.message || 'text_pipeline_failed',
+                phase: 'quality_gate',
+                origin: 'pipeline_policy',
+                blocking: true
             });
             recordDiagnosticEvent(diagnosticRunId, {
                 type: 'stage_end',
@@ -1841,6 +1996,19 @@ const AppContent = () => {
                 error_code: textErrorDetail.code,
                 error_message: textErrorDetail.message,
                 error_detail: textErrorDetail
+            });
+            recordDiagnosticEvent(diagnosticRunId, {
+                type: 'debug_context',
+                debug: {
+                    remaining_errors: [{
+                        type: 'error',
+                        field: 'text_pipeline',
+                        reason: e?.message || 'text_pipeline_failed'
+                    }],
+                    provisional_reason: e?.message || 'text_pipeline_failed',
+                    pipeline_status: 'failed',
+                    result_status: 'failed_recoverable'
+                }
             });
             const diagnostics = finalizeDiagnosticRun(diagnosticRunId, {
                 quality_gate: {

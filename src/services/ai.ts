@@ -57,6 +57,40 @@ export interface AIResultWithMetadata extends AIResult<string> {
     call_budget_mode?: 'two_call_adaptive' | 'standard';
     provisional_reason?: string;
     fallback_hops?: number;
+    sanitization_applied?: boolean;
+    errors_raw_count?: number;
+    errors_final_count?: number;
+    resolved_by_sanitization?: string[];
+    still_blocking_after_sanitization?: string[];
+    reconciliation?: {
+        pre_sanitize_issues: Array<{
+            fingerprint: string;
+            type: string;
+            field: string;
+            reason: string;
+            severity: 'critical' | 'major' | 'minor';
+            phase: 'raw_guard' | 'final_guard';
+            blocking: boolean;
+        }>;
+        post_sanitize_issues: Array<{
+            fingerprint: string;
+            type: string;
+            field: string;
+            reason: string;
+            severity: 'critical' | 'major' | 'minor';
+            phase: 'raw_guard' | 'final_guard';
+            blocking: boolean;
+        }>;
+        neutralized_issues: Array<{
+            fingerprint: string;
+            type: string;
+            field: string;
+            reason: string;
+            severity: 'critical' | 'major' | 'minor';
+            phase: 'raw_guard' | 'final_guard';
+            blocking: boolean;
+        }>;
+    };
 }
 
 const FAST_PATH_ADAPTIVE_VALIDATION = String(import.meta.env.VITE_FAST_PATH_ADAPTIVE_VALIDATION || 'true').toLowerCase() === 'true';
@@ -171,6 +205,38 @@ export class AIService {
         if (hasHighType) return 'high';
         const totalWeight = errors.reduce((acc, error) => acc + this.severityWeight(error.severity), 0);
         return totalWeight >= 4 ? 'medium' : 'low';
+    }
+
+    private issueFingerprint(error: { type?: string; field?: string; reason?: string; severity?: string }): string {
+        const type = error.type || 'unknown';
+        const field = error.field || 'unknown';
+        const reason = (error.reason || 'sin_detalle').toLowerCase().trim();
+        const severity = error.severity || 'minor';
+        return `${type}|${field}|${severity}|${reason}`;
+    }
+
+    private toReconciliationIssue(
+        error: ValidationError,
+        phase: 'raw_guard' | 'final_guard'
+    ): {
+        fingerprint: string;
+        type: string;
+        field: string;
+        reason: string;
+        severity: 'critical' | 'major' | 'minor';
+        phase: 'raw_guard' | 'final_guard';
+        blocking: boolean;
+    } {
+        const severity = (error.severity || ((error.type === 'hallucination' || error.type === 'inconsistency') ? 'critical' : 'major')) as 'critical' | 'major' | 'minor';
+        return {
+            fingerprint: this.issueFingerprint(error),
+            type: error.type || 'unknown',
+            field: error.field || 'unknown',
+            reason: error.reason || 'sin_detalle',
+            severity,
+            phase,
+            blocking: this.severityWeight(severity) >= 2
+        };
     }
 
     private runDeterministicClinicalGuard(
@@ -504,6 +570,10 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 logical_calls_used?: number;
                 physical_calls_used?: number;
                 provisional_reason?: string;
+                sanitization_applied?: boolean;
+                errors_raw_count?: number;
+                errors_final_count?: number;
+                neutralized_issues?: number;
             } = {
                 corrections_applied: correctionsApplied,
                 error_counts: errorCounts,
@@ -523,25 +593,35 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 physical_calls_used: modelInvocations.length
             };
 
-            const qualityErrors = (mergedExtraction.notas_calidad || [])
-                .filter((note) => note.tipo === 'INAUDIBLE')
-                .map(note => ({
-                    type: 'warning',
-                    field: note.seccion,
-                    reason: `[${note.tipo}] ${note.descripcion}`
-                })) || [];
+            const historyOutput = this.sanitizeClinicalHistory(generatedHistory);
+            const rawGuard = this.runDeterministicClinicalGuard(generatedHistory, mergedExtraction);
+            const finalGuard = this.runDeterministicClinicalGuard(historyOutput, mergedExtraction);
+            const rawIssues = rawGuard.consensus || [];
+            const finalIssues = finalGuard.consensus || [];
+            allValidations.push(
+                ...rawGuard.validations.map((validation) => ({ ...validation, validator: 'raw_guard' })),
+                ...finalGuard.validations.map((validation) => ({ ...validation, validator: 'final_guard' }))
+            );
 
-            const finalErrors = [...(previousErrors || []), ...qualityErrors];
+            const finalIssueMap = new Set(finalIssues.map((issue) => this.issueFingerprint(issue)));
+            const neutralizedIssuesRaw = rawIssues
+                .filter((issue) => !finalIssueMap.has(this.issueFingerprint(issue)));
+            const preSanitizeIssues = rawIssues.map((issue) => this.toReconciliationIssue(issue as ValidationError, 'raw_guard'));
+            const postSanitizeIssues = finalIssues.map((issue) => this.toReconciliationIssue(issue as ValidationError, 'final_guard'));
+            const neutralizedIssues = neutralizedIssuesRaw.map((issue) => this.toReconciliationIssue(issue as ValidationError, 'raw_guard'));
+            const neutralizedIssueStrings = neutralizedIssues.map((issue) => `${issue.type}:${issue.field}:${issue.reason}`);
+            const postSanitizeIssueStrings = postSanitizeIssues.map((issue) => `${issue.type}:${issue.field}:${issue.reason}`);
+            const finalErrors = finalIssues;
             const uncertaintyFlags: UncertaintyFlag[] = [
-                ...(previousErrors || []).map(err => ({
+                ...finalIssues.map(err => ({
                     field_path: err.field,
                     reason: err.reason,
                     severity: (err.type === 'hallucination' ? 'high' : err.type === 'missing' ? 'medium' : 'low') as 'high' | 'medium' | 'low',
                     value: err.field_value
                 })),
-                ...qualityErrors.map(note => ({
-                    field_path: note.field,
-                    reason: note.reason,
+                ...neutralizedIssueStrings.map(issue => ({
+                    field_path: 'sanitization',
+                    reason: `[SANITIZED_LEAK] ${issue}`,
                     severity: 'low' as 'high' | 'medium' | 'low',
                     value: undefined
                 }))
@@ -558,7 +638,6 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 : undefined;
             const pipelineStatus: 'completed' | 'degraded' = finalErrors.length > 0 ? 'degraded' : 'completed';
             const resultStatus: 'completed' | 'provisional' = provisionalReason ? 'provisional' : 'completed';
-            const historyOutput = this.sanitizeClinicalHistory(generatedHistory);
             const deterministicTriage: QualityTriageResult = {
                 quality_score: Math.max(25, 100 - (finalErrors.length * 10)),
                 critical_gaps: finalErrors
@@ -608,6 +687,10 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
             qualityPayload.quality_score = triageResult.quality_score;
             qualityPayload.critical_gaps = triageResult.critical_gaps.length;
             qualityPayload.provisional_reason = provisionalReason;
+            qualityPayload.sanitization_applied = historyOutput.trim() !== (generatedHistory || '').trim();
+            qualityPayload.errors_raw_count = rawIssues.length;
+            qualityPayload.errors_final_count = finalIssues.length;
+            qualityPayload.neutralized_issues = neutralizedIssues.length;
 
             void enqueueAuditEvent('pipeline_audit_bundle', {
                 audit_id: auditId,
@@ -695,6 +778,16 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 physical_calls_used: modelInvocations.length,
                 provisional_reason: provisionalReason,
                 fallback_hops: modelInvocations.filter((item) => item.is_fallback).length,
+                sanitization_applied: historyOutput.trim() !== (generatedHistory || '').trim(),
+                errors_raw_count: rawIssues.length,
+                errors_final_count: finalIssues.length,
+                resolved_by_sanitization: neutralizedIssueStrings,
+                still_blocking_after_sanitization: postSanitizeIssueStrings,
+                reconciliation: {
+                    pre_sanitize_issues: preSanitizeIssues,
+                    post_sanitize_issues: postSanitizeIssues,
+                    neutralized_issues: neutralizedIssues
+                },
                 phase_timings_ms: {
                     extract: extractDurationMs,
                     generate: generationDurationMs,

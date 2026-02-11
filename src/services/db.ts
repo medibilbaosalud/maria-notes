@@ -34,6 +34,7 @@ export interface LabTestLog {
         diagnostics?: {
             run_id: string;
             mode: 'simulated' | 'real' | 'hybrid';
+            execution_mode?: 'deterministic' | 'real';
             input_source?: 'audio' | 'text';
             scenario_id?: string;
             status: 'passed' | 'failed' | 'degraded' | 'skipped';
@@ -60,6 +61,9 @@ export interface LabTestLog {
                         input_type?: string;
                         mime_type?: string;
                         chunk_bytes?: number;
+                        phase?: 'raw_guard' | 'final_guard' | 'stt' | 'extract' | 'generate' | 'quality_gate';
+                        origin?: 'model_output' | 'sanitizer' | 'validator' | 'pipeline_policy';
+                        blocking?: boolean;
                         notes?: string[];
                     };
                 };
@@ -75,6 +79,49 @@ export interface LabTestLog {
                 result_status?: string;
                 pipeline_status?: string;
                 critical_gaps_count: number;
+            };
+            status_reason_primary?: string;
+            status_reason_chain?: string[];
+            reconciliation?: {
+                pre_sanitize_issues: Array<{
+                    fingerprint: string;
+                    type: string;
+                    field: string;
+                    reason: string;
+                    severity: 'critical' | 'major' | 'minor';
+                    phase: 'raw_guard' | 'final_guard';
+                    blocking: boolean;
+                }>;
+                post_sanitize_issues: Array<{
+                    fingerprint: string;
+                    type: string;
+                    field: string;
+                    reason: string;
+                    severity: 'critical' | 'major' | 'minor';
+                    phase: 'raw_guard' | 'final_guard';
+                    blocking: boolean;
+                }>;
+                neutralized_issues: Array<{
+                    fingerprint: string;
+                    type: string;
+                    field: string;
+                    reason: string;
+                    severity: 'critical' | 'major' | 'minor';
+                    phase: 'raw_guard' | 'final_guard';
+                    blocking: boolean;
+                }>;
+            };
+            debug?: {
+                remaining_errors: Array<{
+                    type: string;
+                    field: string;
+                    reason: string;
+                    severity?: string;
+                }>;
+                provisional_reason?: string;
+                quality_score?: number;
+                pipeline_status?: string;
+                result_status?: string;
             };
             root_causes?: string[];
             error_catalog?: {

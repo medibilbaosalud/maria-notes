@@ -71,8 +71,13 @@ export const TestLogDetailModal: React.FC<TestLogDetailModalProps> = ({ log, onC
               </div>
               <div className="test-log-diagnostics-summary">
                 <p><strong>Estado:</strong> {diagnostics.status}</p>
+                <p><strong>Motivo primario:</strong> {diagnostics.status_reason_primary || 'n/a'}</p>
+                {diagnostics.status_reason_chain && diagnostics.status_reason_chain.length > 0 && (
+                  <p><strong>Cadena causal:</strong> {diagnostics.status_reason_chain.join(' -> ')}</p>
+                )}
                 <p><strong>Run ID:</strong> {diagnostics.run_id}</p>
                 <p><strong>Modo:</strong> {diagnostics.mode}</p>
+                <p><strong>Modo ejecucion:</strong> {diagnostics.execution_mode || 'n/a'}</p>
                 <p><strong>Fuente:</strong> {diagnostics.input_source || log.input_type}</p>
                 {diagnostics.scenario_id && <p><strong>Escenario:</strong> {diagnostics.scenario_id}</p>}
                 {diagnostics.audio_stats && (
@@ -112,7 +117,10 @@ export const TestLogDetailModal: React.FC<TestLogDetailModalProps> = ({ log, onC
                           {typeof stage.error_detail.context.attempt === 'number' ? `attempt=${stage.error_detail.context.attempt} ` : ''}
                           {stage.error_detail.context.provider ? `provider=${stage.error_detail.context.provider} ` : ''}
                           {stage.error_detail.context.operation ? `op=${stage.error_detail.context.operation} ` : ''}
-                          {stage.error_detail.context.endpoint ? `endpoint=${stage.error_detail.context.endpoint}` : ''}
+                          {stage.error_detail.context.endpoint ? `endpoint=${stage.error_detail.context.endpoint} ` : ''}
+                          {stage.error_detail.context.phase ? `phase=${stage.error_detail.context.phase} ` : ''}
+                          {stage.error_detail.context.origin ? `origin=${stage.error_detail.context.origin} ` : ''}
+                          {typeof stage.error_detail.context.blocking === 'boolean' ? `blocking=${String(stage.error_detail.context.blocking)}` : ''}
                         </div>
                       )}
                     </div>
@@ -136,6 +144,73 @@ export const TestLogDetailModal: React.FC<TestLogDetailModalProps> = ({ log, onC
                         </div>
                       </div>
                     ))}
+                  </div>
+                </>
+              )}
+
+              {diagnostics.reconciliation && (
+                <>
+                  <div className="test-log-section-title">
+                    <h3>Pre vs Post Sanitizacion</h3>
+                  </div>
+                  <div className="test-log-validation-list">
+                    <div className="test-log-validation-item">
+                      <div className="test-log-error-badge info">PRE</div>
+                      <div className="test-log-error-content">
+                        {(diagnostics.reconciliation.pre_sanitize_issues || []).length > 0
+                          ? diagnostics.reconciliation.pre_sanitize_issues.map((issue) => `${issue.type}:${issue.field}:${issue.reason}[sev=${issue.severity},blocking=${String(issue.blocking)}]`).join(' | ')
+                          : 'Sin issues pre-sanitizacion'}
+                      </div>
+                    </div>
+                    <div className="test-log-validation-item">
+                      <div className="test-log-error-badge info">POST</div>
+                      <div className="test-log-error-content">
+                        {(diagnostics.reconciliation.post_sanitize_issues || []).length > 0
+                          ? diagnostics.reconciliation.post_sanitize_issues.map((issue) => `${issue.type}:${issue.field}:${issue.reason}[sev=${issue.severity},blocking=${String(issue.blocking)}]`).join(' | ')
+                          : 'Sin issues post-sanitizacion'}
+                      </div>
+                    </div>
+                    <div className="test-log-validation-item">
+                      <div className="test-log-error-badge info">NEUTRALIZADAS</div>
+                      <div className="test-log-error-content">
+                        {(diagnostics.reconciliation.neutralized_issues || []).length > 0
+                          ? diagnostics.reconciliation.neutralized_issues.map((issue) => `${issue.type}:${issue.field}:${issue.reason}[sev=${issue.severity}]`).join(' | ')
+                          : 'Sin neutralizaciones'}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {diagnostics.debug && (
+                <>
+                  <div className="test-log-section-title">
+                    <h3>Errores Exactos</h3>
+                  </div>
+                  <div className="test-log-validation-list">
+                    {(diagnostics.debug.remaining_errors || []).length > 0 ? (
+                      diagnostics.debug.remaining_errors.map((issue, idx) => (
+                        <div key={`${issue.type}-${issue.field}-${idx}`} className="test-log-validation-item">
+                          <div className="test-log-error-badge failed">ERR</div>
+                          <div className="test-log-error-content">
+                            <strong>{issue.type}</strong> {issue.field}: {issue.reason}
+                            {issue.severity && <div>severity={issue.severity}</div>}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="test-log-validation-item">
+                        <div className="test-log-error-badge info">INFO</div>
+                        <div className="test-log-error-content">No hay errores finales bloqueantes en `remaining_errors`.</div>
+                      </div>
+                    )}
+                    <div className="test-log-validation-item">
+                      <div className="test-log-error-badge info">CTX</div>
+                      <div className="test-log-error-content">
+                        provisional_reason={diagnostics.debug.provisional_reason || 'n/a'} | quality_score={String(diagnostics.debug.quality_score ?? 'n/a')}
+                        {' '}| pipeline_status={diagnostics.debug.pipeline_status || 'n/a'} | result_status={diagnostics.debug.result_status || 'n/a'}
+                      </div>
+                    </div>
                   </div>
                 </>
               )}

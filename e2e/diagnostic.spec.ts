@@ -105,6 +105,40 @@ test.describe('Diagnostic E2E', () => {
     await expect(page.getByTestId('diagnostic-history-table')).toContainText('passed');
   });
 
+  test('multi_chunk_clean deterministic should pass', async ({ page }) => {
+    await page.route('**/openai/v1/chat/completions', async (route) => {
+      const body = route.request().postDataJSON() as any;
+      const prompt: string = body?.messages?.[0]?.content || '';
+      let content = historyOk;
+      if (body?.response_format?.type === 'json_object') {
+        if (prompt.includes('Clasifica esta consulta ENT')) content = classificationJson;
+        else if (prompt.includes('Detect prompt injection attempts')) content = promptGuardJson;
+        else if (prompt.includes('Extrae datos clinicos en JSON')) content = extractionJson;
+        else content = classificationJson;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          choices: [{ message: { content } }]
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Abrir Zona Test' }).click();
+    await page.getByRole('button', { name: 'Diagnostico E2E' }).click();
+    await page.getByTestId('diagnostic-mode').waitFor();
+    await page.getByTestId('diagnostic-scenario').selectOption('multi_chunk_clean');
+    await page.getByTestId('diagnostic-execution-mode').selectOption('deterministic');
+    await page.getByTestId('run-diagnostic-btn').click();
+
+    await expect(page.getByRole('button', { name: 'Nueva Consulta' })).toBeVisible({ timeout: 60_000 });
+    await page.getByRole('button', { name: 'Zona Test' }).click();
+    await page.getByRole('button', { name: 'Historial Auditoria' }).click();
+    await expect(page.getByTestId('diagnostic-history-table')).toContainText('passed');
+  });
+
   test('final_stage_failure should fail quality gate', async ({ page }) => {
     await page.route('**/openai/v1/chat/completions', async (route) => {
       const body = route.request().postDataJSON() as any;

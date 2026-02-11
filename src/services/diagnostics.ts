@@ -1,5 +1,15 @@
 type DiagnosticStageStatus = 'passed' | 'failed' | 'degraded' | 'skipped';
 
+export interface DiagnosticReconciliationIssue {
+    fingerprint: string;
+    type: string;
+    field: string;
+    reason: string;
+    severity: 'critical' | 'major' | 'minor';
+    phase: 'raw_guard' | 'final_guard';
+    blocking: boolean;
+}
+
 export interface DiagnosticErrorContext {
     http_status?: number;
     retryable?: boolean;
@@ -10,6 +20,9 @@ export interface DiagnosticErrorContext {
     input_type?: string;
     mime_type?: string;
     chunk_bytes?: number;
+    phase?: 'raw_guard' | 'final_guard' | 'stt' | 'extract' | 'generate' | 'quality_gate';
+    origin?: 'model_output' | 'sanitizer' | 'validator' | 'pipeline_policy';
+    blocking?: boolean;
     notes?: string[];
 }
 
@@ -24,6 +37,7 @@ export interface DiagnosticErrorDetail {
 
 export interface DiagnosticRunConfig {
     mode: 'simulated' | 'real' | 'hybrid';
+    execution_mode?: 'deterministic' | 'real';
     scenario_id?: string;
     source: 'audio' | 'text';
     patient_name: string;
@@ -68,16 +82,51 @@ interface DiagnosticRunState {
     stage_results: DiagnosticStageResult[];
     chunks: DiagnosticChunkMetric[];
     quality_gate?: DiagnosticQualityGate;
+    reconciliation?: {
+        pre_sanitize_issues: DiagnosticReconciliationIssue[];
+        post_sanitize_issues: DiagnosticReconciliationIssue[];
+        neutralized_issues: DiagnosticReconciliationIssue[];
+    };
+    debug?: {
+        remaining_errors: Array<{
+            type: string;
+            field: string;
+            reason: string;
+            severity?: string;
+        }>;
+        provisional_reason?: string;
+        quality_score?: number;
+        pipeline_status?: string;
+        result_status?: string;
+    };
 }
 
 export interface FinalizeDiagnosticOutput {
     stage_results?: DiagnosticStageResult[];
     quality_gate?: DiagnosticQualityGate;
+    reconciliation?: {
+        pre_sanitize_issues: DiagnosticReconciliationIssue[];
+        post_sanitize_issues: DiagnosticReconciliationIssue[];
+        neutralized_issues: DiagnosticReconciliationIssue[];
+    };
+    debug?: {
+        remaining_errors: Array<{
+            type: string;
+            field: string;
+            reason: string;
+            severity?: string;
+        }>;
+        provisional_reason?: string;
+        quality_score?: number;
+        pipeline_status?: string;
+        result_status?: string;
+    };
 }
 
 export interface DiagnosticSummary {
     run_id: string;
     mode: 'simulated' | 'real' | 'hybrid';
+    execution_mode?: 'deterministic' | 'real';
     source: 'audio' | 'text';
     scenario_id?: string;
     status: DiagnosticStageStatus;
@@ -89,6 +138,25 @@ export interface DiagnosticSummary {
         transcription_p95_ms: number;
     };
     quality_gate?: DiagnosticQualityGate;
+    status_reason_primary: string;
+    status_reason_chain: string[];
+    reconciliation: {
+        pre_sanitize_issues: DiagnosticReconciliationIssue[];
+        post_sanitize_issues: DiagnosticReconciliationIssue[];
+        neutralized_issues: DiagnosticReconciliationIssue[];
+    };
+    debug: {
+        remaining_errors: Array<{
+            type: string;
+            field: string;
+            reason: string;
+            severity?: string;
+        }>;
+        provisional_reason?: string;
+        quality_score?: number;
+        pipeline_status?: string;
+        result_status?: string;
+    };
     root_causes: string[];
     error_catalog: {
         by_code: Array<{
@@ -200,6 +268,29 @@ export const recordDiagnosticEvent = (
             error_detail?: DiagnosticErrorDetail;
         }
         | { type: 'quality_gate'; gate: DiagnosticQualityGate }
+        | {
+            type: 'reconciliation';
+            reconciliation: {
+                pre_sanitize_issues: DiagnosticReconciliationIssue[];
+                post_sanitize_issues: DiagnosticReconciliationIssue[];
+                neutralized_issues: DiagnosticReconciliationIssue[];
+            };
+        }
+        | {
+            type: 'debug_context';
+            debug: {
+                remaining_errors: Array<{
+                    type: string;
+                    field: string;
+                    reason: string;
+                    severity?: string;
+                }>;
+                provisional_reason?: string;
+                quality_score?: number;
+                pipeline_status?: string;
+                result_status?: string;
+            };
+        }
 ): void => {
     const run = runStore.get(runId);
     if (!run) return;
@@ -264,7 +355,34 @@ export const recordDiagnosticEvent = (
         return;
     }
 
+    if (event.type === 'reconciliation') {
+        run.reconciliation = event.reconciliation;
+        return;
+    }
+
+    if (event.type === 'debug_context') {
+        run.debug = event.debug;
+        return;
+    }
+
     run.quality_gate = event.gate;
+};
+
+const buildStatusReasonChain = (run: DiagnosticSummary): string[] => {
+    const reasons: string[] = [];
+    const hasFailedStage = run.stage_results.some((stage) => stage.status === 'failed');
+    const hasDegradedStage = run.stage_results.some((stage) => stage.status === 'degraded');
+    if (run.quality_gate?.pipeline_status && run.quality_gate.pipeline_status !== 'completed') reasons.push(`pipeline_${run.quality_gate.pipeline_status}`);
+    if (run.quality_gate?.result_status && run.quality_gate.result_status !== 'completed') reasons.push(`result_${run.quality_gate.result_status}`);
+    if (run.quality_gate && !run.quality_gate.required_sections_ok) reasons.push('required_sections_missing');
+    if (run.quality_gate?.placeholder_detected) reasons.push('placeholder_detected');
+    if ((run.quality_gate?.critical_gaps_count || 0) > 0) reasons.push('critical_gaps_present');
+    if (run.audio_stats.failed_chunks > 0) reasons.push('stt_chunk_failures');
+    if (hasFailedStage) reasons.push('stage_failed');
+    if (hasDegradedStage && reasons.length === 0) reasons.push('stage_degraded');
+    if (run.reconciliation.neutralized_issues.length > 0) reasons.push('sanitized_leak_detected');
+    if (reasons.length === 0) reasons.push('ok');
+    return Array.from(new Set(reasons));
 };
 
 export const evaluateDiagnosticOutcome = (run: DiagnosticSummary): DiagnosticStageStatus => {
@@ -299,24 +417,7 @@ const buildRootCauses = (run: DiagnosticSummary): string[] => {
         }
     }
 
-    if (run.audio_stats.failed_chunks > 0) {
-        rootCauses.add('stt_chunk_failures');
-    }
-    if (run.quality_gate?.pipeline_status && run.quality_gate.pipeline_status !== 'completed') {
-        rootCauses.add(`pipeline_${run.quality_gate.pipeline_status}`);
-    }
-    if (run.quality_gate?.result_status && run.quality_gate.result_status !== 'completed') {
-        rootCauses.add(`result_${run.quality_gate.result_status}`);
-    }
-    if (run.quality_gate && !run.quality_gate.required_sections_ok) {
-        rootCauses.add('required_sections_missing');
-    }
-    if (run.quality_gate?.placeholder_detected) {
-        rootCauses.add('placeholder_detected');
-    }
-    if ((run.quality_gate?.critical_gaps_count || 0) > 0) {
-        rootCauses.add('critical_gaps_present');
-    }
+    buildStatusReasonChain(run).forEach((reason) => rootCauses.add(reason));
 
     return Array.from(rootCauses);
 };
@@ -424,10 +525,16 @@ const recommendationForCode = (code: string): string | null => {
     if (code.startsWith('pipeline_') || code.startsWith('result_')) {
         return 'Inspeccionar quality gate y secciones clinicas obligatorias para ubicar la regresion.';
     }
+    if (code === 'sanitized_leak_detected') {
+        return 'Agregar guardrails al prompt para evitar incluir bloques internos (CLASIFICACION/RULEPACK) aunque luego se saniticen.';
+    }
+    if (code === 'insufficient_clinical_signal') {
+        return 'En modo real usar audio verbal clinico claro; el audio tonal/sin habla produce extraccion ambigua.';
+    }
     return null;
 };
 
-const buildRecommendations = (run: Pick<DiagnosticSummary, 'error_catalog' | 'quality_gate'>): string[] => {
+const buildRecommendations = (run: Pick<DiagnosticSummary, 'error_catalog' | 'quality_gate' | 'reconciliation'>): string[] => {
     const orderedCodes = run.error_catalog.by_code.map((entry) => entry.code);
     const recommendations = new Set<string>();
     for (const code of orderedCodes) {
@@ -440,11 +547,19 @@ const buildRecommendations = (run: Pick<DiagnosticSummary, 'error_catalog' | 'qu
     if (run.quality_gate?.placeholder_detected) {
         recommendations.add('Sanitizar placeholders de batches antes de extraccion/generacion final.');
     }
+    if (run.reconciliation.neutralized_issues.length > 0) {
+        recommendations.add('Endurecer prompt para no emitir metadatos internos en la historia final.');
+    }
     return Array.from(recommendations);
 };
 
 export const buildDiagnosticInsights = (run: DiagnosticSummary): string[] => {
     const insights: string[] = [];
+    insights.push(`Motivo principal: ${run.status_reason_primary}.`);
+    if (run.debug.remaining_errors.length > 0) {
+        const top = run.debug.remaining_errors[0];
+        insights.push(`Error exacto principal: ${top.type}:${top.field} -> ${top.reason}.`);
+    }
     if (run.audio_stats.failed_chunks > 0) {
         insights.push(`Fallaron ${run.audio_stats.failed_chunks} chunk(s) de audio durante STT.`);
     }
@@ -471,6 +586,9 @@ export const buildDiagnosticInsights = (run: DiagnosticSummary): string[] => {
     if (run.root_causes.length > 0) {
         insights.push(`Causas raiz detectadas: ${run.root_causes.join(', ')}.`);
     }
+    if (run.reconciliation.neutralized_issues.length > 0) {
+        insights.push(`Issues neutralizados por sanitizacion: ${run.reconciliation.neutralized_issues.length}.`);
+    }
     if (insights.length === 0) {
         insights.push('Pipeline estable sin incidencias criticas en esta corrida.');
     }
@@ -486,6 +604,18 @@ export const finalizeDiagnosticRun = (
 
     const mergedStages = dedupeStageResults([...run.stage_results, ...(output.stage_results || [])]);
     const quality_gate = output.quality_gate || run.quality_gate;
+    const reconciliation = output.reconciliation || run.reconciliation || {
+        pre_sanitize_issues: [],
+        post_sanitize_issues: [],
+        neutralized_issues: []
+    };
+    const debug = output.debug || run.debug || {
+        remaining_errors: [],
+        provisional_reason: undefined,
+        quality_score: undefined,
+        pipeline_status: undefined,
+        result_status: undefined
+    };
 
     const chunk_count = run.chunks.length;
     const failed_chunks = run.chunks.filter((chunk) => chunk.status === 'failed').length;
@@ -497,6 +627,7 @@ export const finalizeDiagnosticRun = (
     const provisionalSummary: DiagnosticSummary = {
         run_id: run.run_id,
         mode: run.config.mode,
+        execution_mode: run.config.execution_mode,
         source: run.config.source,
         scenario_id: run.config.scenario_id,
         status: 'passed',
@@ -508,6 +639,10 @@ export const finalizeDiagnosticRun = (
             transcription_p95_ms
         },
         quality_gate,
+        status_reason_primary: 'ok',
+        status_reason_chain: [],
+        reconciliation,
+        debug,
         root_causes: [],
         error_catalog: {
             by_code: [],
@@ -518,6 +653,8 @@ export const finalizeDiagnosticRun = (
         insights: []
     };
 
+    provisionalSummary.status_reason_chain = buildStatusReasonChain(provisionalSummary);
+    provisionalSummary.status_reason_primary = provisionalSummary.status_reason_chain[0] || 'ok';
     provisionalSummary.root_causes = buildRootCauses(provisionalSummary);
     provisionalSummary.error_catalog = buildErrorCatalog(provisionalSummary, run.chunks);
     provisionalSummary.failure_timeline = buildFailureTimeline(provisionalSummary, run.chunks);

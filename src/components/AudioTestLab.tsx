@@ -13,6 +13,7 @@ interface AudioTestLabProps {
 }
 
 type TestMode = 'mic' | 'upload' | 'text' | 'diagnostic' | 'history';
+type DiagnosticExecutionMode = 'deterministic' | 'real';
 
 type DiagnosticScenario = {
   id: string;
@@ -35,6 +36,7 @@ const DIAGNOSTIC_SCENARIOS = [
     id: 'multi_chunk_clean',
     label: 'Multi Chunk Limpio',
     source: 'audio',
+    transcript: 'Paciente con obstruccion nasal cronica y rinorrea acuosa intermitente. Antecedentes de rinitis alergica estacional. Exploracion con cornetes hipertroficos bilaterales y sin datos de complicacion. Se pauta corticoide intranasal diario y lavado con suero salino. Se explica seguimiento clinico y signos de alarma.',
     audioDurationsSec: [4, 4, 4],
     audioFrequenciesHz: [330, 392, 440]
   },
@@ -117,6 +119,7 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
   const [processingStep, setProcessingStep] = useState('');
   const [manualText, setManualText] = useState('');
   const [diagnosticScenarioId, setDiagnosticScenarioId] = useState<string>(DIAGNOSTIC_SCENARIOS[0].id);
+  const [diagnosticExecutionMode, setDiagnosticExecutionMode] = useState<DiagnosticExecutionMode>('deterministic');
   const [latestDiagnostic, setLatestDiagnostic] = useState<LabTestLog | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -198,11 +201,14 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
   };
 
   const handleRunDiagnostic = async () => {
-    const diagName = `DIAG_${selectedScenario.id}_${Date.now()}`;
+    const diagName = `DIAG_${diagnosticExecutionMode === 'deterministic' ? 'det' : 'real'}_${selectedScenario.id}_${Date.now()}`;
     setIsProcessing(true);
     setProcessingStep('Preparando escenario de diagnostico...');
     try {
-      if (selectedScenario.source === 'audio') {
+      const useDeterministicText = diagnosticExecutionMode === 'deterministic' && selectedScenario.id === 'multi_chunk_clean';
+      if (useDeterministicText) {
+        await onRunTextPipeline(selectedScenario.transcript || '', diagName);
+      } else if (selectedScenario.source === 'audio') {
         const chunks = buildScenarioAudioChunks(selectedScenario);
         for (let i = 0; i < chunks.length; i++) {
           const isLast = i === chunks.length - 1;
@@ -361,6 +367,17 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                 <option key={scenario.id} value={scenario.id}>{scenario.label}</option>
               ))}
             </select>
+            <label className="audio-lab-label">Modo de ejecucion</label>
+            <select
+              value={diagnosticExecutionMode}
+              onChange={(e) => setDiagnosticExecutionMode(e.target.value as DiagnosticExecutionMode)}
+              className="audio-lab-select"
+              aria-label="Modo de ejecucion diagnostico"
+              data-testid="diagnostic-execution-mode"
+            >
+              <option value="deterministic">Determinista</option>
+              <option value="real">Real (STT/API)</option>
+            </select>
             <button className="audio-lab-run-btn" onClick={handleRunDiagnostic} disabled={isProcessing} data-testid="run-diagnostic-btn">
               <ClipboardList size={18} />
               {isProcessing ? processingStep : 'Ejecutar diagnostico'}
@@ -371,6 +388,7 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                 <h3>Ultimo diagnostico</h3>
               <p><strong>Estado:</strong> {latestDiagnostic.metadata.diagnostics.status}</p>
               <p><strong>Fuente:</strong> {latestDiagnostic.metadata.diagnostics.input_source || latestDiagnostic.input_type}</p>
+              <p><strong>Modo ejecucion:</strong> {latestDiagnostic.metadata.diagnostics.execution_mode || 'n/a'}</p>
               <p><strong>Escenario:</strong> {latestDiagnostic.metadata.diagnostics.scenario_id || 'n/a'}</p>
               <p><strong>Etapas:</strong> {latestDiagnostic.metadata.diagnostics.stage_results.length}</p>
                 <p><strong>Insights:</strong> {(latestDiagnostic.metadata.diagnostics.insights || []).join(' | ') || 'Sin observaciones'}</p>
