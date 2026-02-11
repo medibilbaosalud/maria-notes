@@ -77,3 +77,53 @@ export const getRetryPolicyForTask = (task: string): StageRetryPolicy => {
     const stage = TASK_STAGE_MAP[task] || 'default';
     return getRetryPolicy(stage);
 };
+
+/**
+ * Calcula timeout adaptativo basado en la longitud de la transcripción
+ * Para consultas largas (>15 min), aumenta los timeouts para evitar fallos prematuros
+ */
+export const getAdaptiveTimeout = (
+    stage: RetryStage,
+    transcriptionLength: number
+): number => {
+    const basePolicy = getRetryPolicy(stage);
+    const estimatedTokens = Math.ceil(transcriptionLength / 4);
+    
+    // Aumentar timeout para transcripciones largas
+    if (estimatedTokens > 20000) {
+        // Consultas muy largas (>20k tokens): doblar timeout
+        return basePolicy.timeoutMs * 2;
+    } else if (estimatedTokens > 10000) {
+        // Consultas largas (>10k tokens): 50% más de timeout
+        return Math.floor(basePolicy.timeoutMs * 1.5);
+    } else if (estimatedTokens > 5000) {
+        // Consultas medianas (>5k tokens): 25% más de timeout
+        return Math.floor(basePolicy.timeoutMs * 1.25);
+    }
+    
+    return basePolicy.timeoutMs;
+};
+
+/**
+ * Obtiene política de retry adaptativa basada en longitud de transcripción
+ */
+export const getAdaptiveRetryPolicyForTask = (
+    task: string,
+    transcriptionLength?: number
+): StageRetryPolicy => {
+    const basePolicy = getRetryPolicyForTask(task);
+    
+    if (!transcriptionLength) {
+        return basePolicy;
+    }
+    
+    const adaptiveTimeout = getAdaptiveTimeout(
+        TASK_STAGE_MAP[task] || 'default',
+        transcriptionLength
+    );
+    
+    return {
+        ...basePolicy,
+        timeoutMs: adaptiveTimeout
+    };
+};

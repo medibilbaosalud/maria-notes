@@ -144,9 +144,29 @@ export class AIService {
             'DIAGNOSTICO',
             'PLAN'
         ]);
+        const forbiddenLineMatchers = [
+            /^CLASIFICACION\s*\(CONTEXT/i,
+            /^CLASIFICACION\s*\(CONTEXTO/i,
+            /^RULEPACK:/i,
+            /^REGLAS DE APRENDIZAJE:/i,
+            /^\[(GLOBALES|RECIENTES|TERMINOLOGIA|FORMATO|ESTILO|CLINICO)\]/i
+        ];
+        const stripForbiddenTail = (body: string): string => {
+            const lines = body.split(/\r?\n/);
+            const cutoff = lines.findIndex((line) => {
+                const trimmed = line.trim();
+                if (!trimmed) return false;
+                return forbiddenLineMatchers.some((matcher) => matcher.test(trimmed));
+            });
+            const safeLines = cutoff >= 0 ? lines.slice(0, cutoff) : lines;
+            return safeLines.join('\n').trim();
+        };
         const sectionRegex = /^##\s+(.+)$/gm;
         const matches = Array.from(rawHistory.matchAll(sectionRegex));
-        if (matches.length === 0) return rawHistory.trim();
+        if (matches.length === 0) {
+            const cleaned = stripForbiddenTail(rawHistory);
+            return cleaned || rawHistory.trim();
+        }
 
         const chunks: string[] = [];
         for (let i = 0; i < matches.length; i++) {
@@ -159,7 +179,7 @@ export class AIService {
             if (!allowedSections.has(normalizedTitle)) continue;
             const start = (current.index || 0) + current[0].length;
             const end = i + 1 < matches.length ? (matches[i + 1].index || rawHistory.length) : rawHistory.length;
-            const body = rawHistory.slice(start, end).trim();
+            const body = stripForbiddenTail(rawHistory.slice(start, end).trim());
             chunks.push(`## ${title}\n${body || 'No consta'}`);
         }
 

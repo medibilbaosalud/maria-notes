@@ -1072,10 +1072,39 @@ const AppContent = () => {
         setTranscription(fullTranscription);
 
         // SINGLE EXTRACTION CALL on the full transcript
-        setProcessingStatus('Extrayendo datos clinicos de toda la consulta (Gemini)...');
+        // OPTIMIZACION: Truncamiento inteligente para consultas muy largas (>15 min)
+        const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
+        const MAX_EXTRACTION_TOKENS = 30000; // ~120,000 caracteres - límite seguro para Gemini
+        const estimatedTokens = estimateTokens(fullTranscription);
+        const isLongConsultation = sortedIndexes.length > 3 || estimatedTokens > 20000;
+        
+        if (isLongConsultation) {
+            setProcessingStatus(`Consultación larga detectada (${sortedIndexes.length} segmentos). Optimizando extracción...`);
+        } else {
+            setProcessingStatus('Extrayendo datos clinicos de toda la consulta (Gemini)...');
+        }
+        
         aiService.resetInvocationCounters(sessionId || undefined);
         const sanitizedTranscription = sanitizeTranscriptForExtraction(fullTranscription);
         let extractionInput = sanitizedTranscription;
+        
+        // Truncamiento inteligente: priorizar información reciente (últimos 2/3) si es muy larga
+        if (estimatedTokens > MAX_EXTRACTION_TOKENS) {
+            const keepRatio = 0.67; // Mantener últimos 2/3 de la transcripción
+            const keepChars = Math.floor(sanitizedTranscription.length * keepRatio);
+            extractionInput = sanitizedTranscription.slice(-keepChars);
+            console.warn(`[App] Transcripción truncada de ${sanitizedTranscription.length} a ${extractionInput.length} caracteres (${estimatedTokens} → ${estimateTokens(extractionInput)} tokens) para evitar timeout`);
+            if (runId) {
+                recordDiagnosticEvent(runId, {
+                    type: 'transcript_truncated',
+                    original_length: sanitizedTranscription.length,
+                    truncated_length: extractionInput.length,
+                    original_tokens: estimatedTokens,
+                    truncated_tokens: estimateTokens(extractionInput),
+                    reason: 'exceeds_max_extraction_tokens'
+                });
+            }
+        }
         let fullExtraction;
         if (runId) {
             recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'extract_full' });

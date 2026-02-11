@@ -10,6 +10,16 @@ interface TestLogDetailModalProps {
 
 export const TestLogDetailModal: React.FC<TestLogDetailModalProps> = ({ log, onClose }) => {
   const diagnostics = log.metadata.diagnostics;
+  const uniqueValidationHistory = React.useMemo(() => {
+    const history = log.metadata.validationHistory || [];
+    const seen = new Set<string>();
+    return history.filter((item) => {
+      const key = `${item.type}|${item.field}|${item.reason}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [log.metadata.validationHistory]);
 
   return (
     <div className="test-log-modal-overlay" onClick={onClose}>
@@ -306,8 +316,8 @@ export const TestLogDetailModal: React.FC<TestLogDetailModalProps> = ({ log, onC
           </div>
 
           <div className="test-log-validation-list">
-            {log.metadata.validationHistory && log.metadata.validationHistory.length > 0 ? (
-              log.metadata.validationHistory.map((error, idx) => (
+            {uniqueValidationHistory.length > 0 ? (
+              uniqueValidationHistory.map((error, idx) => (
                 <div key={idx} className="test-log-validation-item">
                   <div className="test-log-error-badge">
                     {error.type === 'hallucination' ? 'ALUCINACION' : error.type === 'missing' ? 'FALTANTE' : error.type.toUpperCase()}
