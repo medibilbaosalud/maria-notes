@@ -73,12 +73,24 @@ export const TestLogDetailModal: React.FC<TestLogDetailModalProps> = ({ log, onC
                 <p><strong>Estado:</strong> {diagnostics.status}</p>
                 <p><strong>Run ID:</strong> {diagnostics.run_id}</p>
                 <p><strong>Modo:</strong> {diagnostics.mode}</p>
+                <p><strong>Fuente:</strong> {diagnostics.input_source || log.input_type}</p>
                 {diagnostics.scenario_id && <p><strong>Escenario:</strong> {diagnostics.scenario_id}</p>}
                 {diagnostics.audio_stats && (
                   <p>
                     <strong>Audio:</strong> chunks={diagnostics.audio_stats.chunk_count}, fallidos={diagnostics.audio_stats.failed_chunks},
                     p95 STT={diagnostics.audio_stats.transcription_p95_ms}ms
                   </p>
+                )}
+                {diagnostics.quality_gate && (
+                  <p>
+                    <strong>Quality Gate:</strong> required_sections_ok={String(diagnostics.quality_gate.required_sections_ok)},
+                    pipeline_status={diagnostics.quality_gate.pipeline_status || 'n/a'},
+                    result_status={diagnostics.quality_gate.result_status || 'n/a'},
+                    critical_gaps={diagnostics.quality_gate.critical_gaps_count}
+                  </p>
+                )}
+                {diagnostics.root_causes && diagnostics.root_causes.length > 0 && (
+                  <p><strong>Causas raiz:</strong> {diagnostics.root_causes.join(', ')}</p>
                 )}
               </div>
 
@@ -93,10 +105,77 @@ export const TestLogDetailModal: React.FC<TestLogDetailModalProps> = ({ log, onC
                       <strong>{stage.stage}</strong> ({stage.duration_ms}ms)
                       {stage.error_code && <span> - {stage.error_code}</span>}
                       {stage.error_message && <div>{stage.error_message}</div>}
+                      {stage.error_detail?.context && (
+                        <div className="test-log-error-meta">
+                          {stage.error_detail.context.http_status ? `http=${stage.error_detail.context.http_status} ` : ''}
+                          {typeof stage.error_detail.context.retryable === 'boolean' ? `retryable=${String(stage.error_detail.context.retryable)} ` : ''}
+                          {typeof stage.error_detail.context.attempt === 'number' ? `attempt=${stage.error_detail.context.attempt} ` : ''}
+                          {stage.error_detail.context.provider ? `provider=${stage.error_detail.context.provider} ` : ''}
+                          {stage.error_detail.context.operation ? `op=${stage.error_detail.context.operation} ` : ''}
+                          {stage.error_detail.context.endpoint ? `endpoint=${stage.error_detail.context.endpoint}` : ''}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
+
+              {diagnostics.error_catalog && diagnostics.error_catalog.by_code.length > 0 && (
+                <>
+                  <div className="test-log-section-title">
+                    <h3>Catalogo de Errores</h3>
+                  </div>
+                  <div className="test-log-validation-list">
+                    {diagnostics.error_catalog.by_code.map((entry, idx) => (
+                      <div key={`${entry.code}-${idx}`} className="test-log-validation-item">
+                        <div className="test-log-error-badge failed">{entry.count}x</div>
+                        <div className="test-log-error-content">
+                          <strong>{entry.code}</strong>
+                          <div>Etapas: {entry.stages.join(', ')}</div>
+                          {entry.last_message && <div>{entry.last_message}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {diagnostics.failure_timeline && diagnostics.failure_timeline.length > 0 && (
+                <>
+                  <div className="test-log-section-title">
+                    <h3>Timeline de Fallos</h3>
+                  </div>
+                  <div className="test-log-validation-list">
+                    {diagnostics.failure_timeline.map((item, idx) => (
+                      <div key={`${item.stage}-${item.timestamp}-${idx}`} className="test-log-validation-item">
+                        <div className={`test-log-error-badge ${item.status}`}>{item.status.toUpperCase()}</div>
+                        <div className="test-log-error-content">
+                          <strong>{new Date(item.timestamp).toLocaleTimeString()}</strong> - {item.stage}
+                          {typeof item.batch_index === 'number' && <span> (batch {item.batch_index})</span>}
+                          {item.error_code && <div>{item.error_code}</div>}
+                          {item.error_message && <div>{item.error_message}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {diagnostics.recommendations && diagnostics.recommendations.length > 0 && (
+                <>
+                  <div className="test-log-section-title">
+                    <h3>Acciones Recomendadas</h3>
+                  </div>
+                  <div className="test-log-validation-list">
+                    {diagnostics.recommendations.map((action, idx) => (
+                      <div key={idx} className="test-log-validation-item">
+                        <div className="test-log-error-badge info"><AlertTriangle size={12} /> NEXT</div>
+                        <div className="test-log-error-content">{action}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
 
               <div className="test-log-section-title">
                 <h3>Insights</h3>
@@ -261,6 +340,7 @@ export const TestLogDetailModal: React.FC<TestLogDetailModalProps> = ({ log, onC
         }
 
         .test-log-diagnostics-summary p { margin: 0.3rem 0; }
+        .test-log-error-meta { margin-top: 0.35rem; font-size: 0.78rem; color: #64748b; font-family: monospace; }
 
         .test-log-validation-list {
           margin-bottom: 1.4rem;

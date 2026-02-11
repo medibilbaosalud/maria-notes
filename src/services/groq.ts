@@ -1032,11 +1032,21 @@ ${schemaHint}`;
         try {
             return await this._transcribeWithBlob(audioBlob);
         } catch (firstError: any) {
-            // If HTTP 400 and the blob is webm, try converting to WAV format
+            // If HTTP 400 on compressed/unknown audio, retry with WAV conversion.
             const status = this.getErrorStatus(firstError);
-            const isWebm = audioBlob.type?.includes('webm') || !audioBlob.type;
-            if (status === 400 && isWebm) {
-                console.warn('[Groq] Whisper returned 400 for webm, retrying with WAV conversion...');
+            const mime = (audioBlob.type || '').toLowerCase();
+            const shouldTryConversion = status === 400 && (
+                !mime
+                || mime.includes('webm')
+                || mime.includes('ogg')
+                || mime.includes('mp4')
+                || mime.includes('m4a')
+                || mime.includes('aac')
+                || mime.includes('mpeg')
+                || mime.includes('mp3')
+            );
+            if (shouldTryConversion) {
+                console.warn(`[Groq] Whisper returned 400 for "${mime || 'unknown'}", retrying with WAV conversion...`);
                 try {
                     const { normalizeAndChunkAudio } = await import('../utils/audioProcessing');
                     const wavChunks = await normalizeAndChunkAudio(audioBlob);

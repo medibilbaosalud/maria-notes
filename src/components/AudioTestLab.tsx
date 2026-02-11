@@ -14,23 +14,95 @@ interface AudioTestLabProps {
 
 type TestMode = 'mic' | 'upload' | 'text' | 'diagnostic' | 'history';
 
+type DiagnosticScenario = {
+  id: string;
+  label: string;
+  source: 'text' | 'audio';
+  transcript?: string;
+  audioDurationsSec?: number[];
+  audioFrequenciesHz?: number[];
+  injectCorruptedMiddleChunk?: boolean;
+};
+
 const DIAGNOSTIC_SCENARIOS = [
   {
     id: 'single_chunk_clean',
     label: 'Single Chunk Limpio',
+    source: 'text',
     transcript: 'Paciente refiere dolor de garganta de 3 dias, sin fiebre. Niega alergias. Exploracion faringea con hiperemia leve. Diagnostico de faringitis catarral. Plan: hidratacion, analgesia y control evolutivo en 48 horas.'
   },
   {
     id: 'multi_chunk_clean',
     label: 'Multi Chunk Limpio',
-    transcript: 'Paciente con obstruccion nasal cronica y rinorrea acuosa intermitente. Antecedentes de rinitis alergica estacional. Exploracion con cornetes hipertroficos bilaterales y sin datos de complicacion. Se pauta corticoide intranasal diario y lavado con suero salino. Se explica seguimiento clinico y signos de alarma.'
+    source: 'audio',
+    audioDurationsSec: [4, 4, 4],
+    audioFrequenciesHz: [330, 392, 440]
+  },
+  {
+    id: 'chunk_failure_in_middle',
+    label: 'Fallo Chunk Intermedio',
+    source: 'audio',
+    audioDurationsSec: [4, 3, 4],
+    audioFrequenciesHz: [330, 196, 440],
+    injectCorruptedMiddleChunk: true
   },
   {
     id: 'final_stage_failure',
     label: 'Final Stage Failure',
+    source: 'text',
     transcript: 'Texto de prueba deliberadamente incompleto para estresar validaciones y forzar gaps criticos en secciones clinicas. Sin datos suficientes de plan ni diagnostico definitivo.'
   }
-] as const;
+] as const satisfies readonly DiagnosticScenario[];
+
+const createSyntheticWavBlob = (durationSec: number, frequencyHz: number, sampleRate = 16_000): Blob => {
+  const totalSamples = Math.max(1, Math.floor(durationSec * sampleRate));
+  const dataSize = totalSamples * 2;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  const writeAscii = (offset: number, value: string) => {
+    for (let i = 0; i < value.length; i++) {
+      view.setUint8(offset + i, value.charCodeAt(i));
+    }
+  };
+
+  writeAscii(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeAscii(8, 'WAVE');
+  writeAscii(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeAscii(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  for (let i = 0; i < totalSamples; i++) {
+    const t = i / sampleRate;
+    const amplitude = 0.2 * Math.sin(2 * Math.PI * frequencyHz * t);
+    const sample = Math.max(-1, Math.min(1, amplitude));
+    view.setInt16(44 + (i * 2), Math.round(sample * 32767), true);
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
+};
+
+const buildScenarioAudioChunks = (scenario: DiagnosticScenario): Blob[] => {
+  const durations = scenario.audioDurationsSec || [4];
+  const frequencies = scenario.audioFrequenciesHz || [330];
+  const chunks = durations.map((duration, idx) => {
+    const frequency = frequencies[idx] || frequencies[frequencies.length - 1] || 330;
+    return createSyntheticWavBlob(duration, frequency);
+  });
+  if (scenario.injectCorruptedMiddleChunk && chunks.length >= 3) {
+    const middle = Math.floor(chunks.length / 2);
+    chunks[middle] = new Blob(['corrupted-audio-payload'], { type: 'audio/webm' });
+  }
+  return chunks;
+};
 
 const isDiagnosticLog = (log: LabTestLog) => Boolean(log.metadata?.diagnostics);
 
@@ -130,7 +202,17 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
     setIsProcessing(true);
     setProcessingStep('Preparando escenario de diagnostico...');
     try {
-      await onRunTextPipeline(selectedScenario.transcript, diagName);
+      if (selectedScenario.source === 'audio') {
+        const chunks = buildScenarioAudioChunks(selectedScenario);
+        for (let i = 0; i < chunks.length; i++) {
+          const isLast = i === chunks.length - 1;
+          setProcessingStep(`Ejecutando diagnostico audio: chunk ${i + 1}/${chunks.length}...`);
+          await onRunFullPipeline(chunks[i], diagName, !isLast, i);
+          if (!isLast) await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      } else {
+        await onRunTextPipeline(selectedScenario.transcript || '', diagName);
+      }
       setProcessingStep('Diagnostico completado');
       await loadLogs();
     } catch (error) {
@@ -287,9 +369,10 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
             {latestDiagnostic?.metadata?.diagnostics && (
               <div className="audio-lab-diagnostic-summary" data-testid="diagnostic-summary">
                 <h3>Ultimo diagnostico</h3>
-                <p><strong>Estado:</strong> {latestDiagnostic.metadata.diagnostics.status}</p>
-                <p><strong>Escenario:</strong> {latestDiagnostic.metadata.diagnostics.scenario_id || 'n/a'}</p>
-                <p><strong>Etapas:</strong> {latestDiagnostic.metadata.diagnostics.stage_results.length}</p>
+              <p><strong>Estado:</strong> {latestDiagnostic.metadata.diagnostics.status}</p>
+              <p><strong>Fuente:</strong> {latestDiagnostic.metadata.diagnostics.input_source || latestDiagnostic.input_type}</p>
+              <p><strong>Escenario:</strong> {latestDiagnostic.metadata.diagnostics.scenario_id || 'n/a'}</p>
+              <p><strong>Etapas:</strong> {latestDiagnostic.metadata.diagnostics.stage_results.length}</p>
                 <p><strong>Insights:</strong> {(latestDiagnostic.metadata.diagnostics.insights || []).join(' | ') || 'Sin observaciones'}</p>
                 <div className="audio-lab-diagnostic-actions">
                   <button className="audio-lab-export-btn" onClick={() => exportDiagnostics(latestDiagnostic)}>
@@ -354,7 +437,7 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                       </td>
                       <td><span className="audio-lab-badge-cycles">{log.metadata.versionsCount}</span></td>
                       <td><span className="audio-lab-badge-errors">{log.metadata.errorsFixed}</span></td>
-                      <td><code className="audio-lab-model-code">{log.metadata.models.generation}</code></td>
+                      <td><code className="audio-lab-model-code">{`${log.input_type}:${log.metadata.models.generation}`}</code></td>
                       <td>
                         {log.metadata.active_memory_used && (
                           <span title="Uso memoria activa" className="audio-lab-memory-flag">

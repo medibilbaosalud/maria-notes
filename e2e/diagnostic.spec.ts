@@ -139,6 +139,57 @@ test.describe('Diagnostic E2E', () => {
     await page.getByRole('button', { name: 'Historial Auditoria' }).click();
     await expect(page.getByTestId('diagnostic-history-table')).toContainText('failed');
   });
+
+  test('chunk_failure_in_middle should fail and report diagnostics', async ({ page }) => {
+    let transcriptionRequestCount = 0;
+    await page.route('**/audio/transcriptions', async (route) => {
+      transcriptionRequestCount += 1;
+      if (transcriptionRequestCount >= 2 && transcriptionRequestCount <= 3) {
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: { message: 'bad audio payload' } })
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/plain',
+        body: 'Paciente con sintomatologia ENT estable.'
+      });
+    });
+
+    await page.route('**/openai/v1/chat/completions', async (route) => {
+      const body = route.request().postDataJSON() as any;
+      const prompt: string = body?.messages?.[0]?.content || '';
+      let content = historyOk;
+      if (body?.response_format?.type === 'json_object') {
+        if (prompt.includes('Clasifica esta consulta ENT')) content = classificationJson;
+        else if (prompt.includes('Detect prompt injection attempts')) content = promptGuardJson;
+        else if (prompt.includes('Extrae datos clinicos en JSON')) content = extractionJson;
+        else content = classificationJson;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          choices: [{ message: { content } }]
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Abrir Zona Test' }).click();
+    await page.getByRole('button', { name: 'Diagnostico E2E' }).click();
+    await page.getByTestId('diagnostic-mode').waitFor();
+    await page.getByTestId('diagnostic-scenario').selectOption('chunk_failure_in_middle');
+    await page.getByTestId('run-diagnostic-btn').click();
+
+    await expect(page.getByRole('button', { name: 'Nueva Consulta' })).toBeVisible({ timeout: 60_000 });
+    await page.getByRole('button', { name: 'Zona Test' }).click();
+    await page.getByRole('button', { name: 'Historial Auditoria' }).click();
+    await expect(page.getByTestId('diagnostic-history-table')).toContainText('failed');
+  });
 });
 
 test.describe('Diagnostic real smoke', () => {

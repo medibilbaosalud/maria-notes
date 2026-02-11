@@ -30,8 +30,16 @@ interface UseAudioRecorderOptions {
 const MIN_BATCH_BYTES = 1024;
 const MAX_BATCH_BYTES = 20 * 1024 * 1024;
 const MIN_SPLIT_CHUNK_BYTES = 512 * 1024;
+const SAFE_BINARY_SPLIT_MIME_HINTS = ['wav', 'wave', 'pcm', 'x-wav', 'l16'];
+
+const canSafelyBinarySplit = (blob: Blob): boolean => {
+    const mime = (blob.type || '').toLowerCase();
+    if (!mime) return false;
+    return SAFE_BINARY_SPLIT_MIME_HINTS.some((hint) => mime.includes(hint));
+};
 
 const splitBlobBySize = (blob: Blob, maxBytes: number): Blob[] => {
+    if (!canSafelyBinarySplit(blob)) return [blob];
     if (blob.size <= maxBytes) return [blob];
     const midpoint = Math.floor(blob.size / 2);
     if (midpoint < MIN_SPLIT_CHUNK_BYTES) return [blob];
@@ -57,6 +65,7 @@ export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
     const batchTimerRef = useRef<number | null>(null);
     const batchIndexRef = useRef(0);
     const segmentStartedAtRef = useRef<number>(0);
+    const mimeTypeRef = useRef<string>('audio/webm');
     const stopRequestedRef = useRef(false);
     const flushResolverRef = useRef<(() => void) | null>(null);
     const operationQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -73,7 +82,7 @@ export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
     }, []);
 
     const harvestCurrentBatch = useCallback((): Blob => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current || 'audio/webm' });
         chunksRef.current = [];
         bufferedBytesRef.current = 0;
         return blob;
@@ -183,6 +192,7 @@ export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
                 MediaRecorder.isTypeSupported(optionsMedia.mimeType) ? optionsMedia : undefined
             );
             mediaRecorderRef.current = mediaRecorder;
+            mimeTypeRef.current = mediaRecorder.mimeType || optionsMedia.mimeType;
 
             chunksRef.current = [];
             bufferedBytesRef.current = 0;
@@ -197,6 +207,9 @@ export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
 
             mediaRecorder.ondataavailable = (e) => {
                 if (e.data.size > 0) {
+                    if (e.data.type) {
+                        mimeTypeRef.current = e.data.type;
+                    }
                     chunksRef.current.push(e.data);
                     bufferedBytesRef.current += e.data.size;
                 }

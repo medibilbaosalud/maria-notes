@@ -34,14 +34,35 @@ export interface LabTestLog {
         diagnostics?: {
             run_id: string;
             mode: 'simulated' | 'real' | 'hybrid';
+            input_source?: 'audio' | 'text';
             scenario_id?: string;
             status: 'passed' | 'failed' | 'degraded' | 'skipped';
             stage_results: Array<{
                 stage: string;
                 status: 'passed' | 'failed' | 'degraded' | 'skipped';
                 duration_ms: number;
+                ended_at?: number;
                 error_code?: string;
                 error_message?: string;
+                error_detail?: {
+                    code: string;
+                    message: string;
+                    stage?: string;
+                    batch_index?: number;
+                    occurred_at: string;
+                    context?: {
+                        http_status?: number;
+                        retryable?: boolean;
+                        attempt?: number;
+                        provider?: string;
+                        operation?: string;
+                        endpoint?: string;
+                        input_type?: string;
+                        mime_type?: string;
+                        chunk_bytes?: number;
+                        notes?: string[];
+                    };
+                };
             }>;
             audio_stats?: {
                 chunk_count: number;
@@ -52,8 +73,33 @@ export interface LabTestLog {
             quality_gate?: {
                 required_sections_ok: boolean;
                 result_status?: string;
+                pipeline_status?: string;
                 critical_gaps_count: number;
             };
+            root_causes?: string[];
+            error_catalog?: {
+                by_code: Array<{
+                    code: string;
+                    count: number;
+                    stages: string[];
+                    last_message?: string;
+                }>;
+                by_stage: Array<{
+                    stage: string;
+                    failed: number;
+                    degraded: number;
+                    last_error_code?: string;
+                }>;
+            };
+            failure_timeline?: Array<{
+                timestamp: string;
+                stage: string;
+                status: 'passed' | 'failed' | 'degraded' | 'skipped';
+                error_code?: string;
+                error_message?: string;
+                batch_index?: number;
+            }>;
+            recommendations?: string[];
             insights?: string[];
         };
     };

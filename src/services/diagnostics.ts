@@ -1,5 +1,27 @@
 type DiagnosticStageStatus = 'passed' | 'failed' | 'degraded' | 'skipped';
 
+export interface DiagnosticErrorContext {
+    http_status?: number;
+    retryable?: boolean;
+    attempt?: number;
+    provider?: string;
+    operation?: string;
+    endpoint?: string;
+    input_type?: string;
+    mime_type?: string;
+    chunk_bytes?: number;
+    notes?: string[];
+}
+
+export interface DiagnosticErrorDetail {
+    code: string;
+    message: string;
+    stage?: string;
+    batch_index?: number;
+    occurred_at: string;
+    context?: DiagnosticErrorContext;
+}
+
 export interface DiagnosticRunConfig {
     mode: 'simulated' | 'real' | 'hybrid';
     scenario_id?: string;
@@ -11,22 +33,28 @@ export interface DiagnosticStageResult {
     stage: string;
     status: DiagnosticStageStatus;
     duration_ms: number;
+    ended_at: number;
     error_code?: string;
     error_message?: string;
+    error_detail?: DiagnosticErrorDetail;
 }
 
 export interface DiagnosticChunkMetric {
     batch_index: number;
     size_bytes: number;
     duration_ms: number;
+    ended_at: number;
     status: 'passed' | 'failed';
+    mime_type?: string;
     error_code?: string;
     error_message?: string;
+    error_detail?: DiagnosticErrorDetail;
 }
 
 export interface DiagnosticQualityGate {
     required_sections_ok: boolean;
     result_status?: string;
+    pipeline_status?: string;
     critical_gaps_count: number;
     missing_sections?: string[];
     placeholder_detected?: boolean;
@@ -50,6 +78,7 @@ export interface FinalizeDiagnosticOutput {
 export interface DiagnosticSummary {
     run_id: string;
     mode: 'simulated' | 'real' | 'hybrid';
+    source: 'audio' | 'text';
     scenario_id?: string;
     status: DiagnosticStageStatus;
     stage_results: DiagnosticStageResult[];
@@ -60,6 +89,30 @@ export interface DiagnosticSummary {
         transcription_p95_ms: number;
     };
     quality_gate?: DiagnosticQualityGate;
+    root_causes: string[];
+    error_catalog: {
+        by_code: Array<{
+            code: string;
+            count: number;
+            stages: string[];
+            last_message?: string;
+        }>;
+        by_stage: Array<{
+            stage: string;
+            failed: number;
+            degraded: number;
+            last_error_code?: string;
+        }>;
+    };
+    failure_timeline: Array<{
+        timestamp: string;
+        stage: string;
+        status: DiagnosticStageStatus;
+        error_code?: string;
+        error_message?: string;
+        batch_index?: number;
+    }>;
+    recommendations: string[];
     insights: string[];
 }
 
@@ -128,8 +181,10 @@ export const recordDiagnosticEvent = (
             type: 'stage_end';
             stage: string;
             status: DiagnosticStageStatus;
+            ended_at?: number;
             error_code?: string;
             error_message?: string;
+            error_detail?: DiagnosticErrorDetail;
             duration_ms?: number;
         }
         | {
@@ -137,9 +192,12 @@ export const recordDiagnosticEvent = (
             batch_index: number;
             size_bytes: number;
             duration_ms: number;
+            ended_at?: number;
             status: 'passed' | 'failed';
+            mime_type?: string;
             error_code?: string;
             error_message?: string;
+            error_detail?: DiagnosticErrorDetail;
         }
         | { type: 'quality_gate'; gate: DiagnosticQualityGate }
 ): void => {
@@ -156,25 +214,52 @@ export const recordDiagnosticEvent = (
         const duration_ms = typeof event.duration_ms === 'number'
             ? Math.max(0, event.duration_ms)
             : Math.max(0, Date.now() - (start || Date.now()));
+        const endedAt = typeof event.ended_at === 'number' ? event.ended_at : Date.now();
+        const detail = event.error_detail || (
+            event.error_code || event.error_message
+                ? {
+                    code: event.error_code || 'unknown_error',
+                    message: event.error_message || event.error_code || 'unknown_error',
+                    stage: event.stage,
+                    occurred_at: new Date(endedAt).toISOString()
+                }
+                : undefined
+        );
         run.stage_results.push({
             stage: event.stage,
             status: event.status,
             duration_ms,
+            ended_at: endedAt,
             error_code: event.error_code,
-            error_message: event.error_message
+            error_message: event.error_message,
+            error_detail: detail
         });
         run.stage_started_at.delete(event.stage);
         return;
     }
 
     if (event.type === 'chunk_result') {
+        const endedAt = typeof event.ended_at === 'number' ? event.ended_at : Date.now();
+        const detail = event.error_detail || (
+            event.error_code || event.error_message
+                ? {
+                    code: event.error_code || 'unknown_error',
+                    message: event.error_message || event.error_code || 'unknown_error',
+                    batch_index: event.batch_index,
+                    occurred_at: new Date(endedAt).toISOString()
+                }
+                : undefined
+        );
         run.chunks.push({
             batch_index: event.batch_index,
             size_bytes: event.size_bytes,
             duration_ms: event.duration_ms,
+            ended_at: endedAt,
             status: event.status,
+            mime_type: event.mime_type,
             error_code: event.error_code,
-            error_message: event.error_message
+            error_message: event.error_message,
+            error_detail: detail
         });
         return;
     }
@@ -187,6 +272,7 @@ export const evaluateDiagnosticOutcome = (run: DiagnosticSummary): DiagnosticSta
     const quality = run.quality_gate;
 
     if (hasCriticalStageFailure) return 'failed';
+    if (quality?.pipeline_status && quality.pipeline_status !== 'completed') return 'failed';
     if (quality?.result_status && quality.result_status !== 'completed') return 'failed';
     if (quality && !quality.required_sections_ok) return 'failed';
     if (quality?.placeholder_detected) return 'failed';
@@ -195,23 +281,195 @@ export const evaluateDiagnosticOutcome = (run: DiagnosticSummary): DiagnosticSta
     return 'passed';
 };
 
+const dedupeStageResults = (stages: DiagnosticStageResult[]): DiagnosticStageResult[] => {
+    const byStage = new Map<string, DiagnosticStageResult>();
+    for (const stage of stages) {
+        if (byStage.has(stage.stage)) byStage.delete(stage.stage);
+        byStage.set(stage.stage, stage);
+    }
+    return Array.from(byStage.values());
+};
+
+const buildRootCauses = (run: DiagnosticSummary): string[] => {
+    const rootCauses = new Set<string>();
+
+    for (const stage of run.stage_results) {
+        if ((stage.status === 'failed' || stage.status === 'degraded') && stage.error_code) {
+            rootCauses.add(stage.error_code);
+        }
+    }
+
+    if (run.audio_stats.failed_chunks > 0) {
+        rootCauses.add('stt_chunk_failures');
+    }
+    if (run.quality_gate?.pipeline_status && run.quality_gate.pipeline_status !== 'completed') {
+        rootCauses.add(`pipeline_${run.quality_gate.pipeline_status}`);
+    }
+    if (run.quality_gate?.result_status && run.quality_gate.result_status !== 'completed') {
+        rootCauses.add(`result_${run.quality_gate.result_status}`);
+    }
+    if (run.quality_gate && !run.quality_gate.required_sections_ok) {
+        rootCauses.add('required_sections_missing');
+    }
+    if (run.quality_gate?.placeholder_detected) {
+        rootCauses.add('placeholder_detected');
+    }
+    if ((run.quality_gate?.critical_gaps_count || 0) > 0) {
+        rootCauses.add('critical_gaps_present');
+    }
+
+    return Array.from(rootCauses);
+};
+
+const buildErrorCatalog = (
+    run: Pick<DiagnosticSummary, 'stage_results'>,
+    chunks: DiagnosticChunkMetric[]
+): DiagnosticSummary['error_catalog'] => {
+    const byCode = new Map<string, { code: string; count: number; stages: Set<string>; last_message?: string }>();
+    const byStage = new Map<string, { stage: string; failed: number; degraded: number; last_error_code?: string }>();
+
+    for (const stage of run.stage_results) {
+        const stageEntry = byStage.get(stage.stage) || { stage: stage.stage, failed: 0, degraded: 0, last_error_code: undefined };
+        if (stage.status === 'failed') stageEntry.failed += 1;
+        if (stage.status === 'degraded') stageEntry.degraded += 1;
+        if (stage.error_code) stageEntry.last_error_code = stage.error_code;
+        byStage.set(stage.stage, stageEntry);
+
+        if (!stage.error_code) continue;
+        const codeEntry = byCode.get(stage.error_code) || {
+            code: stage.error_code,
+            count: 0,
+            stages: new Set<string>(),
+            last_message: undefined
+        };
+        codeEntry.count += 1;
+        codeEntry.stages.add(stage.stage);
+        codeEntry.last_message = stage.error_message || stage.error_detail?.message || codeEntry.last_message;
+        byCode.set(stage.error_code, codeEntry);
+    }
+
+    for (const chunk of chunks) {
+        const stageName = `chunk_${chunk.batch_index}`;
+        if (!chunk.error_code) continue;
+        const codeEntry = byCode.get(chunk.error_code) || {
+            code: chunk.error_code,
+            count: 0,
+            stages: new Set<string>(),
+            last_message: undefined
+        };
+        codeEntry.count += 1;
+        codeEntry.stages.add(stageName);
+        codeEntry.last_message = chunk.error_message || chunk.error_detail?.message || codeEntry.last_message;
+        byCode.set(chunk.error_code, codeEntry);
+    }
+
+    return {
+        by_code: Array.from(byCode.values())
+            .sort((a, b) => b.count - a.count)
+            .map((entry) => ({
+                code: entry.code,
+                count: entry.count,
+                stages: Array.from(entry.stages),
+                last_message: entry.last_message
+            })),
+        by_stage: Array.from(byStage.values())
+    };
+};
+
+const buildFailureTimeline = (
+    run: Pick<DiagnosticSummary, 'stage_results'>,
+    chunks: DiagnosticChunkMetric[]
+): DiagnosticSummary['failure_timeline'] => {
+    const timeline: DiagnosticSummary['failure_timeline'] = [];
+    for (const stage of run.stage_results) {
+        if (stage.status !== 'failed' && stage.status !== 'degraded') continue;
+        timeline.push({
+            timestamp: new Date(stage.ended_at).toISOString(),
+            stage: stage.stage,
+            status: stage.status,
+            error_code: stage.error_code || stage.error_detail?.code,
+            error_message: stage.error_message || stage.error_detail?.message
+        });
+    }
+    for (const chunk of chunks) {
+        if (chunk.status !== 'failed') continue;
+        timeline.push({
+            timestamp: new Date(chunk.ended_at).toISOString(),
+            stage: `chunk_${chunk.batch_index}`,
+            status: 'failed',
+            error_code: chunk.error_code || chunk.error_detail?.code,
+            error_message: chunk.error_message || chunk.error_detail?.message,
+            batch_index: chunk.batch_index
+        });
+    }
+    return timeline.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+};
+
+const recommendationForCode = (code: string): string | null => {
+    if (code === 'http_400' || code === 'groq_transcription_http_400') {
+        return 'Revisar formato/mime del chunk; priorizar WAV/PCM y evitar cortes binarios en contenedores comprimidos.';
+    }
+    if (code === 'http_429' || code === 'budget_limit') {
+        return 'Aplicar backoff y controlar presupuesto/cuotas; reducir concurrencia de STT temporalmente.';
+    }
+    if (code === 'timeout') {
+        return 'Reducir tamano de chunk o aumentar timeout de red para STT.';
+    }
+    if (code === 'decode_error') {
+        return 'Re-codificar audio a WAV mono 16kHz antes de transcribir.';
+    }
+    if (code === 'unsafe_binary_split_blocked') {
+        return 'No dividir por bytes audio comprimido; usar normalizacion previa y chunking seguro.';
+    }
+    if (code.startsWith('pipeline_') || code.startsWith('result_')) {
+        return 'Inspeccionar quality gate y secciones clinicas obligatorias para ubicar la regresion.';
+    }
+    return null;
+};
+
+const buildRecommendations = (run: Pick<DiagnosticSummary, 'error_catalog' | 'quality_gate'>): string[] => {
+    const orderedCodes = run.error_catalog.by_code.map((entry) => entry.code);
+    const recommendations = new Set<string>();
+    for (const code of orderedCodes) {
+        const recommendation = recommendationForCode(code);
+        if (recommendation) recommendations.add(recommendation);
+    }
+    if (run.quality_gate && !run.quality_gate.required_sections_ok) {
+        recommendations.add('Revisar extraccion/generacion para completar secciones obligatorias faltantes.');
+    }
+    if (run.quality_gate?.placeholder_detected) {
+        recommendations.add('Sanitizar placeholders de batches antes de extraccion/generacion final.');
+    }
+    return Array.from(recommendations);
+};
+
 export const buildDiagnosticInsights = (run: DiagnosticSummary): string[] => {
     const insights: string[] = [];
     if (run.audio_stats.failed_chunks > 0) {
         insights.push(`Fallaron ${run.audio_stats.failed_chunks} chunk(s) de audio durante STT.`);
     }
     const failedStages = run.stage_results.filter((stage) => stage.status === 'failed');
+    const degradedStages = run.stage_results.filter((stage) => stage.status === 'degraded');
     if (failedStages.length > 0) {
         insights.push(`Etapas fallidas: ${failedStages.map((stage) => stage.stage).join(', ')}.`);
     }
+    if (degradedStages.length > 0) {
+        insights.push(`Etapas degradadas: ${degradedStages.map((stage) => stage.stage).join(', ')}.`);
+    }
     if (run.quality_gate && !run.quality_gate.required_sections_ok) {
         insights.push(`Secciones faltantes: ${(run.quality_gate.missing_sections || []).join(', ')}.`);
+    }
+    if (run.quality_gate?.pipeline_status && run.quality_gate.pipeline_status !== 'completed') {
+        insights.push(`Pipeline final no completado (${run.quality_gate.pipeline_status}).`);
     }
     if (run.quality_gate?.placeholder_detected) {
         insights.push('Se detectaron placeholders de batches en la salida final.');
     }
     if (run.audio_stats.transcription_p95_ms > 45_000) {
         insights.push(`Latencia STT elevada (p95=${run.audio_stats.transcription_p95_ms}ms).`);
+    }
+    if (run.root_causes.length > 0) {
+        insights.push(`Causas raiz detectadas: ${run.root_causes.join(', ')}.`);
     }
     if (insights.length === 0) {
         insights.push('Pipeline estable sin incidencias criticas en esta corrida.');
@@ -226,7 +484,7 @@ export const finalizeDiagnosticRun = (
     const run = runStore.get(runId);
     if (!run) return null;
 
-    const mergedStages = [...run.stage_results, ...(output.stage_results || [])];
+    const mergedStages = dedupeStageResults([...run.stage_results, ...(output.stage_results || [])]);
     const quality_gate = output.quality_gate || run.quality_gate;
 
     const chunk_count = run.chunks.length;
@@ -239,6 +497,7 @@ export const finalizeDiagnosticRun = (
     const provisionalSummary: DiagnosticSummary = {
         run_id: run.run_id,
         mode: run.config.mode,
+        source: run.config.source,
         scenario_id: run.config.scenario_id,
         status: 'passed',
         stage_results: mergedStages,
@@ -249,9 +508,20 @@ export const finalizeDiagnosticRun = (
             transcription_p95_ms
         },
         quality_gate,
+        root_causes: [],
+        error_catalog: {
+            by_code: [],
+            by_stage: []
+        },
+        failure_timeline: [],
+        recommendations: [],
         insights: []
     };
 
+    provisionalSummary.root_causes = buildRootCauses(provisionalSummary);
+    provisionalSummary.error_catalog = buildErrorCatalog(provisionalSummary, run.chunks);
+    provisionalSummary.failure_timeline = buildFailureTimeline(provisionalSummary, run.chunks);
+    provisionalSummary.recommendations = buildRecommendations(provisionalSummary);
     provisionalSummary.status = evaluateDiagnosticOutcome(provisionalSummary);
     provisionalSummary.insights = buildDiagnosticInsights(provisionalSummary);
     runStore.delete(runId);
@@ -261,15 +531,16 @@ export const finalizeDiagnosticRun = (
 export const buildQualityGateFromHistory = (params: {
     medical_history: string;
     result_status?: string;
+    pipeline_status?: string;
     critical_gaps_count?: number;
 }): DiagnosticQualityGate => {
     const coverage = evaluateRequiredSections(params.medical_history || '');
     return {
         required_sections_ok: coverage.required_sections_ok,
         result_status: params.result_status,
+        pipeline_status: params.pipeline_status,
         critical_gaps_count: Math.max(0, params.critical_gaps_count || 0),
         missing_sections: coverage.missing_sections,
         placeholder_detected: hasPlaceholderToken(params.medical_history || '')
     };
 };
-

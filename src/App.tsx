@@ -36,7 +36,8 @@ import {
     finalizeDiagnosticRun,
     recordDiagnosticEvent,
     startDiagnosticRun,
-    type DiagnosticSummary
+    type DiagnosticSummary,
+    type DiagnosticErrorDetail
 } from './services/diagnostics';
 import { WhatsNewModal } from './components/WhatsNewModal';
 import { OnboardingModal } from './components/OnboardingModal';
@@ -54,6 +55,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '';
 const PIPELINE_V4_ENABLED = String(import.meta.env.VITE_PIPELINE_V4_ENABLED || 'true').toLowerCase() === 'true';
 const MAX_SAFE_AUDIO_BLOB_BYTES = 20 * 1024 * 1024;
+const SAFE_BINARY_SPLIT_MIME_HINTS = ['wav', 'wave', 'pcm', 'x-wav', 'l16'];
 const LEARNING_V2_ENABLED = String(import.meta.env.VITE_LEARNING_V2_ENABLED || 'true').toLowerCase() === 'true';
 const RULEPACK_APPLY_ENABLED = String(import.meta.env.VITE_RULEPACK_APPLY_ENABLED || 'true').toLowerCase() === 'true';
 const RULE_AUTO_PROMOTE_ENABLED = String(import.meta.env.VITE_RULE_AUTO_PROMOTE_ENABLED || 'true').toLowerCase() === 'true';
@@ -76,6 +78,12 @@ const getApiKeys = (userKey?: string) => {
 const getInitialApiKey = () => {
     if (typeof window === 'undefined') return GROQ_API_KEY;
     return safeGetLocalStorage('groq_api_key', GROQ_API_KEY);
+};
+
+const canSafelyBinarySplitAudio = (blob: Blob): boolean => {
+    const mime = (blob.type || '').toLowerCase();
+    if (!mime) return false;
+    return SAFE_BINARY_SPLIT_MIME_HINTS.some((hint) => mime.includes(hint));
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -185,6 +193,9 @@ const AppContent = () => {
 
     const normalizeDiagnosticError = (error: unknown): string => {
         const message = ((error as Error)?.message || '').toLowerCase();
+        if (message.includes('unsafe_binary_split_blocked')) return 'unsafe_binary_split_blocked';
+        if (message.includes('groq_transcription_http_400')) return 'http_400';
+        if (message.includes('groq_transcription_http_429')) return 'http_429';
         if (message.includes('budget_limit') || message.includes('awaiting_budget')) return 'budget_limit';
         if (message.includes('timeout') || message.includes('abort')) return 'timeout';
         if (message.includes('400')) return 'http_400';
@@ -204,6 +215,78 @@ const AppContent = () => {
         return 'unknown_error';
     };
 
+    const inferEndpointFromErrorMessage = (message: string): string | undefined => {
+        const normalized = (message || '').toLowerCase();
+        if (normalized.includes('groq_transcription')) return '/audio/transcriptions';
+        if (normalized.includes('chat/completions')) return '/chat/completions';
+        if (normalized.includes('gemini')) return 'gemini_api';
+        return undefined;
+    };
+
+    const extractTrailingJsonObject = (message: string): Record<string, unknown> | null => {
+        if (!message) return null;
+        const start = message.lastIndexOf('{');
+        const end = message.lastIndexOf('}');
+        if (start < 0 || end <= start) return null;
+        const candidate = message.slice(start, end + 1);
+        try {
+            const parsed = JSON.parse(candidate);
+            return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+        } catch {
+            return null;
+        }
+    };
+
+    const buildDiagnosticErrorDetail = (
+        error: unknown,
+        params: {
+            stage?: string;
+            batchIndex?: number;
+            provider?: string;
+            operation?: string;
+            mimeType?: string;
+            chunkBytes?: number;
+            inputType?: 'audio' | 'text';
+            codeOverride?: string;
+            messageOverride?: string;
+        } = {}
+    ): DiagnosticErrorDetail => {
+        const anyError = error as {
+            message?: string;
+            status?: number;
+            retryable?: boolean;
+            attempt?: number;
+        };
+        const message = params.messageOverride || anyError?.message || 'unknown_error';
+        const code = params.codeOverride || normalizeDiagnosticError(error);
+        const metadata = extractTrailingJsonObject(message);
+        const maybeHttpStatus = Number((metadata?.status as number) || anyError?.status || 0) || undefined;
+        const endpoint = inferEndpointFromErrorMessage(message);
+
+        return {
+            code,
+            message,
+            stage: params.stage,
+            batch_index: params.batchIndex,
+            occurred_at: new Date().toISOString(),
+            context: {
+                http_status: maybeHttpStatus,
+                retryable: typeof anyError?.retryable === 'boolean' ? anyError.retryable : undefined,
+                attempt: typeof anyError?.attempt === 'number' ? anyError.attempt : undefined,
+                provider: params.provider,
+                operation: params.operation,
+                endpoint,
+                input_type: params.inputType,
+                mime_type: params.mimeType || (metadata?.input_type as string | undefined),
+                chunk_bytes: params.chunkBytes,
+                notes: [
+                    typeof metadata?.retry_after_ms === 'number' ? `retry_after_ms=${metadata.retry_after_ms}` : '',
+                    typeof metadata?.transcription_length === 'number' ? `transcription_length=${metadata.transcription_length}` : ''
+                ].filter(Boolean)
+            }
+        };
+    };
+
     const sanitizeTranscriptForExtraction = (raw: string) => {
         if (!raw) return raw;
         return raw
@@ -218,6 +301,30 @@ const AppContent = () => {
         if (!validations || validations.length === 0) return 'unknown';
         const unique = Array.from(new Set(validations.map(v => v.validator).filter(Boolean)));
         return unique.join(' + ');
+    };
+
+    const toLogDiagnostics = (diagnostics?: DiagnosticSummary | null) => {
+        if (!diagnostics) return undefined;
+        return {
+            run_id: diagnostics.run_id,
+            mode: diagnostics.mode,
+            input_source: diagnostics.source,
+            scenario_id: diagnostics.scenario_id,
+            status: diagnostics.status,
+            stage_results: diagnostics.stage_results,
+            audio_stats: diagnostics.audio_stats,
+            quality_gate: diagnostics.quality_gate ? {
+                required_sections_ok: diagnostics.quality_gate.required_sections_ok,
+                result_status: diagnostics.quality_gate.result_status,
+                pipeline_status: diagnostics.quality_gate.pipeline_status,
+                critical_gaps_count: diagnostics.quality_gate.critical_gaps_count
+            } : undefined,
+            root_causes: diagnostics.root_causes,
+            error_catalog: diagnostics.error_catalog,
+            failure_timeline: diagnostics.failure_timeline,
+            recommendations: diagnostics.recommendations,
+            insights: diagnostics.insights
+        };
     };
 
     const prefixExtractionMeta = (meta: ExtractionMeta[], batchIndex: number) => {
@@ -260,6 +367,7 @@ const AppContent = () => {
             }
             return [blob];
         }
+        let normalizeFallbackError: unknown = null;
         try {
             const chunks = await normalizeAndChunkAudio(blob);
             if (chunks.length > 0) {
@@ -272,18 +380,36 @@ const AppContent = () => {
                 }
                 return chunks;
             }
+            normalizeFallbackError = new Error('normalize_and_chunk_returned_empty');
         } catch (error) {
-            console.warn('[App] normalizeAndChunkAudio failed, falling back to binary split:', error);
+            normalizeFallbackError = error;
+        }
+
+        if (!canSafelyBinarySplitAudio(blob)) {
+            const blockedError = new Error('unsafe_binary_split_blocked');
+            const errorDetail = buildDiagnosticErrorDetail(normalizeFallbackError || blockedError, {
+                stage: splitStage,
+                provider: 'client',
+                operation: 'split_blob',
+                mimeType: blob.type,
+                chunkBytes: blob.size,
+                inputType: 'audio',
+                codeOverride: 'unsafe_binary_split_blocked'
+            });
             if (runId) {
                 recordDiagnosticEvent(runId, {
                     type: 'stage_end',
                     stage: splitStage,
-                    status: 'degraded',
-                    error_code: normalizeDiagnosticError(error),
-                    error_message: (error as Error)?.message || 'normalize_and_chunk_failed'
+                    status: 'failed',
+                    error_code: errorDetail.code,
+                    error_message: errorDetail.message,
+                    error_detail: errorDetail
                 });
             }
+            throw blockedError;
         }
+
+        console.warn('[App] normalizeAndChunkAudio failed, falling back to binary split:', normalizeFallbackError);
         const chunks: Blob[] = [];
         let start = 0;
         while (start < blob.size) {
@@ -291,11 +417,22 @@ const AppContent = () => {
             chunks.push(blob.slice(start, end, blob.type));
             start = end;
         }
+        const fallbackErrorDetail = buildDiagnosticErrorDetail(normalizeFallbackError, {
+            stage: splitStage,
+            provider: 'client',
+            operation: 'split_blob_fallback',
+            mimeType: blob.type,
+            chunkBytes: blob.size,
+            inputType: 'audio'
+        });
         if (runId) {
             recordDiagnosticEvent(runId, {
                 type: 'stage_end',
                 stage: splitStage,
-                status: 'passed'
+                status: 'degraded',
+                error_code: fallbackErrorDetail.code,
+                error_message: fallbackErrorDetail.message,
+                error_detail: fallbackErrorDetail
             });
         }
         return chunks;
@@ -555,7 +692,8 @@ const AppContent = () => {
                             batch_index: partBatchIndex,
                             size_bytes: partBlob.size,
                             duration_ms: Date.now() - chunkStartedAt,
-                            status: 'passed'
+                            status: 'passed',
+                            mime_type: partBlob.type
                         });
                     }
                     await saveSegment({
@@ -567,6 +705,15 @@ const AppContent = () => {
                     });
                     continue;
                 } catch (error) {
+                    const errorDetail = buildDiagnosticErrorDetail(error, {
+                        stage: `partial_${batchIndex}`,
+                        batchIndex: partBatchIndex,
+                        provider: 'groq',
+                        operation: 'transcribeAudio',
+                        mimeType: partBlob.type,
+                        chunkBytes: partBlob.size,
+                        inputType: 'audio'
+                    });
                     if (runId) {
                         recordDiagnosticEvent(runId, {
                             type: 'chunk_result',
@@ -574,8 +721,10 @@ const AppContent = () => {
                             size_bytes: partBlob.size,
                             duration_ms: Date.now() - chunkStartedAt,
                             status: 'failed',
-                            error_code: normalizeDiagnosticError(error),
-                            error_message: (error as Error)?.message || 'transcription_failed'
+                            mime_type: partBlob.type,
+                            error_code: errorDetail.code,
+                            error_message: errorDetail.message,
+                            error_detail: errorDetail
                         });
                     }
                     throw error;
@@ -679,13 +828,24 @@ const AppContent = () => {
                 });
             }
             if (runId) {
+                const errorDetail = buildDiagnosticErrorDetail(error, {
+                    stage: `partial_${batchIndex}`,
+                    batchIndex,
+                    provider: 'pipeline',
+                    operation: 'process_partial_batch',
+                    mimeType: blob.type,
+                    chunkBytes: blob.size,
+                    inputType: 'audio',
+                    messageOverride: error?.message || 'partial_batch_failed'
+                });
                 recordDiagnosticEvent(runId, {
                     type: 'stage_end',
                     stage: `partial_${batchIndex}`,
                     status: 'failed',
                     duration_ms: Date.now() - partialStartedAt,
-                    error_code: normalizeDiagnosticError(error),
-                    error_message: error?.message || 'partial_batch_failed'
+                    error_code: errorDetail.code,
+                    error_message: errorDetail.message,
+                    error_detail: errorDetail
                 });
             }
         }
@@ -725,7 +885,8 @@ const AppContent = () => {
                         batch_index: subBatchIndex,
                         size_bytes: subBlob.size,
                         duration_ms: Date.now() - chunkStartedAt,
-                        status: 'passed'
+                        status: 'passed',
+                        mime_type: subBlob.type
                     });
                 }
                 await saveSegment({
@@ -737,6 +898,15 @@ const AppContent = () => {
                 });
                 continue;
             } catch (error) {
+                const errorDetail = buildDiagnosticErrorDetail(error, {
+                    stage: 'finalize',
+                    batchIndex: subBatchIndex,
+                    provider: 'groq',
+                    operation: 'transcribeAudio',
+                    mimeType: subBlob.type,
+                    chunkBytes: subBlob.size,
+                    inputType: 'audio'
+                });
                 if (runId) {
                     recordDiagnosticEvent(runId, {
                         type: 'chunk_result',
@@ -744,8 +914,10 @@ const AppContent = () => {
                         size_bytes: subBlob.size,
                         duration_ms: Date.now() - chunkStartedAt,
                         status: 'failed',
-                        error_code: normalizeDiagnosticError(error),
-                        error_message: (error as Error)?.message || 'transcription_failed'
+                        mime_type: subBlob.type,
+                        error_code: errorDetail.code,
+                        error_message: errorDetail.message,
+                        error_detail: errorDetail
                     });
                 }
                 throw error;
@@ -812,16 +984,37 @@ const AppContent = () => {
             try {
                 fullExtraction = await aiService.extractOnly(extractionInput);
                 if (runId) {
-                    recordDiagnosticEvent(runId, { type: 'stage_end', stage: 'extract_full', status: 'degraded' });
+                    const degradedDetail = buildDiagnosticErrorDetail(firstError, {
+                        stage: 'extract_full',
+                        provider: 'gemini',
+                        operation: 'extractOnly_retry_success',
+                        inputType: 'text'
+                    });
+                    recordDiagnosticEvent(runId, {
+                        type: 'stage_end',
+                        stage: 'extract_full',
+                        status: 'degraded',
+                        error_code: degradedDetail.code,
+                        error_message: degradedDetail.message,
+                        error_detail: degradedDetail
+                    });
                 }
             } catch (secondError: any) {
                 if (runId) {
+                    const extractErrorDetail = buildDiagnosticErrorDetail(secondError, {
+                        stage: 'extract_full',
+                        provider: 'gemini',
+                        operation: 'extractOnly',
+                        inputType: 'text',
+                        messageOverride: secondError?.message || 'final_extraction_failed'
+                    });
                     recordDiagnosticEvent(runId, {
                         type: 'stage_end',
                         stage: 'extract_full',
                         status: 'failed',
-                        error_code: normalizeDiagnosticError(secondError),
-                        error_message: secondError?.message || 'final_extraction_failed'
+                        error_code: extractErrorDetail.code,
+                        error_message: extractErrorDetail.message,
+                        error_detail: extractErrorDetail
                     });
                 }
                 try {
@@ -993,18 +1186,37 @@ const AppContent = () => {
             const qualityGate = buildQualityGateFromHistory({
                 medical_history: result.data,
                 result_status: result.result_status,
+                pipeline_status: result.pipeline_status,
                 critical_gaps_count: result.critical_gaps?.length || 0
             });
             if (runId) {
                 recordDiagnosticEvent(runId, { type: 'quality_gate', gate: qualityGate });
-                const finalizeStageStatus = !qualityGate.required_sections_ok || result.result_status === 'provisional'
-                    ? 'failed'
-                    : (result.pipeline_status === 'degraded' ? 'degraded' : 'passed');
+                const finalizeStageStatus = (
+                    !qualityGate.required_sections_ok
+                    || qualityGate.placeholder_detected
+                    || (qualityGate.pipeline_status && qualityGate.pipeline_status !== 'completed')
+                    || (qualityGate.result_status && qualityGate.result_status !== 'completed')
+                ) ? 'failed' : 'passed';
+                const finalizeErrorDetail = finalizeStageStatus === 'failed'
+                    ? buildDiagnosticErrorDetail(new Error('quality_gate_failed'), {
+                        stage: 'finalize',
+                        provider: 'pipeline',
+                        operation: 'quality_gate',
+                        inputType: 'audio',
+                        codeOverride: qualityGate.placeholder_detected
+                            ? 'placeholder_detected'
+                            : (!qualityGate.required_sections_ok ? 'required_sections_missing' : 'pipeline_not_completed'),
+                        messageOverride: `quality_gate_failed(required_sections_ok=${String(qualityGate.required_sections_ok)}, pipeline_status=${qualityGate.pipeline_status || 'n/a'}, result_status=${qualityGate.result_status || 'n/a'})`
+                    })
+                    : undefined;
                 recordDiagnosticEvent(runId, {
                     type: 'stage_end',
                     stage: 'finalize',
                     status: finalizeStageStatus,
-                    duration_ms: Date.now() - finalizeStartedAt
+                    duration_ms: Date.now() - finalizeStartedAt,
+                    error_code: finalizeErrorDetail?.code,
+                    error_message: finalizeErrorDetail?.message,
+                    error_detail: finalizeErrorDetail
                 });
                 const diagnostics = finalizeDiagnosticRun(runId, {
                     quality_gate: qualityGate
@@ -1029,33 +1241,29 @@ const AppContent = () => {
                         active_memory_used: Boolean(result.active_memory_used),
                         validationHistory: result.validations?.flatMap((v) => v.errors),
                         remainingErrors: result.remaining_errors,
-                        diagnostics: diagnostics ? {
-                            run_id: diagnostics.run_id,
-                            mode: diagnostics.mode,
-                            scenario_id: diagnostics.scenario_id,
-                            status: diagnostics.status,
-                            stage_results: diagnostics.stage_results,
-                            audio_stats: diagnostics.audio_stats,
-                            quality_gate: diagnostics.quality_gate ? {
-                                required_sections_ok: diagnostics.quality_gate.required_sections_ok,
-                                result_status: diagnostics.quality_gate.result_status,
-                                critical_gaps_count: diagnostics.quality_gate.critical_gaps_count
-                            } : undefined,
-                            insights: diagnostics.insights
-                        } : undefined
+                        diagnostics: toLogDiagnostics(diagnostics)
                     }
                 });
             }
         } catch (saveError) {
             console.error('[App] Error saving record:', saveError);
             if (runId) {
+                const saveErrorDetail = buildDiagnosticErrorDetail(saveError, {
+                    stage: 'finalize',
+                    provider: 'storage',
+                    operation: 'persistPipelineRecord',
+                    inputType: 'audio',
+                    codeOverride: normalizeDiagnosticError(saveError),
+                    messageOverride: (saveError as Error)?.message || 'save_failed'
+                });
                 recordDiagnosticEvent(runId, {
                     type: 'stage_end',
                     stage: 'finalize',
                     status: 'failed',
                     duration_ms: Date.now() - finalizeStartedAt,
-                    error_code: normalizeDiagnosticError(saveError),
-                    error_message: (saveError as Error)?.message || 'save_failed'
+                    error_code: saveErrorDetail.code,
+                    error_message: saveErrorDetail.message,
+                    error_detail: saveErrorDetail
                 });
             }
         }
@@ -1332,17 +1540,29 @@ const AppContent = () => {
             if (sessionId) {
                 const runId = diagnosticRunBySessionRef.current.get(sessionId);
                 if (runId) {
+                    const v4ErrorDetail = buildDiagnosticErrorDetail(error, {
+                        stage: 'finalize',
+                        provider: 'pipeline',
+                        operation: 'orchestrator_finalize',
+                        inputType: 'audio',
+                        mimeType: blob.type,
+                        chunkBytes: blob.size,
+                        codeOverride: normalizeDiagnosticError(error),
+                        messageOverride: error?.message || 'v4_pipeline_failed'
+                    });
                     recordDiagnosticEvent(runId, {
                         type: 'stage_end',
                         stage: 'finalize',
                         status: 'failed',
-                        error_code: normalizeDiagnosticError(error),
-                        error_message: error?.message || 'v4_pipeline_failed'
+                        error_code: v4ErrorDetail.code,
+                        error_message: v4ErrorDetail.message,
+                        error_detail: v4ErrorDetail
                     });
                     const diagnostics = finalizeDiagnosticRun(runId, {
                         quality_gate: {
                             required_sections_ok: false,
                             result_status: 'failed_recoverable',
+                            pipeline_status: 'failed',
                             critical_gaps_count: 1
                         }
                     });
@@ -1553,15 +1773,35 @@ const AppContent = () => {
             const qualityGate = buildQualityGateFromHistory({
                 medical_history: result.data,
                 result_status: result.result_status,
+                pipeline_status: result.pipeline_status,
                 critical_gaps_count: result.critical_gaps?.length || 0
             });
             recordDiagnosticEvent(diagnosticRunId, { type: 'quality_gate', gate: qualityGate });
+            const textPipelineStageStatus = (
+                qualityGate.required_sections_ok
+                && !qualityGate.placeholder_detected
+                && (qualityGate.pipeline_status || 'completed') === 'completed'
+                && (qualityGate.result_status || 'completed') === 'completed'
+            ) ? 'passed' : 'failed';
+            const textGateErrorDetail = textPipelineStageStatus === 'failed'
+                ? buildDiagnosticErrorDetail(new Error('text_quality_gate_failed'), {
+                    stage: 'text_pipeline',
+                    provider: 'pipeline',
+                    operation: 'text_quality_gate',
+                    inputType: 'text',
+                    codeOverride: qualityGate.placeholder_detected
+                        ? 'placeholder_detected'
+                        : (!qualityGate.required_sections_ok ? 'required_sections_missing' : 'pipeline_not_completed'),
+                    messageOverride: `text_quality_gate_failed(required_sections_ok=${String(qualityGate.required_sections_ok)}, pipeline_status=${qualityGate.pipeline_status || 'n/a'}, result_status=${qualityGate.result_status || 'n/a'})`
+                })
+                : undefined;
             recordDiagnosticEvent(diagnosticRunId, {
                 type: 'stage_end',
                 stage: 'text_pipeline',
-                status: qualityGate.required_sections_ok && (result.result_status || 'completed') === 'completed'
-                    ? 'passed'
-                    : 'failed'
+                status: textPipelineStageStatus,
+                error_code: textGateErrorDetail?.code,
+                error_message: textGateErrorDetail?.message,
+                error_detail: textGateErrorDetail
             });
             const diagnostics = finalizeDiagnosticRun(diagnosticRunId, {
                 quality_gate: qualityGate
@@ -1579,37 +1819,34 @@ const AppContent = () => {
                     active_memory_used: Boolean(result.active_memory_used),
                     validationHistory: result.validations?.flatMap((v) => v.errors),
                     remainingErrors: result.remaining_errors,
-                    diagnostics: diagnostics ? {
-                        run_id: diagnostics.run_id,
-                        mode: diagnostics.mode,
-                        scenario_id: diagnostics.scenario_id,
-                        status: diagnostics.status,
-                        stage_results: diagnostics.stage_results,
-                        audio_stats: diagnostics.audio_stats,
-                        quality_gate: diagnostics.quality_gate ? {
-                            required_sections_ok: diagnostics.quality_gate.required_sections_ok,
-                            result_status: diagnostics.quality_gate.result_status,
-                            critical_gaps_count: diagnostics.quality_gate.critical_gaps_count
-                        } : undefined,
-                        insights: diagnostics.insights
-                    } : undefined
+                    diagnostics: toLogDiagnostics(diagnostics)
                 }
             });
             setProcessingStatus('Consulta de prueba guardada en Historial');
         } catch (e: any) {
             console.error(e);
             setProcessingStatus('Error procesando texto');
+            const textErrorDetail = buildDiagnosticErrorDetail(e, {
+                stage: 'text_pipeline',
+                provider: 'pipeline',
+                operation: 'text_pipeline',
+                inputType: 'text',
+                codeOverride: normalizeDiagnosticError(e),
+                messageOverride: e?.message || 'text_pipeline_failed'
+            });
             recordDiagnosticEvent(diagnosticRunId, {
                 type: 'stage_end',
                 stage: 'text_pipeline',
                 status: 'failed',
-                error_code: normalizeDiagnosticError(e),
-                error_message: e?.message || 'text_pipeline_failed'
+                error_code: textErrorDetail.code,
+                error_message: textErrorDetail.message,
+                error_detail: textErrorDetail
             });
             const diagnostics = finalizeDiagnosticRun(diagnosticRunId, {
                 quality_gate: {
                     required_sections_ok: false,
                     result_status: 'failed_recoverable',
+                    pipeline_status: 'failed',
                     critical_gaps_count: 1
                 }
             });
@@ -1625,20 +1862,7 @@ const AppContent = () => {
                         versionsCount: 0,
                         errorsFixed: 0,
                         active_memory_used: false,
-                        diagnostics: {
-                            run_id: diagnostics.run_id,
-                            mode: diagnostics.mode,
-                            scenario_id: diagnostics.scenario_id,
-                            status: diagnostics.status,
-                            stage_results: diagnostics.stage_results,
-                            audio_stats: diagnostics.audio_stats,
-                            quality_gate: diagnostics.quality_gate ? {
-                                required_sections_ok: diagnostics.quality_gate.required_sections_ok,
-                                result_status: diagnostics.quality_gate.result_status,
-                                critical_gaps_count: diagnostics.quality_gate.critical_gaps_count
-                            } : undefined,
-                            insights: diagnostics.insights
-                        }
+                        diagnostics: toLogDiagnostics(diagnostics)
                     }
                 });
             }
