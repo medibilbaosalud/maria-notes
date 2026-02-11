@@ -37,6 +37,7 @@ export interface LabTestLog {
             execution_mode?: 'deterministic' | 'real';
             input_source?: 'audio' | 'text';
             scenario_id?: string;
+            stt_route_policy?: 'whisper_strict' | 'default';
             status: 'passed' | 'failed' | 'degraded' | 'skipped';
             stage_results: Array<{
                 stage: string;
@@ -52,18 +53,31 @@ export interface LabTestLog {
                     batch_index?: number;
                     occurred_at: string;
                     context?: {
+                        canonical_code?: string;
+                        provider_code?: string;
+                        provider_message?: string;
+                        request_id?: string;
                         http_status?: number;
+                        retry_after_ms?: number;
                         retryable?: boolean;
                         attempt?: number;
+                        attempt_index?: number;
+                        fallback_index?: number;
                         provider?: string;
+                        model?: string;
+                        route_key?: string;
                         operation?: string;
                         endpoint?: string;
                         input_type?: string;
                         mime_type?: string;
                         chunk_bytes?: number;
+                        chunk_id?: string;
+                        audio_duration_ms?: number;
                         phase?: 'raw_guard' | 'final_guard' | 'stt' | 'extract' | 'generate' | 'quality_gate';
                         origin?: 'model_output' | 'sanitizer' | 'validator' | 'pipeline_policy';
                         blocking?: boolean;
+                        blocking_rule_id?: string;
+                        raw_payload_excerpt?: string;
                         notes?: string[];
                     };
                 };
@@ -79,9 +93,17 @@ export interface LabTestLog {
                 result_status?: string;
                 pipeline_status?: string;
                 critical_gaps_count: number;
+                blocking_rule_id?: string;
+                blocking_reason?: string;
             };
             status_reason_primary?: string;
             status_reason_chain?: string[];
+            primary_failure_evidence?: string;
+            failure_graph?: Array<{
+                node: string;
+                caused_by?: string;
+                evidence_ref?: string;
+            }>;
             reconciliation?: {
                 pre_sanitize_issues: Array<{
                     fingerprint: string;

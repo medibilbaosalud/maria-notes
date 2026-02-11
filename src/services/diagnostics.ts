@@ -11,18 +11,31 @@ export interface DiagnosticReconciliationIssue {
 }
 
 export interface DiagnosticErrorContext {
+    canonical_code?: string;
+    provider_code?: string;
+    provider_message?: string;
+    request_id?: string;
     http_status?: number;
+    retry_after_ms?: number;
     retryable?: boolean;
     attempt?: number;
+    attempt_index?: number;
+    fallback_index?: number;
     provider?: string;
+    model?: string;
+    route_key?: string;
     operation?: string;
     endpoint?: string;
     input_type?: string;
     mime_type?: string;
     chunk_bytes?: number;
+    chunk_id?: string;
+    audio_duration_ms?: number;
     phase?: 'raw_guard' | 'final_guard' | 'stt' | 'extract' | 'generate' | 'quality_gate';
     origin?: 'model_output' | 'sanitizer' | 'validator' | 'pipeline_policy';
     blocking?: boolean;
+    blocking_rule_id?: string;
+    raw_payload_excerpt?: string;
     notes?: string[];
 }
 
@@ -72,6 +85,8 @@ export interface DiagnosticQualityGate {
     critical_gaps_count: number;
     missing_sections?: string[];
     placeholder_detected?: boolean;
+    blocking_rule_id?: string;
+    blocking_reason?: string;
 }
 
 interface DiagnosticRunState {
@@ -104,6 +119,7 @@ interface DiagnosticRunState {
 export interface FinalizeDiagnosticOutput {
     stage_results?: DiagnosticStageResult[];
     quality_gate?: DiagnosticQualityGate;
+    stt_route_policy?: 'whisper_strict' | 'default';
     reconciliation?: {
         pre_sanitize_issues: DiagnosticReconciliationIssue[];
         post_sanitize_issues: DiagnosticReconciliationIssue[];
@@ -129,6 +145,7 @@ export interface DiagnosticSummary {
     execution_mode?: 'deterministic' | 'real';
     source: 'audio' | 'text';
     scenario_id?: string;
+    stt_route_policy?: 'whisper_strict' | 'default';
     status: DiagnosticStageStatus;
     stage_results: DiagnosticStageResult[];
     audio_stats: {
@@ -140,6 +157,12 @@ export interface DiagnosticSummary {
     quality_gate?: DiagnosticQualityGate;
     status_reason_primary: string;
     status_reason_chain: string[];
+    primary_failure_evidence?: string;
+    failure_graph: Array<{
+        node: string;
+        caused_by?: string;
+        evidence_ref?: string;
+    }>;
     reconciliation: {
         pre_sanitize_issues: DiagnosticReconciliationIssue[];
         post_sanitize_issues: DiagnosticReconciliationIssue[];
@@ -378,6 +401,11 @@ const buildStatusReasonChain = (run: DiagnosticSummary): string[] => {
     if (run.quality_gate?.placeholder_detected) reasons.push('placeholder_detected');
     if ((run.quality_gate?.critical_gaps_count || 0) > 0) reasons.push('critical_gaps_present');
     if (run.audio_stats.failed_chunks > 0) reasons.push('stt_chunk_failures');
+    const hasInsufficientClinicalSignal = run.debug.remaining_errors.some((item) => {
+        const text = `${item.field}:${item.reason}`.toLowerCase();
+        return text.includes('transcripcion') && (text.includes('inaudible') || text.includes('ambiguo') || text.includes('no se identifican datos clinicos'));
+    });
+    if (hasInsufficientClinicalSignal) reasons.push('insufficient_clinical_signal');
     if (hasFailedStage) reasons.push('stage_failed');
     if (hasDegradedStage && reasons.length === 0) reasons.push('stage_degraded');
     if (run.reconciliation.neutralized_issues.length > 0) reasons.push('sanitized_leak_detected');
@@ -420,6 +448,16 @@ const buildRootCauses = (run: DiagnosticSummary): string[] => {
     buildStatusReasonChain(run).forEach((reason) => rootCauses.add(reason));
 
     return Array.from(rootCauses);
+};
+
+const buildFailureGraph = (run: DiagnosticSummary): DiagnosticSummary['failure_graph'] => {
+    const chain = run.status_reason_chain || [];
+    if (chain.length === 0) return [];
+    return chain.map((node, idx) => ({
+        node,
+        caused_by: idx > 0 ? chain[idx - 1] : undefined,
+        evidence_ref: idx === 0 ? run.primary_failure_evidence : undefined
+    }));
 };
 
 const buildErrorCatalog = (
@@ -531,6 +569,9 @@ const recommendationForCode = (code: string): string | null => {
     if (code === 'insufficient_clinical_signal') {
         return 'En modo real usar audio verbal clinico claro; el audio tonal/sin habla produce extraccion ambigua.';
     }
+    if (code === 'whisper_route_exhausted') {
+        return 'Fallo toda la ruta Whisper estricta; revisar API key, cuota y formato de audio de entrada.';
+    }
     return null;
 };
 
@@ -556,6 +597,9 @@ const buildRecommendations = (run: Pick<DiagnosticSummary, 'error_catalog' | 'qu
 export const buildDiagnosticInsights = (run: DiagnosticSummary): string[] => {
     const insights: string[] = [];
     insights.push(`Motivo principal: ${run.status_reason_primary}.`);
+    if (run.primary_failure_evidence) {
+        insights.push(`Evidencia primaria: ${run.primary_failure_evidence}.`);
+    }
     if (run.debug.remaining_errors.length > 0) {
         const top = run.debug.remaining_errors[0];
         insights.push(`Error exacto principal: ${top.type}:${top.field} -> ${top.reason}.`);
@@ -630,6 +674,7 @@ export const finalizeDiagnosticRun = (
         execution_mode: run.config.execution_mode,
         source: run.config.source,
         scenario_id: run.config.scenario_id,
+        stt_route_policy: output.stt_route_policy || 'default',
         status: 'passed',
         stage_results: mergedStages,
         audio_stats: {
@@ -641,6 +686,8 @@ export const finalizeDiagnosticRun = (
         quality_gate,
         status_reason_primary: 'ok',
         status_reason_chain: [],
+        primary_failure_evidence: undefined,
+        failure_graph: [],
         reconciliation,
         debug,
         root_causes: [],
@@ -655,7 +702,33 @@ export const finalizeDiagnosticRun = (
 
     provisionalSummary.status_reason_chain = buildStatusReasonChain(provisionalSummary);
     provisionalSummary.status_reason_primary = provisionalSummary.status_reason_chain[0] || 'ok';
+    const firstFailedStage = provisionalSummary.stage_results.find((item) => item.status === 'failed' || item.status === 'degraded');
+    const firstFailedChunk = run.chunks.find((item) => item.status === 'failed');
+    if (firstFailedStage?.error_detail?.context) {
+        const ctx = firstFailedStage.error_detail.context;
+        provisionalSummary.primary_failure_evidence = [
+            `stage=${firstFailedStage.stage}`,
+            `code=${firstFailedStage.error_detail.code}`,
+            ctx.provider ? `provider=${ctx.provider}` : '',
+            ctx.model ? `model=${ctx.model}` : '',
+            ctx.route_key ? `route=${ctx.route_key}` : '',
+            typeof ctx.http_status === 'number' ? `http=${ctx.http_status}` : '',
+            typeof firstFailedStage.error_detail.batch_index === 'number' ? `batch=${firstFailedStage.error_detail.batch_index}` : '',
+            ctx.request_id ? `request_id=${ctx.request_id}` : ''
+        ].filter(Boolean).join(' ');
+    } else if (firstFailedChunk?.error_detail?.context) {
+        const ctx = firstFailedChunk.error_detail.context;
+        provisionalSummary.primary_failure_evidence = [
+            `chunk=${firstFailedChunk.batch_index}`,
+            `code=${firstFailedChunk.error_detail.code}`,
+            ctx.provider ? `provider=${ctx.provider}` : '',
+            ctx.model ? `model=${ctx.model}` : '',
+            typeof ctx.http_status === 'number' ? `http=${ctx.http_status}` : '',
+            ctx.request_id ? `request_id=${ctx.request_id}` : ''
+        ].filter(Boolean).join(' ');
+    }
     provisionalSummary.root_causes = buildRootCauses(provisionalSummary);
+    provisionalSummary.failure_graph = buildFailureGraph(provisionalSummary);
     provisionalSummary.error_catalog = buildErrorCatalog(provisionalSummary, run.chunks);
     provisionalSummary.failure_timeline = buildFailureTimeline(provisionalSummary, run.chunks);
     provisionalSummary.recommendations = buildRecommendations(provisionalSummary);
@@ -672,12 +745,32 @@ export const buildQualityGateFromHistory = (params: {
     critical_gaps_count?: number;
 }): DiagnosticQualityGate => {
     const coverage = evaluateRequiredSections(params.medical_history || '');
+    const pipelineStatus = params.pipeline_status;
+    const resultStatus = params.result_status;
+    const placeholderDetected = hasPlaceholderToken(params.medical_history || '');
+    let blockingRuleId: string | undefined;
+    let blockingReason: string | undefined;
+    if (placeholderDetected) {
+        blockingRuleId = 'QG_PLACEHOLDER_IN_FINAL_OUTPUT';
+        blockingReason = 'Se detectaron placeholders de batch en salida final.';
+    } else if (!coverage.required_sections_ok) {
+        blockingRuleId = 'QG_REQUIRED_SECTIONS_MISSING';
+        blockingReason = `Faltan secciones obligatorias: ${(coverage.missing_sections || []).join(', ')}`;
+    } else if (pipelineStatus && pipelineStatus !== 'completed') {
+        blockingRuleId = 'QG_PIPELINE_NOT_COMPLETED';
+        blockingReason = `pipeline_status=${pipelineStatus}`;
+    } else if (resultStatus && resultStatus !== 'completed') {
+        blockingRuleId = 'QG_RESULT_NOT_COMPLETED';
+        blockingReason = `result_status=${resultStatus}`;
+    }
     return {
         required_sections_ok: coverage.required_sections_ok,
-        result_status: params.result_status,
-        pipeline_status: params.pipeline_status,
+        result_status: resultStatus,
+        pipeline_status: pipelineStatus,
         critical_gaps_count: Math.max(0, params.critical_gaps_count || 0),
         missing_sections: coverage.missing_sections,
-        placeholder_detected: hasPlaceholderToken(params.medical_history || '')
+        placeholder_detected: placeholderDetected,
+        blocking_rule_id: blockingRuleId,
+        blocking_reason: blockingReason
     };
 };

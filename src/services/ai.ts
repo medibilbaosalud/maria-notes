@@ -372,7 +372,8 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
     async transcribeAudio(
         audioInput: Blob | string,
         mimeType?: string,
-        legacyAudioBlob?: Blob
+        legacyAudioBlob?: Blob,
+        options?: { whisperStrict?: boolean }
     ): Promise<AIResult<string>> {
         let audioBlob: Blob | null = null;
 
@@ -392,7 +393,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
             audioBlob = new Blob([bytes], { type: mimeType });
         }
 
-        const result = await this.groq.transcribeAudio(audioBlob);
+        const result = await this.groq.transcribeAudio(audioBlob, options);
         return { data: result.text, model: result.model };
     }
 

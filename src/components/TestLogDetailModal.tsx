@@ -75,9 +75,13 @@ export const TestLogDetailModal: React.FC<TestLogDetailModalProps> = ({ log, onC
                 {diagnostics.status_reason_chain && diagnostics.status_reason_chain.length > 0 && (
                   <p><strong>Cadena causal:</strong> {diagnostics.status_reason_chain.join(' -> ')}</p>
                 )}
+                {diagnostics.primary_failure_evidence && (
+                  <p><strong>Evidencia primaria:</strong> <code>{diagnostics.primary_failure_evidence}</code></p>
+                )}
                 <p><strong>Run ID:</strong> {diagnostics.run_id}</p>
                 <p><strong>Modo:</strong> {diagnostics.mode}</p>
                 <p><strong>Modo ejecucion:</strong> {diagnostics.execution_mode || 'n/a'}</p>
+                <p><strong>Ruta STT:</strong> {diagnostics.stt_route_policy || 'default'}</p>
                 <p><strong>Fuente:</strong> {diagnostics.input_source || log.input_type}</p>
                 {diagnostics.scenario_id && <p><strong>Escenario:</strong> {diagnostics.scenario_id}</p>}
                 {diagnostics.audio_stats && (
@@ -94,10 +98,33 @@ export const TestLogDetailModal: React.FC<TestLogDetailModalProps> = ({ log, onC
                     critical_gaps={diagnostics.quality_gate.critical_gaps_count}
                   </p>
                 )}
+                {diagnostics.quality_gate?.blocking_rule_id && (
+                  <p><strong>Regla bloqueante:</strong> {diagnostics.quality_gate.blocking_rule_id} ({diagnostics.quality_gate.blocking_reason || 'sin detalle'})</p>
+                )}
                 {diagnostics.root_causes && diagnostics.root_causes.length > 0 && (
                   <p><strong>Causas raiz:</strong> {diagnostics.root_causes.join(', ')}</p>
                 )}
               </div>
+
+              {diagnostics.failure_graph && diagnostics.failure_graph.length > 0 && (
+                <>
+                  <div className="test-log-section-title">
+                    <h3>Grafo Causal</h3>
+                  </div>
+                  <div className="test-log-validation-list">
+                    {diagnostics.failure_graph.map((node, idx) => (
+                      <div key={`${node.node}-${idx}`} className="test-log-validation-item">
+                        <div className="test-log-error-badge info">CAUSE</div>
+                        <div className="test-log-error-content">
+                          <strong>{node.node}</strong>
+                          {node.caused_by && <div>caused_by={node.caused_by}</div>}
+                          {node.evidence_ref && <div><code>{node.evidence_ref}</code></div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
 
               <div className="test-log-section-title">
                 <h3>Etapas</h3>
@@ -116,12 +143,20 @@ export const TestLogDetailModal: React.FC<TestLogDetailModalProps> = ({ log, onC
                           {typeof stage.error_detail.context.retryable === 'boolean' ? `retryable=${String(stage.error_detail.context.retryable)} ` : ''}
                           {typeof stage.error_detail.context.attempt === 'number' ? `attempt=${stage.error_detail.context.attempt} ` : ''}
                           {stage.error_detail.context.provider ? `provider=${stage.error_detail.context.provider} ` : ''}
+                          {stage.error_detail.context.model ? `model=${stage.error_detail.context.model} ` : ''}
+                          {stage.error_detail.context.route_key ? `route=${stage.error_detail.context.route_key} ` : ''}
                           {stage.error_detail.context.operation ? `op=${stage.error_detail.context.operation} ` : ''}
                           {stage.error_detail.context.endpoint ? `endpoint=${stage.error_detail.context.endpoint} ` : ''}
+                          {stage.error_detail.context.provider_code ? `provider_code=${stage.error_detail.context.provider_code} ` : ''}
+                          {stage.error_detail.context.request_id ? `request_id=${stage.error_detail.context.request_id} ` : ''}
+                          {stage.error_detail.context.blocking_rule_id ? `blocking_rule_id=${stage.error_detail.context.blocking_rule_id} ` : ''}
                           {stage.error_detail.context.phase ? `phase=${stage.error_detail.context.phase} ` : ''}
                           {stage.error_detail.context.origin ? `origin=${stage.error_detail.context.origin} ` : ''}
                           {typeof stage.error_detail.context.blocking === 'boolean' ? `blocking=${String(stage.error_detail.context.blocking)}` : ''}
                         </div>
+                      )}
+                      {stage.error_detail?.context?.raw_payload_excerpt && (
+                        <div className="test-log-error-meta"><code>{stage.error_detail.context.raw_payload_excerpt}</code></div>
                       )}
                     </div>
                   </div>

@@ -22,6 +22,8 @@ type DiagnosticScenario = {
   transcript?: string;
   audioDurationsSec?: number[];
   audioFrequenciesHz?: number[];
+  audioChunkDurationSec?: number;
+  audioChunkCount?: number;
   injectCorruptedMiddleChunk?: boolean;
 };
 
@@ -53,6 +55,15 @@ const DIAGNOSTIC_SCENARIOS = [
     label: 'Final Stage Failure',
     source: 'text',
     transcript: 'Texto de prueba deliberadamente incompleto para estresar validaciones y forzar gaps criticos en secciones clinicas. Sin datos suficientes de plan ni diagnostico definitivo.'
+  },
+  {
+    id: 'hourly_complex_consultation',
+    label: 'Consulta Compleja 60m (20x3m)',
+    source: 'audio',
+    transcript: 'Consulta ENT compleja de larga duracion con poliposis nasal, obstruccion cronica, crisis de rinorrea, variacion estacional, antecedentes atopicos, hallazgos endoscopicos y plan escalonado con corticoide intranasal, antihistaminico y seguimiento.',
+    audioChunkDurationSec: 180,
+    audioChunkCount: 20,
+    audioFrequenciesHz: [196, 220, 247, 262, 294, 330]
   }
 ] as const satisfies readonly DiagnosticScenario[];
 
@@ -92,18 +103,25 @@ const createSyntheticWavBlob = (durationSec: number, frequencyHz: number, sample
   return new Blob([buffer], { type: 'audio/wav' });
 };
 
-const buildScenarioAudioChunks = (scenario: DiagnosticScenario): Blob[] => {
-  const durations = scenario.audioDurationsSec || [4];
-  const frequencies = scenario.audioFrequenciesHz || [330];
-  const chunks = durations.map((duration, idx) => {
-    const frequency = frequencies[idx] || frequencies[frequencies.length - 1] || 330;
-    return createSyntheticWavBlob(duration, frequency);
-  });
-  if (scenario.injectCorruptedMiddleChunk && chunks.length >= 3) {
-    const middle = Math.floor(chunks.length / 2);
-    chunks[middle] = new Blob(['corrupted-audio-payload'], { type: 'audio/webm' });
+const getScenarioAudioChunkCount = (scenario: DiagnosticScenario): number => {
+  if (typeof scenario.audioChunkCount === 'number' && scenario.audioChunkCount > 0) {
+    return scenario.audioChunkCount;
   }
-  return chunks;
+  return (scenario.audioDurationsSec || [4]).length;
+};
+
+const buildScenarioAudioChunk = (scenario: DiagnosticScenario, idx: number): Blob => {
+  const durations = scenario.audioDurationsSec || [];
+  const duration = durations[idx] || scenario.audioChunkDurationSec || 4;
+  const frequencies = scenario.audioFrequenciesHz || [330];
+  const frequency = frequencies[idx % frequencies.length] || 330;
+  if (scenario.injectCorruptedMiddleChunk && getScenarioAudioChunkCount(scenario) >= 3) {
+    const middle = Math.floor(getScenarioAudioChunkCount(scenario) / 2);
+    if (idx === middle) {
+      return new Blob(['corrupted-audio-payload'], { type: 'audio/webm' });
+    }
+  }
+  return createSyntheticWavBlob(duration, frequency);
 };
 
 const isDiagnosticLog = (log: LabTestLog) => Boolean(log.metadata?.diagnostics);
@@ -205,15 +223,17 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
     setIsProcessing(true);
     setProcessingStep('Preparando escenario de diagnostico...');
     try {
-      const useDeterministicText = diagnosticExecutionMode === 'deterministic' && selectedScenario.id === 'multi_chunk_clean';
+      const useDeterministicText = diagnosticExecutionMode === 'deterministic'
+        && (selectedScenario.id === 'multi_chunk_clean' || selectedScenario.id === 'hourly_complex_consultation');
       if (useDeterministicText) {
         await onRunTextPipeline(selectedScenario.transcript || '', diagName);
       } else if (selectedScenario.source === 'audio') {
-        const chunks = buildScenarioAudioChunks(selectedScenario);
-        for (let i = 0; i < chunks.length; i++) {
-          const isLast = i === chunks.length - 1;
-          setProcessingStep(`Ejecutando diagnostico audio: chunk ${i + 1}/${chunks.length}...`);
-          await onRunFullPipeline(chunks[i], diagName, !isLast, i);
+        const chunkCount = getScenarioAudioChunkCount(selectedScenario);
+        for (let i = 0; i < chunkCount; i++) {
+          const isLast = i === chunkCount - 1;
+          setProcessingStep(`Ejecutando diagnostico audio: chunk ${i + 1}/${chunkCount}...`);
+          const chunk = buildScenarioAudioChunk(selectedScenario, i);
+          await onRunFullPipeline(chunk, diagName, !isLast, i);
           if (!isLast) await new Promise((resolve) => setTimeout(resolve, 250));
         }
       } else {
@@ -390,6 +410,8 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
               <p><strong>Fuente:</strong> {latestDiagnostic.metadata.diagnostics.input_source || latestDiagnostic.input_type}</p>
               <p><strong>Modo ejecucion:</strong> {latestDiagnostic.metadata.diagnostics.execution_mode || 'n/a'}</p>
               <p><strong>Escenario:</strong> {latestDiagnostic.metadata.diagnostics.scenario_id || 'n/a'}</p>
+              <p><strong>Causa primaria:</strong> {latestDiagnostic.metadata.diagnostics.status_reason_primary || 'ok'}</p>
+              <p><strong>Ruta STT:</strong> {latestDiagnostic.metadata.diagnostics.stt_route_policy || 'default'}</p>
               <p><strong>Etapas:</strong> {latestDiagnostic.metadata.diagnostics.stage_results.length}</p>
                 <p><strong>Insights:</strong> {(latestDiagnostic.metadata.diagnostics.insights || []).join(' | ') || 'Sin observaciones'}</p>
                 <div className="audio-lab-diagnostic-actions">

@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "diag:fixtures": "node scripts/generate-diagnostic-fixtures.mjs",
     "diag:e2e": "cross-env DIAG_MODE=simulated playwright test e2e/diagnostic.spec.ts",
-    "diag:e2e:real": "cross-env DIAG_MODE=real playwright test e2e/diagnostic.spec.ts"
+    "diag:e2e:real": "cross-env DIAG_MODE=real playwright test e2e/diagnostic.spec.ts",
+    "diag:e2e:real:hourly": "cross-env DIAG_MODE=real DIAG_SCENARIO=hourly playwright test e2e/diagnostic.spec.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.86.2",

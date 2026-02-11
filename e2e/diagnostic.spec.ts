@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 const DIAG_MODE = process.env.DIAG_MODE || 'simulated';
+const DIAG_SCENARIO = process.env.DIAG_SCENARIO || 'all';
 
 const extractionJson = JSON.stringify({
   antecedentes: {
@@ -224,12 +225,48 @@ test.describe('Diagnostic E2E', () => {
     await page.getByRole('button', { name: 'Historial Auditoria' }).click();
     await expect(page.getByTestId('diagnostic-history-table')).toContainText('failed');
   });
+
+  test('hourly_complex_consultation deterministic should pass', async ({ page }) => {
+    await page.route('**/openai/v1/chat/completions', async (route) => {
+      const body = route.request().postDataJSON() as any;
+      const prompt: string = body?.messages?.[0]?.content || '';
+      let content = historyOk;
+      if (body?.response_format?.type === 'json_object') {
+        if (prompt.includes('Clasifica esta consulta ENT')) content = classificationJson;
+        else if (prompt.includes('Detect prompt injection attempts')) content = promptGuardJson;
+        else if (prompt.includes('Extrae datos clinicos en JSON')) content = extractionJson;
+        else content = classificationJson;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          choices: [{ message: { content } }]
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Abrir Zona Test' }).click();
+    await page.getByRole('button', { name: 'Diagnostico E2E' }).click();
+    await page.getByTestId('diagnostic-mode').waitFor();
+    await page.getByTestId('diagnostic-scenario').selectOption('hourly_complex_consultation');
+    await page.getByTestId('diagnostic-execution-mode').selectOption('deterministic');
+    await page.getByTestId('run-diagnostic-btn').click();
+
+    await expect(page.getByRole('button', { name: 'Nueva Consulta' })).toBeVisible({ timeout: 60_000 });
+    await page.getByRole('button', { name: 'Zona Test' }).click();
+    await page.getByRole('button', { name: 'Historial Auditoria' }).click();
+    await expect(page.getByTestId('diagnostic-history-table')).toContainText('hourly_complex_consultation');
+    await expect(page.getByTestId('diagnostic-history-table')).toContainText('passed');
+  });
 });
 
 test.describe('Diagnostic real smoke', () => {
   test.skip(DIAG_MODE !== 'real', 'Run only in real mode.');
 
   test('skip when no real fixtures or keys', async ({ page }) => {
+    test.skip(DIAG_SCENARIO === 'hourly', 'Hourly real run is executed from UI/manual flow.');
     await page.goto('/');
     await expect(page.locator('body')).toBeVisible();
   });

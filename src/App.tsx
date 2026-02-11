@@ -216,8 +216,14 @@ const AppContent = () => {
         };
     };
 
+    const isWhisperStrictScenario = (scenarioId?: string, executionMode?: 'deterministic' | 'real') => {
+        if (executionMode !== 'real') return false;
+        return (scenarioId || '').toLowerCase().includes('hourly_complex_consultation');
+    };
+
     const normalizeDiagnosticError = (error: unknown): string => {
         const message = ((error as Error)?.message || '').toLowerCase();
+        if (message.includes('whisper_route_exhausted')) return 'whisper_route_exhausted';
         if (message.includes('unsafe_binary_split_blocked')) return 'unsafe_binary_split_blocked';
         if (message.includes('groq_transcription_http_400')) return 'http_400';
         if (message.includes('groq_transcription_http_429')) return 'http_429';
@@ -277,6 +283,7 @@ const AppContent = () => {
             phase?: 'raw_guard' | 'final_guard' | 'stt' | 'extract' | 'generate' | 'quality_gate';
             origin?: 'model_output' | 'sanitizer' | 'validator' | 'pipeline_policy';
             blocking?: boolean;
+            blockingRuleId?: string;
         } = {}
     ): DiagnosticErrorDetail => {
         const anyError = error as {
@@ -290,6 +297,15 @@ const AppContent = () => {
         const metadata = extractTrailingJsonObject(message);
         const maybeHttpStatus = Number((metadata?.status as number) || anyError?.status || 0) || undefined;
         const endpoint = inferEndpointFromErrorMessage(message);
+        const providerCode = typeof metadata?.reason === 'string'
+            ? metadata.reason
+            : (message.match(/(groq_[a-z_]+_(?:http_\d{3}|timeout|network))/)?.[1] || undefined);
+        const requestId = (metadata?.request_id as string | undefined) || undefined;
+        const model = (metadata?.model as string | undefined) || undefined;
+        const routeKey = (metadata?.route_key as string | undefined) || undefined;
+        const rawPayloadExcerpt = (metadata?.body_excerpt as string | undefined) || undefined;
+        const retryAfterMs = typeof metadata?.retry_after_ms === 'number' ? metadata.retry_after_ms : undefined;
+        const canonicalCode = code;
 
         return {
             code,
@@ -298,18 +314,31 @@ const AppContent = () => {
             batch_index: params.batchIndex,
             occurred_at: new Date().toISOString(),
             context: {
+                canonical_code: canonicalCode,
+                provider_code: providerCode,
+                provider_message: message,
+                request_id: requestId,
                 http_status: maybeHttpStatus,
+                retry_after_ms: retryAfterMs,
                 retryable: typeof anyError?.retryable === 'boolean' ? anyError.retryable : undefined,
                 attempt: typeof anyError?.attempt === 'number' ? anyError.attempt : undefined,
+                attempt_index: typeof metadata?.attempt_index === 'number' ? metadata.attempt_index : undefined,
+                fallback_index: typeof metadata?.fallback_index === 'number' ? metadata.fallback_index : undefined,
                 provider: params.provider,
+                model,
+                route_key: routeKey,
                 operation: params.operation,
                 endpoint,
                 input_type: params.inputType,
                 mime_type: params.mimeType || (metadata?.input_type as string | undefined),
                 chunk_bytes: params.chunkBytes,
+                chunk_id: typeof params.batchIndex === 'number' ? `batch_${params.batchIndex}` : undefined,
+                audio_duration_ms: typeof metadata?.audio_duration_ms === 'number' ? metadata.audio_duration_ms : undefined,
                 phase: params.phase,
                 origin: params.origin,
                 blocking: params.blocking,
+                blocking_rule_id: params.blockingRuleId || (typeof metadata?.blocking_rule_id === 'string' ? metadata.blocking_rule_id : undefined),
+                raw_payload_excerpt: rawPayloadExcerpt,
                 notes: [
                     typeof metadata?.retry_after_ms === 'number' ? `retry_after_ms=${metadata.retry_after_ms}` : '',
                     typeof metadata?.transcription_length === 'number' ? `transcription_length=${metadata.transcription_length}` : ''
@@ -360,6 +389,7 @@ const AppContent = () => {
             execution_mode: diagnostics.execution_mode,
             input_source: diagnostics.source,
             scenario_id: diagnostics.scenario_id,
+            stt_route_policy: diagnostics.stt_route_policy,
             status: diagnostics.status,
             stage_results: diagnostics.stage_results,
             audio_stats: diagnostics.audio_stats,
@@ -367,10 +397,14 @@ const AppContent = () => {
                 required_sections_ok: diagnostics.quality_gate.required_sections_ok,
                 result_status: diagnostics.quality_gate.result_status,
                 pipeline_status: diagnostics.quality_gate.pipeline_status,
-                critical_gaps_count: diagnostics.quality_gate.critical_gaps_count
+                critical_gaps_count: diagnostics.quality_gate.critical_gaps_count,
+                blocking_rule_id: diagnostics.quality_gate.blocking_rule_id,
+                blocking_reason: diagnostics.quality_gate.blocking_reason
             } : undefined,
             status_reason_primary: diagnostics.status_reason_primary,
             status_reason_chain: diagnostics.status_reason_chain,
+            primary_failure_evidence: diagnostics.primary_failure_evidence,
+            failure_graph: diagnostics.failure_graph,
             reconciliation: diagnostics.reconciliation,
             debug: diagnostics.debug,
             root_causes: diagnostics.root_causes,
@@ -717,6 +751,9 @@ const AppContent = () => {
         const partialStartedAt = Date.now();
         const sessionId = orchestratorRef.current?.getStatus().sessionId || '';
         const runId = sessionId ? diagnosticRunBySessionRef.current.get(sessionId) : undefined;
+        const currentPatientName = orchestratorRef.current?.getStatus().patientName || '';
+        const diagnosticContext = extractDiagnosticContext(currentPatientName);
+        const whisperStrict = isWhisperStrictScenario(diagnosticContext.scenarioId, diagnosticContext.executionMode);
         try {
             if (runId) {
                 recordDiagnosticEvent(runId, { type: 'stage_start', stage: `partial_${batchIndex}` });
@@ -744,7 +781,9 @@ const AppContent = () => {
                 const partBatchIndex = safeBlobs.length > 1 ? (batchIndex * 1000) + i : batchIndex;
                 const chunkStartedAt = Date.now();
                 try {
-                    const transcriptResult = await aiService.transcribeAudio(partBlob);
+                    const transcriptResult = await aiService.transcribeAudio(partBlob, undefined, undefined, {
+                        whisperStrict
+                    });
                     transcriptParts.push(transcriptResult.data);
                     if (runId) {
                         recordDiagnosticEvent(runId, {
@@ -927,6 +966,8 @@ const AppContent = () => {
         const finalizeStartedAt = Date.now();
         const sessionId = orchestratorRef.current?.getStatus().sessionId || '';
         const runId = sessionId ? diagnosticRunBySessionRef.current.get(sessionId) : undefined;
+        const diagnosticContext = extractDiagnosticContext(patientName);
+        const whisperStrict = isWhisperStrictScenario(diagnosticContext.scenarioId, diagnosticContext.executionMode);
         if (runId) {
             recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'finalize' });
         }
@@ -943,7 +984,9 @@ const AppContent = () => {
             const subBatchIndex = safeFinalBlobs.length > 1 ? (batchIndex * 1000) + i : batchIndex;
             const chunkStartedAt = Date.now();
             try {
-                const transcriptResult = await aiService.transcribeAudio(subBlob);
+                const transcriptResult = await aiService.transcribeAudio(subBlob, undefined, undefined, {
+                    whisperStrict
+                });
                 finalTranscriptParts.push(transcriptResult.data);
                 if (runId) {
                     recordDiagnosticEvent(runId, {
@@ -1310,7 +1353,8 @@ const AppContent = () => {
                         messageOverride: `quality_gate_failed(required_sections_ok=${String(qualityGate.required_sections_ok)}, pipeline_status=${qualityGate.pipeline_status || 'n/a'}, result_status=${qualityGate.result_status || 'n/a'})`,
                         phase: 'quality_gate',
                         origin: 'pipeline_policy',
-                        blocking: true
+                        blocking: true,
+                        blockingRuleId: qualityGate.blocking_rule_id
                     })
                     : undefined;
                 recordDiagnosticEvent(runId, {
@@ -1323,7 +1367,8 @@ const AppContent = () => {
                     error_detail: finalizeErrorDetail
                 });
                 const diagnostics = finalizeDiagnosticRun(runId, {
-                    quality_gate: qualityGate
+                    quality_gate: qualityGate,
+                    stt_route_policy: whisperStrict ? 'whisper_strict' : 'default'
                 });
                 if (diagnostics) {
                     diagnosticSummaryBySessionRef.current.set(sessionId, diagnostics);
@@ -1691,7 +1736,11 @@ const AppContent = () => {
                             result_status: 'failed_recoverable',
                             pipeline_status: 'failed',
                             critical_gaps_count: 1
-                        }
+                        },
+                        stt_route_policy: isWhisperStrictScenario(
+                            extractDiagnosticContext(patientName).scenarioId,
+                            extractDiagnosticContext(patientName).executionMode
+                        ) ? 'whisper_strict' : 'default'
                     });
                     if (diagnostics) {
                         diagnosticSummaryBySessionRef.current.set(sessionId, diagnostics);
@@ -1944,7 +1993,8 @@ const AppContent = () => {
                     messageOverride: `text_quality_gate_failed(required_sections_ok=${String(qualityGate.required_sections_ok)}, pipeline_status=${qualityGate.pipeline_status || 'n/a'}, result_status=${qualityGate.result_status || 'n/a'})`,
                     phase: 'quality_gate',
                     origin: 'pipeline_policy',
-                    blocking: true
+                    blocking: true,
+                    blockingRuleId: qualityGate.blocking_rule_id
                 })
                 : undefined;
             recordDiagnosticEvent(diagnosticRunId, {
@@ -1956,7 +2006,8 @@ const AppContent = () => {
                 error_detail: textGateErrorDetail
             });
             const diagnostics = finalizeDiagnosticRun(diagnosticRunId, {
-                quality_gate: qualityGate
+                quality_gate: qualityGate,
+                stt_route_policy: 'default'
             });
             await saveLabTestLog({
                 test_name: patientName,
@@ -2016,7 +2067,8 @@ const AppContent = () => {
                     result_status: 'failed_recoverable',
                     pipeline_status: 'failed',
                     critical_gaps_count: 1
-                }
+                },
+                stt_route_policy: 'default'
             });
             if (diagnostics) {
                 await saveLabTestLog({

@@ -23,6 +23,10 @@ const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
 const WHISPER_MODELS = ['whisper-large-v3-turbo', 'whisper-large-v3'];
 
+type TranscriptionOptions = {
+    whisperStrict?: boolean;
+};
+
 const CHARS_PER_TOKEN = 4;
 const PROMPT_OVERHEAD_TOKENS = 300;
 const MIN_CHUNK_TOKENS = 500;
@@ -1028,9 +1032,9 @@ ${schemaHint}`;
         return this.callCandidatesWithFallback(models, prompt, { ...options, task });
     }
 
-    async transcribeAudio(audioBlob: Blob): Promise<{ text: string; model: string }> {
+    async transcribeAudio(audioBlob: Blob, options: TranscriptionOptions = {}): Promise<{ text: string; model: string }> {
         try {
-            return await this._transcribeWithBlob(audioBlob);
+            return await this._transcribeWithBlob(audioBlob, options);
         } catch (firstError: any) {
             // If HTTP 400 on compressed/unknown audio, retry with WAV conversion.
             const status = this.getErrorStatus(firstError);
@@ -1054,7 +1058,7 @@ ${schemaHint}`;
                         const combinedParts: string[] = [];
                         let lastModel = '';
                         for (const chunk of wavChunks) {
-                            const result = await this._transcribeWithBlob(chunk);
+                            const result = await this._transcribeWithBlob(chunk, options);
                             combinedParts.push(result.text);
                             lastModel = result.model;
                         }
@@ -1068,11 +1072,13 @@ ${schemaHint}`;
         }
     }
 
-    private async _transcribeWithBlob(audioBlob: Blob): Promise<{ text: string; model: string }> {
+    private async _transcribeWithBlob(audioBlob: Blob, options: TranscriptionOptions = {}): Promise<{ text: string; model: string }> {
         const isWav = audioBlob.type?.includes('wav');
         const fileName = isWav ? 'audio.wav' : 'audio.webm';
         return this.executeWithFallback(async (apiKey) => {
-            const allModels = [...WHISPER_MODELS];
+            const allModels = options.whisperStrict
+                ? ['whisper-large-v3-turbo', 'whisper-large-v3']
+                : [...WHISPER_MODELS];
             let innerError = null;
 
             for (const modelName of allModels) {
@@ -1117,7 +1123,21 @@ ${schemaHint}`;
                         }
                     );
 
-                    if (!response.ok) throw new Error(`API error: ${response.status}`);
+                    if (!response.ok) {
+                        const body = await response.text().catch(() => '');
+                        const requestId = response.headers.get('x-request-id')
+                            || response.headers.get('request-id')
+                            || undefined;
+                        const serialized = JSON.stringify({
+                            status: response.status,
+                            request_id: requestId,
+                            provider: 'groq',
+                            model: modelName,
+                            route_key: routeKey,
+                            body_excerpt: body.slice(0, 300)
+                        });
+                        throw new Error(`API error: ${response.status} ${serialized}`);
+                    }
 
                     const text = await response.text();
                     this.registerInvocation({
@@ -1160,6 +1180,15 @@ ${schemaHint}`;
                     }
                     await this.delay(500);
                 }
+            }
+            if (options.whisperStrict) {
+                const strictError = new Error(`whisper_route_exhausted ${JSON.stringify({
+                    provider: 'groq',
+                    route_policy: 'whisper_strict',
+                    attempted_models: allModels
+                })}`);
+                (strictError as { cause?: unknown }).cause = innerError || undefined;
+                throw strictError;
             }
             throw innerError || new Error('All Whisper models failed');
         });
