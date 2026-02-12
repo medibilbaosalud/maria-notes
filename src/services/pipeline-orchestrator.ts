@@ -56,6 +56,7 @@ interface FinalizeRequest<TFinalizeResult> {
 
 const DEFAULT_FINALIZE_WAIT_MS = 180_000;
 const DEFAULT_DRAIN_RETRY_MS = 5_000;
+const MAX_CONCURRENT_PARTIALS = 4; // Allow parallel STT/Extraction
 
 export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
     private readonly handlers: OrchestratorHandlers<TFinalizeResult>;
@@ -73,6 +74,7 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
     private missingBatches = new Set<number>();
 
     private running = false;
+    private runningPartials = new Set<number>();
     private finalizeRequest: FinalizeRequest<TFinalizeResult> | null = null;
     private drainPromise: Promise<void> | null = null;
 
@@ -170,52 +172,74 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
             while (true) {
                 const context = this.getContextOrThrow();
 
-                const nextBlob = this.pending.get(this.nextExpectedBatch);
-                if (nextBlob) {
-                    this.pending.delete(this.nextExpectedBatch);
-                    const currentBatch = this.nextExpectedBatch;
-                    this.touch();
-                    try {
-                        await this.handlers.processPartial({
-                            sessionId: context.sessionId,
-                            patientName: context.patientName,
-                            batchIndex: currentBatch,
-                            blob: nextBlob
-                        });
-                        this.processed.add(currentBatch);
-                        this.missingBatches.delete(currentBatch);
-                        this.nextExpectedBatch++;
-                        this.state = 'processing_partials';
+                // 1. Process as many partials as we can concurrently
+                const pendingIndices = Array.from(this.pending.keys())
+                    .filter(idx => !this.runningPartials.has(idx))
+                    .sort((a, b) => a - b);
+
+                if (pendingIndices.length > 0 && this.runningPartials.size < MAX_CONCURRENT_PARTIALS) {
+                    const toFire = pendingIndices.slice(0, MAX_CONCURRENT_PARTIALS - this.runningPartials.size);
+
+                    for (const batchIndex of toFire) {
+                        const blob = this.pending.get(batchIndex);
+                        if (!blob) continue;
+
+                        this.pending.delete(batchIndex);
+                        this.runningPartials.add(batchIndex);
                         this.touch();
-                    } catch (error) {
-                        const budgetRetryMs = this.readBudgetRetryMs(error);
-                        if (budgetRetryMs > 0) {
-                            this.pending.set(currentBatch, nextBlob);
-                            this.state = 'awaiting_budget';
-                            this.touch((error as Error)?.message || 'awaiting_budget_partial');
-                            setTimeout(() => {
-                                void this.scheduleDrain();
-                            }, budgetRetryMs);
-                            break;
-                        }
-                        // Graceful degradation: skip this batch instead of killing the pipeline
-                        console.error(`[Orchestrator] Partial batch ${currentBatch} failed, skipping:`, error);
-                        this.processed.add(currentBatch);
-                        this.missingBatches.add(currentBatch);
-                        this.nextExpectedBatch++;
-                        this.state = 'processing_partials';
-                        this.touch((error as Error)?.message || 'partial_batch_skipped');
+
+                        // Fire and handle internally to not block the drain loop
+                        void (async () => {
+                            try {
+                                await this.handlers.processPartial({
+                                    sessionId: context.sessionId,
+                                    patientName: context.patientName,
+                                    batchIndex,
+                                    blob
+                                });
+                                this.processed.add(batchIndex);
+                                this.missingBatches.delete(batchIndex);
+                                // The original code used nextExpectedBatch for strict ordering.
+                                // We'll update it to be the first non-processed batch.
+                                this.updateNextExpected();
+                                this.state = 'processing_partials';
+                            } catch (error) {
+                                const budgetRetryMs = this.readBudgetRetryMs(error);
+                                if (budgetRetryMs > 0) {
+                                    this.pending.set(batchIndex, blob);
+                                    this.state = 'awaiting_budget';
+                                    setTimeout(() => void this.scheduleDrain(), budgetRetryMs);
+                                } else {
+                                    console.error(`[Orchestrator] Partial batch ${batchIndex} failed:`, error);
+                                    this.processed.add(batchIndex);
+                                    this.missingBatches.add(batchIndex);
+                                    this.updateNextExpected();
+                                }
+                            } finally {
+                                this.runningPartials.delete(batchIndex);
+                                this.touch();
+                                void this.scheduleDrain(); // Check for more work
+                            }
+                        })();
                     }
+                    // Continue loop to see if we can trigger more or move to finalize
+                    if (this.runningPartials.size >= MAX_CONCURRENT_PARTIALS) break;
                     continue;
+                }
+
+                // If still running partials, we might need to wait before finalizing
+                if (this.runningPartials.size > 0 && this.finalizeRequest) {
+                    break; // Finalize will be handled in a later drain call when partials finish
                 }
 
                 const finalizeReq = this.finalizeRequest;
                 if (!finalizeReq) break;
 
                 const expectedPartials = Math.max(0, finalizeReq.lastBatchIndex);
+                const isWaitingForPartials = this.runningPartials.size > 0;
                 const missing = this.computeMissingRange(0, expectedPartials - 1);
 
-                if (missing.length === 0) {
+                if (missing.length === 0 && !isWaitingForPartials) {
                     try {
                         const result = await this.handlers.finalize({
                             sessionId: context.sessionId,
@@ -318,6 +342,14 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
         const message = ((error as Error)?.message || '').toLowerCase();
         if (!message.includes('budget_limit') && !message.includes('awaiting_budget')) return 0;
         return DEFAULT_DRAIN_RETRY_MS;
+    }
+
+    private updateNextExpected(): void {
+        let next = 0;
+        while (this.processed.has(next)) {
+            next++;
+        }
+        this.nextExpectedBatch = next;
     }
 
     private resetInternal(resetContext = true): void {

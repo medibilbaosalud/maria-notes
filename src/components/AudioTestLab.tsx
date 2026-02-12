@@ -60,7 +60,7 @@ const DIAGNOSTIC_SCENARIOS = [
     id: 'hourly_complex_consultation',
     label: 'Consulta Compleja 60m (20x3m)',
     source: 'audio',
-    transcript: 'Consulta ENT compleja de larga duracion con poliposis nasal, obstruccion cronica, crisis de rinorrea, variacion estacional, antecedentes atopicos, hallazgos endoscopicos y plan escalonado con corticoide intranasal, antihistaminico y seguimiento.',
+    transcript: 'Consulta de Otorrinolaringología de alta complejidad para seguimiento de rinosinusitis crónica con poliposis nasal grado III bilateral (CRSwNP). El paciente ha sido intervenido previamente mediante CENS (Cirugía Endoscópica Nasosinusal) en dos ocasiones, la última hace 2 años, con recidiva precoz. Presenta anosmia mantenida, congestión nasal severa y rinorrea posterior que interfiere con el sueño. Se discute el fracaso del tratamiento médico máximo con corticoides nasales (mometasona) y lavados de alto volumen. Se solicita prueba de imagen (TC de senos) para valorar nueva revisión quirúrgica vs inicio de tratamiento biológico con Dupilumab según criterios SEAIC/SEORL. Exploración endoscópica muestra pólipos que ocupan el meato medio bilateralmente. Plan: Iniciar ciclos corticoideos cortos en pauta descendente, completar analítica con IgE específica y eosinófilos en sangre periférica, y programar nueva visita tras TC.',
     audioChunkDurationSec: 180,
     audioChunkCount: 20,
     audioFrequenciesHz: [196, 220, 247, 262, 294, 330]
@@ -229,13 +229,18 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
         await onRunTextPipeline(selectedScenario.transcript || '', diagName);
       } else if (selectedScenario.source === 'audio') {
         const chunkCount = getScenarioAudioChunkCount(selectedScenario);
+        const promises: Promise<void>[] = [];
         for (let i = 0; i < chunkCount; i++) {
           const isLast = i === chunkCount - 1;
-          setProcessingStep(`Ejecutando diagnostico audio: chunk ${i + 1}/${chunkCount}...`);
+          const chunkStatusMessage = `Encolando diagnostico audio: chunk ${i + 1}/${chunkCount}...`;
+          setProcessingStep(chunkStatusMessage);
           const chunk = buildScenarioAudioChunk(selectedScenario, i);
-          await onRunFullPipeline(chunk, diagName, !isLast, i);
-          if (!isLast) await new Promise((resolve) => setTimeout(resolve, 250));
+          // We fire the promises without awaiting here to parallelize ENQUEUEING
+          // The orchestrator's internal drain loop will (soon) parallelize the EXECUTION
+          promises.push(onRunFullPipeline(chunk, diagName, !isLast, i));
+          if (!isLast) await new Promise((resolve) => setTimeout(resolve, 50)); // Tiny delay to avoid UI freeze
         }
+        await Promise.all(promises);
       } else {
         await onRunTextPipeline(selectedScenario.transcript || '', diagName);
       }
@@ -406,13 +411,13 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
             {latestDiagnostic?.metadata?.diagnostics && (
               <div className="audio-lab-diagnostic-summary" data-testid="diagnostic-summary">
                 <h3>Ultimo diagnostico</h3>
-              <p><strong>Estado:</strong> {latestDiagnostic.metadata.diagnostics.status}</p>
-              <p><strong>Fuente:</strong> {latestDiagnostic.metadata.diagnostics.input_source || latestDiagnostic.input_type}</p>
-              <p><strong>Modo ejecucion:</strong> {latestDiagnostic.metadata.diagnostics.execution_mode || 'n/a'}</p>
-              <p><strong>Escenario:</strong> {latestDiagnostic.metadata.diagnostics.scenario_id || 'n/a'}</p>
-              <p><strong>Causa primaria:</strong> {latestDiagnostic.metadata.diagnostics.status_reason_primary || 'ok'}</p>
-              <p><strong>Ruta STT:</strong> {latestDiagnostic.metadata.diagnostics.stt_route_policy || 'default'}</p>
-              <p><strong>Etapas:</strong> {latestDiagnostic.metadata.diagnostics.stage_results.length}</p>
+                <p><strong>Estado:</strong> {latestDiagnostic.metadata.diagnostics.status}</p>
+                <p><strong>Fuente:</strong> {latestDiagnostic.metadata.diagnostics.input_source || latestDiagnostic.input_type}</p>
+                <p><strong>Modo ejecucion:</strong> {latestDiagnostic.metadata.diagnostics.execution_mode || 'n/a'}</p>
+                <p><strong>Escenario:</strong> {latestDiagnostic.metadata.diagnostics.scenario_id || 'n/a'}</p>
+                <p><strong>Causa primaria:</strong> {latestDiagnostic.metadata.diagnostics.status_reason_primary || 'ok'}</p>
+                <p><strong>Ruta STT:</strong> {latestDiagnostic.metadata.diagnostics.stt_route_policy || 'default'}</p>
+                <p><strong>Etapas:</strong> {latestDiagnostic.metadata.diagnostics.stage_results.length}</p>
                 <p><strong>Insights:</strong> {(latestDiagnostic.metadata.diagnostics.insights || []).join(' | ') || 'Sin observaciones'}</p>
                 <div className="audio-lab-diagnostic-actions">
                   <button className="audio-lab-export-btn" onClick={() => exportDiagnostics(latestDiagnostic)}>

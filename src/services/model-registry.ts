@@ -1,5 +1,6 @@
 export type TaskType =
     | 'extraction'
+    | 'single_shot_history'
     | 'generation'
     | 'validation_a'
     | 'validation_b'
@@ -95,6 +96,7 @@ const GROQ_PROMPT_GUARD: ModelCandidate[] = [
 
 const DEFAULT_TASK_MODEL_PREFERENCES: Record<TaskType, ModelCandidate[]> = {
     extraction: [...GEMINI_TEXT_CHAIN_LOW, ...GROQ_CORE_FALLBACK],
+    single_shot_history: [...GEMINI_TEXT_CHAIN_MEDIUM, ...GROQ_CORE_FALLBACK],
     generation: [...GEMINI_TEXT_CHAIN_MEDIUM, ...GROQ_CORE_FALLBACK],
     merge: [...GEMINI_TEXT_CHAIN_LOW, ...GROQ_CORE_FALLBACK],
     classification: [...GEMINI_TEXT_CHAIN_LOW, ...GROQ_CORE_FALLBACK],

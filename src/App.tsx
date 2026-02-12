@@ -65,7 +65,6 @@ const FAST_PATH_ADAPTIVE_VALIDATION = String(import.meta.env.VITE_FAST_PATH_ADAP
 const FAST_PATH_TOKEN_BUDGETS = String(import.meta.env.VITE_FAST_PATH_TOKEN_BUDGETS || 'true').toLowerCase() === 'true';
 const FAST_PATH_RETRY_TUNING = String(import.meta.env.VITE_FAST_PATH_RETRY_TUNING || 'true').toLowerCase() === 'true';
 const FAST_PATH_ASYNC_TRIAGE = String(import.meta.env.VITE_FAST_PATH_ASYNC_TRIAGE || 'true').toLowerCase() === 'true';
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Helper to get key array
 const getApiKeys = (userKey?: string) => {
@@ -425,18 +424,6 @@ const AppContent = () => {
         };
     };
 
-    const prefixExtractionMeta = (meta: ExtractionMeta[], batchIndex: number) => {
-        const prefix = `batch_${batchIndex + 1}`;
-        return meta.map((chunk) => ({
-            ...chunk,
-            chunk_id: `${prefix}_${chunk.chunk_id}`,
-            field_evidence: (chunk.field_evidence || []).map((entry) => ({
-                ...entry,
-                chunk_id: `${prefix}_${entry.chunk_id}`
-            }))
-        }));
-    };
-
     const buildFallbackExtraction = (reason: string): ExtractionResult => ({
         antecedentes: { alergias: null, enfermedades_cronicas: null, cirugias: null, tratamiento_habitual: null },
         enfermedad_actual: { motivo_consulta: '', sintomas: [], evolucion: null },
@@ -551,17 +538,6 @@ const AppContent = () => {
                 ...classificationPartsRef.current.keys()
             ])
         ).sort((a, b) => a - b);
-    };
-
-    const buildTranscriptFromStoredSegments = async (sessionId: string): Promise<string> => {
-        if (!sessionId) return '';
-        const recovered = await resumeSession(sessionId);
-        if (!recovered?.transcript_segments || recovered.transcript_segments.length === 0) return '';
-        return recovered.transcript_segments
-            .sort((a, b) => a.batch_index - b.batch_index)
-            .map((segment) => segment.text || '')
-            .join(' ')
-            .trim();
     };
 
     // ════════════════════════════════════════════════════════════════
@@ -1126,105 +1102,14 @@ const AppContent = () => {
                 });
             }
         }
-        let fullExtraction;
         if (runId) {
-            recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'extract_full' });
+            recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'single_shot_history' });
         }
-        try {
-            fullExtraction = await aiService.extractOnly(extractionInput);
-            if (runId) {
-                recordDiagnosticEvent(runId, { type: 'stage_end', stage: 'extract_full', status: 'passed' });
-            }
-        } catch (firstError) {
-            console.warn('[App] Final extraction failed, retrying from stored transcript segments...', firstError);
-            const recoveredTranscript = await buildTranscriptFromStoredSegments(sessionId);
-            if (recoveredTranscript && recoveredTranscript.length > extractionInput.length) {
-                extractionInput = sanitizeTranscriptForExtraction(recoveredTranscript);
-                setTranscription(extractionInput);
-            }
-            await sleep(700);
-            try {
-                fullExtraction = await aiService.extractOnly(extractionInput);
-                if (runId) {
-                    const degradedDetail = buildDiagnosticErrorDetail(firstError, {
-                        stage: 'extract_full',
-                        provider: 'gemini',
-                        operation: 'extractOnly_retry_success',
-                        inputType: 'text',
-                        phase: 'extract',
-                        origin: 'model_output',
-                        blocking: false
-                    });
-                    recordDiagnosticEvent(runId, {
-                        type: 'stage_end',
-                        stage: 'extract_full',
-                        status: 'degraded',
-                        error_code: degradedDetail.code,
-                        error_message: degradedDetail.message,
-                        error_detail: degradedDetail
-                    });
-                }
-            } catch (secondError: any) {
-                if (runId) {
-                    const extractErrorDetail = buildDiagnosticErrorDetail(secondError, {
-                        stage: 'extract_full',
-                        provider: 'gemini',
-                        operation: 'extractOnly',
-                        inputType: 'text',
-                        messageOverride: secondError?.message || 'final_extraction_failed',
-                        phase: 'extract',
-                        origin: 'model_output',
-                        blocking: true
-                    });
-                    recordDiagnosticEvent(runId, {
-                        type: 'stage_end',
-                        stage: 'extract_full',
-                        status: 'failed',
-                        error_code: extractErrorDetail.code,
-                        error_message: extractErrorDetail.message,
-                        error_detail: extractErrorDetail
-                    });
-                }
-                try {
-                    if (sessionId) {
-                        await upsertConsultationSession({
-                            session_id: sessionId,
-                            patient_name: patientName,
-                            status: 'awaiting_budget',
-                            result_status: 'failed_recoverable',
-                            last_batch_index: batchIndex,
-                            error_reason: secondError?.message || 'final_extraction_failed',
-                            idempotency_key: sessionId
-                        });
-                    }
-                } catch (auditErr) {
-                    console.error('[App] Failed to persist extraction failure audit:', auditErr);
-                }
-                throw secondError;
-            }
-        }
-
-        const orderedExtractions = [fullExtraction.data];
-        const orderedMeta = prefixExtractionMeta(fullExtraction.meta, 0); // usage index 0 as it's full
-        const bestClassification = fullExtraction.classification;
-
-        setProcessingStatus(`Generando historia clinica final (${orderedExtractions.length} bloque)...`);
-
-        if (runId) {
-            recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'generate_history' });
-        }
-        const result = await aiService.generateFromMergedExtractions(
-            orderedExtractions,
-            extractionInput,
-            patientName,
-            orderedMeta,
-            bestClassification,
-            sessionId
-        );
+        const result = await aiService.generateMedicalHistory(extractionInput, patientName);
         if (runId) {
             recordDiagnosticEvent(runId, {
                 type: 'stage_end',
-                stage: 'generate_history',
+                stage: 'single_shot_history',
                 status: result.pipeline_status === 'completed' ? 'passed' : 'degraded'
             });
         }
@@ -1248,7 +1133,7 @@ const AppContent = () => {
             versionsCount: (result.corrections_applied || 0) + 1,
             remainingErrors: remainingErrors.length > 0 ? remainingErrors : undefined,
             validationHistory: result.validations?.flatMap(v => v.errors),
-            extractionMeta: orderedMeta,
+            extractionMeta: result.extraction_meta,
             classification: result.classification,
             uncertaintyFlags: result.uncertainty_flags,
             auditId: result.audit_id,
@@ -1891,22 +1776,11 @@ const AppContent = () => {
 
         try {
             aiService.resetInvocationCounters(textSessionId);
-            recordDiagnosticEvent(diagnosticRunId, { type: 'stage_start', stage: 'extract_text' });
-            const extraction = await aiService.extractOnly(text);
-            recordDiagnosticEvent(diagnosticRunId, { type: 'stage_end', stage: 'extract_text', status: 'passed' });
-            const normalizedMeta = prefixExtractionMeta(extraction.meta, 0);
-            recordDiagnosticEvent(diagnosticRunId, { type: 'stage_start', stage: 'generate_text_history' });
-            const result = await aiService.generateFromMergedExtractions(
-                [extraction.data],
-                text,
-                patientName,
-                normalizedMeta,
-                extraction.classification,
-                textSessionId
-            );
+            recordDiagnosticEvent(diagnosticRunId, { type: 'stage_start', stage: 'single_shot_text_history' });
+            const result = await aiService.generateMedicalHistory(text, patientName);
             recordDiagnosticEvent(diagnosticRunId, {
                 type: 'stage_end',
-                stage: 'generate_text_history',
+                stage: 'single_shot_text_history',
                 status: result.pipeline_status === 'completed' ? 'passed' : 'degraded'
             });
 

@@ -22,6 +22,8 @@ export async function normalizeAndChunkAudio(blob: Blob): Promise<Blob[]> {
         if (Math.abs(channelData[i]) > maxAmplitude) {
             maxAmplitude = Math.abs(channelData[i]);
         }
+        // Yield to main thread every 2M samples (~40s of audio) to prevent UI hang
+        if (i % 2000000 === 0) await new Promise(r => setTimeout(r, 0));
     }
 
     const targetAmplitude = 0.89; // -1dB
@@ -32,8 +34,6 @@ export async function normalizeAndChunkAudio(blob: Blob): Promise<Blob[]> {
 
     // 2. Process, Downmix to Mono, and Chunk
     // REDUCED to 3 minutes (180s) to be safe even if browser runs at 48kHz
-    // 3 mins @ 48kHz 16-bit Mono = ~17.2 MB (Safe < 25MB)
-    // 3 mins @ 16kHz 16-bit Mono = ~5.7 MB
     const CHUNK_DURATION_SEC = 180;
     const chunks: Blob[] = [];
     const MAX_CHUNK_BYTES = 20 * 1024 * 1024; // Hard guard below API limits
@@ -98,13 +98,15 @@ export async function normalizeAndChunkAudio(blob: Blob): Promise<Blob[]> {
 
 // Simple WAV encoder helper (16-bit Mono)
 function bufferToWav(abuffer: AudioBuffer) {
-    const numOfChan = 1; // Force Mono
-    const length = abuffer.length * numOfChan * 2 + 44;
-    const buffer = new ArrayBuffer(length);
-    const view = new DataView(buffer);
-    let channels = [], i, sample;
-    let offset = 0;
-    let pos = 0;
+    const numOfChan = abuffer.numberOfChannels,
+        length = abuffer.length * numOfChan * 2 + 44,
+        buffer = new ArrayBuffer(length),
+        view = new DataView(buffer),
+        channels = [],
+        sampleRate = abuffer.sampleRate;
+
+    let offset = 0,
+        pos = 0;
 
     // write WAVE header
     setUint32(0x46464952); // "RIFF"
@@ -115,35 +117,36 @@ function bufferToWav(abuffer: AudioBuffer) {
     setUint32(16); // length = 16
     setUint16(1); // PCM (uncompressed)
     setUint16(numOfChan);
-    setUint32(abuffer.sampleRate);
-    setUint32(abuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
+    setUint32(sampleRate);
+    setUint32(sampleRate * 2 * numOfChan); // avg. bytes/sec
     setUint16(numOfChan * 2); // block-align
-    setUint16(16); // 16-bit
+    setUint16(16); // 16-bit (hardcoded)
 
     setUint32(0x61746164); // "data" - chunk
     setUint32(length - pos - 4); // chunk length
 
     // write interleaved data
-    channels.push(abuffer.getChannelData(0));
+    for (let i = 0; i < numOfChan; i++)
+        channels.push(abuffer.getChannelData(i));
 
-    while (pos < abuffer.length) {
-        for (i = 0; i < numOfChan; i++) {
-            sample = Math.max(-1, Math.min(1, channels[i][pos])); // clamp
-            sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0; // scale to 16-bit signed int
-            view.setInt16(44 + offset, sample, true); // write 16-bit sample
-            offset += 2;
+    while (pos < length) {
+        for (let i = 0; i < numOfChan; i++) { // interleave channels
+            let sample = Math.max(-1, Math.min(1, channels[i][offset])); // clamp
+            sample = (sample < 0 ? sample * 0x8000 : sample * 0x7FFF) | 0; // scale to 16-bit signed int
+            view.setInt16(pos, sample, true); // write 16-bit sample
+            pos += 2;
         }
-        pos++;
+        offset++; // next source sample
     }
 
-    return new Blob([buffer], { type: 'audio/wav' });
+    return new Blob([buffer], { type: "audio/wav" });
 
-    function setUint16(data: any) {
+    function setUint16(data: number) {
         view.setUint16(pos, data, true);
         pos += 2;
     }
 
-    function setUint32(data: any) {
+    function setUint32(data: number) {
         view.setUint32(pos, data, true);
         pos += 4;
     }

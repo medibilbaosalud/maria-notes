@@ -104,6 +104,7 @@ const FAST_PATH_ADAPTIVE_VALIDATION = String(import.meta.env.VITE_FAST_PATH_ADAP
 
 const TASK_MAX_OUTPUT_TOKENS: Partial<Record<TaskType, number>> = {
     extraction: 900,
+    single_shot_history: 2400,
     classification: 350,
     semantic_check: 450,
     prompt_guard: 250,
@@ -223,6 +224,14 @@ export interface PipelineResult {
     rule_ids_used?: string[];
     learning_applied?: boolean;
     uncertainty_flags?: UncertaintyFlag[];
+}
+
+export interface SingleShotHistoryResult {
+    history_markdown: string;
+    extraction: ExtractionResult;
+    classification: ConsultationClassification;
+    uncertainty_flags?: UncertaintyFlag[];
+    model: string;
 }
 
 export interface QualityTriageResult {
@@ -642,6 +651,62 @@ ${schemaHint}`;
         };
     }
 
+    private normalizeSingleShotExtraction(value: unknown): ExtractionResult {
+        const raw = (value && typeof value === 'object') ? value as Record<string, unknown> : {};
+        const antecedentesRaw = (raw.antecedentes && typeof raw.antecedentes === 'object')
+            ? raw.antecedentes as Record<string, unknown>
+            : {};
+        const enfermedadActualRaw = (raw.enfermedad_actual && typeof raw.enfermedad_actual === 'object')
+            ? raw.enfermedad_actual as Record<string, unknown>
+            : {};
+        const exploracionesRaw = (raw.exploraciones_realizadas && typeof raw.exploraciones_realizadas === 'object')
+            ? raw.exploraciones_realizadas as Record<string, unknown>
+            : {};
+        const normalizeStringList = (input: unknown): string[] | null => {
+            if (!Array.isArray(input)) return null;
+            const values = input.map((item) => String(item || '').trim()).filter(Boolean);
+            return values.length > 0 ? values : null;
+        };
+        const notasRaw = Array.isArray(raw.notas_calidad) ? raw.notas_calidad as Record<string, unknown>[] : [];
+        const notas = notasRaw
+            .map((item) => ({
+                tipo: (item.tipo === 'INAUDIBLE' ? 'INAUDIBLE' : 'AMBIGUO') as 'INAUDIBLE' | 'AMBIGUO',
+                seccion: String(item.seccion || '').trim(),
+                descripcion: String(item.descripcion || '').trim()
+            }))
+            .filter((item) => item.seccion || item.descripcion);
+
+        return {
+            antecedentes: {
+                alergias: normalizeStringList(antecedentesRaw.alergias),
+                enfermedades_cronicas: normalizeStringList(antecedentesRaw.enfermedades_cronicas),
+                cirugias: normalizeStringList(antecedentesRaw.cirugias),
+                tratamiento_habitual: normalizeStringList(antecedentesRaw.tratamiento_habitual)
+            },
+            enfermedad_actual: {
+                motivo_consulta: String(enfermedadActualRaw.motivo_consulta || '').trim(),
+                sintomas: normalizeStringList(enfermedadActualRaw.sintomas) || [],
+                evolucion: (() => {
+                    const valueText = String(enfermedadActualRaw.evolucion || '').trim();
+                    return valueText || null;
+                })()
+            },
+            exploraciones_realizadas: Object.keys(exploracionesRaw).reduce<Record<string, string | null>>((acc, key) => {
+                const normalizedKey = String(key || '').trim();
+                if (!normalizedKey) return acc;
+                const valueText = String(exploracionesRaw[key] || '').trim();
+                acc[normalizedKey] = valueText || null;
+                return acc;
+            }, {}),
+            diagnostico: normalizeStringList(raw.diagnostico),
+            plan: (() => {
+                const valueText = String(raw.plan || '').trim();
+                return valueText || null;
+            })(),
+            notas_calidad: notas.length > 0 ? notas : undefined
+        };
+    }
+
     // Generic Rotation Wrapper
     private async executeWithFallback<T>(operation: (key: string) => Promise<T>): Promise<T> {
         let lastError: any = null;
@@ -670,6 +735,8 @@ ${schemaHint}`;
         switch (task) {
             case 'extraction':
                 return 800;
+            case 'single_shot_history':
+                return 2400;
             case 'classification':
                 return 300;
             case 'semantic_check':
@@ -2130,6 +2197,127 @@ ${schemaHint}`;
         } catch {
             return fallback();
         }
+    }
+
+    async generateSingleShotHistory(
+        transcription: string,
+        patientName: string = '',
+        options?: { classification?: ConsultationClassification }
+    ): Promise<SingleShotHistoryResult> {
+        const schemaHint = `{
+  "history_markdown": "## MOTIVO DE CONSULTA\\n...",
+  "extraction": {
+    "antecedentes": {
+      "alergias": [],
+      "enfermedades_cronicas": [],
+      "cirugias": [],
+      "tratamiento_habitual": []
+    },
+    "enfermedad_actual": {
+      "motivo_consulta": "",
+      "sintomas": [],
+      "evolucion": null
+    },
+    "exploraciones_realizadas": {},
+    "diagnostico": [],
+    "plan": "",
+    "notas_calidad": []
+  },
+  "classification": {
+    "visit_type": "string",
+    "ent_area": "string",
+    "urgency": "string",
+    "confidence": 0.0
+  },
+  "uncertainty_flags": [
+    { "field_path": "string", "reason": "string", "severity": "low|medium|high", "value": "string" }
+  ]
+}`;
+        const prompt = `Eres un asistente clinico ENT. Responde SOLO JSON valido.
+Objetivo: generar historia clinica final y extraccion estructurada en una sola respuesta.
+Reglas:
+- Usa SOLO la transcripcion, no inventes datos.
+- Si falta un dato, usa "No consta" en la historia y null/[]/"" en extraccion segun corresponda.
+- Respeta negaciones y temporalidad.
+- Mantiene exactamente este formato Markdown en history_markdown:
+## MOTIVO DE CONSULTA
+...
+
+## ANTECEDENTES
+- Alergias: ...
+- Enfermedades crónicas: ...
+- Cirugías: ...
+- Tratamiento habitual: ...
+
+## ENFERMEDAD ACTUAL
+- Síntomas: ...
+- Evolución: ...
+
+## EXPLORACION / PRUEBAS
+...
+
+## DIAGNOSTICO
+...
+
+## PLAN
+...
+- No incluyas bloques internos del sistema (rulepack, clasificacion técnica, notas del sistema).
+- classification debe contener visit_type, ent_area y urgency.
+- uncertainty_flags debe contener solo dudas clinicas reales detectadas.
+
+Paciente: ${patientName || 'Paciente'}
+Clasificacion sugerida (opcional): ${JSON.stringify(options?.classification || null)}
+
+TRANSCRIPCION:
+${this.trimToTokens(transcription, 9000)}
+
+Salida JSON exacta con esquema:
+${schemaHint}`;
+
+        const result = await this.callTaskModel('single_shot_history', prompt, {
+            temperature: 0.1,
+            jsonMode: true,
+            maxTokens: 2600
+        });
+        const parsed = await this.parseJsonWithRepair<Record<string, unknown>>(result.text, schemaHint);
+        const historyMarkdown = String(parsed.history_markdown || '').trim();
+        if (!historyMarkdown) {
+            throw new Error('single_shot_empty_history');
+        }
+
+        const extraction = this.normalizeSingleShotExtraction(parsed.extraction);
+        const classificationRaw = (parsed.classification && typeof parsed.classification === 'object')
+            ? parsed.classification as Record<string, unknown>
+            : {};
+        const classification: ConsultationClassification = {
+            visit_type: String(classificationRaw.visit_type || options?.classification?.visit_type || 'unknown'),
+            ent_area: String(classificationRaw.ent_area || options?.classification?.ent_area || 'unknown'),
+            urgency: String(classificationRaw.urgency || options?.classification?.urgency || 'unknown'),
+            confidence: (() => {
+                const rawConfidence = Number(classificationRaw.confidence);
+                if (!Number.isFinite(rawConfidence)) return options?.classification?.confidence;
+                return Math.max(0, Math.min(1, rawConfidence));
+            })()
+        };
+        const uncertaintyFlagsRaw = Array.isArray(parsed.uncertainty_flags)
+            ? parsed.uncertainty_flags as Record<string, unknown>[]
+            : [];
+        const uncertaintyFlags = uncertaintyFlagsRaw
+            .map((entry) => ({
+                field_path: String(entry.field_path || '').trim(),
+                reason: String(entry.reason || '').trim(),
+                severity: entry.severity === 'high' ? 'high' : (entry.severity === 'medium' ? 'medium' : 'low') as 'low' | 'medium' | 'high',
+                value: typeof entry.value === 'string' ? entry.value : undefined
+            }))
+            .filter((entry) => entry.field_path && entry.reason);
+
+        return {
+            history_markdown: historyMarkdown,
+            extraction,
+            classification,
+            uncertainty_flags: uncertaintyFlags.length > 0 ? uncertaintyFlags : undefined,
+            model: result.model
+        };
     }
 
     async generateMedicalHistoryValidated(transcription: string, patientName: string = ''): Promise<PipelineResult> {

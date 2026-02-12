@@ -54,7 +54,7 @@ export interface AIResultWithMetadata extends AIResult<string> {
     };
     logical_calls_used?: number;
     physical_calls_used?: number;
-    call_budget_mode?: 'two_call_adaptive' | 'standard';
+    call_budget_mode?: 'two_call_adaptive' | 'standard' | 'single_shot';
     provisional_reason?: string;
     fallback_hops?: number;
     sanitization_applied?: boolean;
@@ -91,11 +91,13 @@ export interface AIResultWithMetadata extends AIResult<string> {
             blocking: boolean;
         }>;
     };
+    followup_status?: 'pending' | 'completed' | 'degraded' | 'failed';
 }
 
 const FAST_PATH_ADAPTIVE_VALIDATION = String(import.meta.env.VITE_FAST_PATH_ADAPTIVE_VALIDATION || 'true').toLowerCase() === 'true';
 const FAST_PATH_ASYNC_TRIAGE = String(import.meta.env.VITE_FAST_PATH_ASYNC_TRIAGE || 'true').toLowerCase() === 'true';
 const TWO_CALL_ADAPTIVE_MODE = String(import.meta.env.VITE_TWO_CALL_ADAPTIVE_MODE || 'true').toLowerCase() === 'true';
+const SINGLE_SHOT_HISTORY_MODE = String(import.meta.env.VITE_SINGLE_SHOT_HISTORY_MODE || 'true').toLowerCase() === 'true';
 
 export class AIService {
     private groq: GroqService;
@@ -857,18 +859,318 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
         }
     }
 
+    private startAsyncGroqFollowup(params: {
+        sessionId: string;
+        patientName: string;
+        transcription: string;
+        generatedHistory: string;
+        extraction?: ExtractionResult;
+        extractionMeta?: ExtractionMeta[];
+    }): void {
+        const startedAt = Date.now();
+        void this.groq.validateOutput(
+            params.generatedHistory,
+            params.extraction || {
+                antecedentes: { alergias: null, enfermedades_cronicas: null, cirugias: null, tratamiento_habitual: null },
+                enfermedad_actual: { motivo_consulta: '', sintomas: [], evolucion: null },
+                exploraciones_realizadas: {},
+                diagnostico: [],
+                plan: ''
+            },
+            params.transcription,
+            params.extractionMeta || []
+        ).then(({ consensus, validations }) => {
+            const criticalCount = (consensus || []).filter((error) => this.severityWeight((error as ValidationError).severity) >= 2).length;
+            const status = criticalCount > 0 ? 'degraded' : 'completed';
+            void enqueueAuditEvent('pipeline_attempt', {
+                session_id: params.sessionId,
+                stage: 'followup_groq',
+                attempt_index: 0,
+                status,
+                started_at: new Date(startedAt).toISOString(),
+                finished_at: new Date().toISOString(),
+                duration_ms: Date.now() - startedAt,
+                metadata: {
+                    critical_gaps: criticalCount,
+                    validations: validations.map((item) => item.validator)
+                }
+            });
+            void enqueueAuditEvent('pipeline_run_update', {
+                session_id: params.sessionId,
+                patient_name: params.patientName,
+                status,
+                metadata: {
+                    followup_status: status,
+                    followup_critical_gaps: criticalCount
+                }
+            });
+        }).catch((error) => {
+            void enqueueAuditEvent('pipeline_attempt', {
+                session_id: params.sessionId,
+                stage: 'followup_groq',
+                attempt_index: 0,
+                status: 'failed',
+                started_at: new Date(startedAt).toISOString(),
+                finished_at: new Date().toISOString(),
+                duration_ms: Date.now() - startedAt,
+                error_message: (error as Error)?.message || 'followup_groq_failed'
+            });
+            void enqueueAuditEvent('pipeline_run_update', {
+                session_id: params.sessionId,
+                patient_name: params.patientName,
+                status: 'degraded',
+                metadata: {
+                    followup_status: 'failed',
+                    followup_error: (error as Error)?.message || 'followup_groq_failed'
+                }
+            });
+        });
+    }
+
+    private async generateMedicalHistorySingleShot(transcription: string, patientName: string = ""): Promise<AIResultWithMetadata> {
+        const startedAt = Date.now();
+        const auditId = this.buildAuditId();
+        this.groq.resetInvocationCounters();
+        const generationStartedAt = Date.now();
+        const singleShot = await this.groq.generateSingleShotHistory(transcription, patientName);
+        const generationDurationMs = Date.now() - generationStartedAt;
+
+        const generatedHistory = singleShot.history_markdown;
+        const historyOutput = this.sanitizeClinicalHistory(generatedHistory);
+        const rawGuard = this.runDeterministicClinicalGuard(generatedHistory, singleShot.extraction);
+        const finalGuard = this.runDeterministicClinicalGuard(historyOutput, singleShot.extraction);
+        const rawIssues = rawGuard.consensus || [];
+        const finalIssues = finalGuard.consensus || [];
+        const preSanitizeIssues = rawIssues.map((issue) => this.toReconciliationIssue(issue as ValidationError, 'raw_guard'));
+        const postSanitizeIssues = finalIssues.map((issue) => this.toReconciliationIssue(issue as ValidationError, 'final_guard'));
+        const finalIssueMap = new Set(finalIssues.map((issue) => this.issueFingerprint(issue)));
+        const neutralizedIssues = rawIssues
+            .filter((issue) => !finalIssueMap.has(this.issueFingerprint(issue)))
+            .map((issue) => this.toReconciliationIssue(issue as ValidationError, 'raw_guard'));
+        const neutralizedIssueStrings = neutralizedIssues.map((issue) => `${issue.type}:${issue.field}:${issue.reason}`);
+        const postSanitizeIssueStrings = postSanitizeIssues.map((issue) => `${issue.type}:${issue.field}:${issue.reason}`);
+
+        const hasHighRiskError = finalIssues.some((error) =>
+            (error.type === 'hallucination' || error.type === 'inconsistency') &&
+            this.severityWeight((error as ValidationError).severity) >= 2
+        );
+        const provisionalReason = hasHighRiskError ? 'high_risk_detected_requires_manual_review' : undefined;
+        const pipelineStatus: 'completed' | 'degraded' = finalIssues.length > 0 ? 'degraded' : 'completed';
+        const resultStatus: 'completed' | 'provisional' = provisionalReason ? 'provisional' : 'completed';
+        const allValidations: ValidationResult[] = [
+            ...rawGuard.validations.map((validation) => ({ ...validation, validator: 'raw_guard' })),
+            ...finalGuard.validations.map((validation) => ({ ...validation, validator: 'final_guard' }))
+        ];
+        const deterministicTriage: QualityTriageResult = {
+            quality_score: Math.max(25, 100 - (finalIssues.length * 10)),
+            critical_gaps: finalIssues
+                .filter((error) => this.severityWeight((error as ValidationError).severity) >= 2)
+                .slice(0, 5)
+                .map((error) => ({
+                    field: error.field || 'unknown',
+                    reason: error.reason || 'Sin detalle',
+                    severity: (((error as ValidationError).severity || ((error.type === 'hallucination' || error.type === 'inconsistency') ? 'critical' : 'major')) as 'critical' | 'major' | 'minor')
+                })),
+            doctor_next_actions: [
+                'Revisar primero los gaps criticos detectados',
+                'Confirmar campos con incertidumbre antes de finalizar',
+                'Finalizar solo cuando no queden dudas clinicas'
+            ],
+            model: 'quality_triage_deterministic'
+        };
+
+        const triagePromise = FAST_PATH_ASYNC_TRIAGE
+            ? Promise.resolve(deterministicTriage)
+            : this.groq.generateQualityTriage({
+                generatedHistory: historyOutput,
+                remainingErrors: finalIssues as ValidationError[],
+                classification: singleShot.classification
+            }).catch(() => deterministicTriage);
+        let triageResult = deterministicTriage;
+        if (!FAST_PATH_ASYNC_TRIAGE) {
+            triageResult = await triagePromise;
+        }
+
+        const modelInvocations = this.groq.drainModelInvocations();
+        const semanticChecks = this.groq.drainSemanticChecks();
+        const invocationSummary = this.summarizeInvocations(modelInvocations);
+        const durationMs = Date.now() - startedAt;
+        const uncertaintyFlags: UncertaintyFlag[] = [
+            ...finalIssues.map(err => ({
+                field_path: err.field,
+                reason: err.reason,
+                severity: (err.type === 'hallucination' ? 'high' : err.type === 'missing' ? 'medium' : 'low') as 'high' | 'medium' | 'low',
+                value: err.field_value
+            })),
+            ...(singleShot.uncertainty_flags || []),
+            ...neutralizedIssueStrings.map(issue => ({
+                field_path: 'sanitization',
+                reason: `[SANITIZED_LEAK] ${issue}`,
+                severity: 'low' as 'high' | 'medium' | 'low',
+                value: undefined
+            }))
+        ];
+
+        void enqueueAuditEvent('pipeline_audit_bundle', {
+            audit_id: auditId,
+            audit_data: {
+                patient_name: patientName,
+                pipeline_version: 'single-shot-v1',
+                models_used: {
+                    extraction: singleShot.model,
+                    generation: singleShot.model,
+                    validation_a: 'raw_guard',
+                    validation_b: 'final_guard',
+                    invocation_summary: invocationSummary
+                },
+                extraction_data: {
+                    extraction: singleShot.extraction,
+                    extraction_meta: [],
+                    classification: singleShot.classification || null
+                },
+                metadata: {
+                    learning_applied: false,
+                    rule_ids_used: [],
+                    call_budget_mode: 'single_shot',
+                    logical_calls_used: 1,
+                    physical_calls_used: modelInvocations.length,
+                    provisional_reason: provisionalReason || null,
+                    phase_timings_ms: {
+                        extract: 0,
+                        generate: generationDurationMs,
+                        validate: 0,
+                        corrections: 0,
+                        total: durationMs
+                    },
+                    rounds_executed: 1,
+                    early_stop_reason: finalIssues.length === 0 ? 'clean_consensus' : 'low_risk_remaining',
+                    risk_level: this.computeRiskLevel(finalIssues)
+                },
+                generation_versions: [
+                    {
+                        phase: 'single_shot_generation',
+                        content: generatedHistory,
+                        model: singleShot.model,
+                        timestamp: Date.now()
+                    }
+                ],
+                validation_logs: allValidations,
+                corrections_applied: 0,
+                successful: true,
+                duration_ms: durationMs,
+                created_at: new Date().toISOString()
+            },
+            extraction_meta: [],
+            semantic_checks: semanticChecks,
+            model_invocations: modelInvocations,
+            quality_event: {
+                record_id: auditId,
+                event_type: 'pipeline_completed',
+                payload: {
+                    corrections_applied: 0,
+                    error_counts: (finalIssues || []).reduce((acc, err) => {
+                        acc[err.type] = (acc[err.type] || 0) + 1;
+                        return acc;
+                    }, {} as Record<string, number>),
+                    uncertainty_flags: uncertaintyFlags.length,
+                    duration_ms: durationMs,
+                    transcript_tokens: this.estimateTokens(transcription),
+                    quality_score: triageResult.quality_score,
+                    critical_gaps: triageResult.critical_gaps.length,
+                    t_extract_ms: 0,
+                    t_generate_ms: generationDurationMs,
+                    t_validate_ms: 0,
+                    t_corrections_ms: 0,
+                    t_total_ms: durationMs,
+                    rounds_executed: 1,
+                    early_stop_reason: finalIssues.length === 0 ? 'clean_consensus' : 'low_risk_remaining',
+                    risk_level: this.computeRiskLevel(finalIssues),
+                    fallback_hops: modelInvocations.filter((item) => item.is_fallback).length,
+                    logical_calls_used: 1,
+                    physical_calls_used: modelInvocations.length,
+                    provisional_reason: provisionalReason,
+                    sanitization_applied: historyOutput.trim() !== (generatedHistory || '').trim(),
+                    errors_raw_count: rawIssues.length,
+                    errors_final_count: finalIssues.length,
+                    neutralized_issues: neutralizedIssues.length
+                }
+            }
+        }).catch((error) => {
+            console.error('[AIService] Failed to enqueue single-shot audit event:', error);
+        });
+
+        this.startAsyncGroqFollowup({
+            sessionId: auditId,
+            patientName,
+            transcription,
+            generatedHistory: historyOutput,
+            extraction: singleShot.extraction,
+            extractionMeta: []
+        });
+
+        return {
+            data: historyOutput,
+            model: singleShot.model,
+            extraction: singleShot.extraction,
+            extraction_meta: [],
+            classification: singleShot.classification,
+            validations: allValidations,
+            corrections_applied: 0,
+            remaining_errors: finalIssues.length > 0 ? finalIssues : undefined,
+            active_memory_used: false,
+            uncertainty_flags: uncertaintyFlags.length > 0 ? uncertaintyFlags : undefined,
+            audit_id: auditId,
+            pipeline_status: pipelineStatus,
+            result_status: resultStatus,
+            session_id: auditId,
+            learning_applied: false,
+            quality_score: triageResult.quality_score,
+            critical_gaps: triageResult.critical_gaps,
+            doctor_next_actions: triageResult.doctor_next_actions,
+            quality_triage_model: triageResult.model,
+            correction_rounds_executed: 1,
+            early_stop_reason: finalIssues.length === 0 ? 'clean_consensus' : 'low_risk_remaining',
+            risk_level: this.computeRiskLevel(finalIssues),
+            call_budget_mode: 'single_shot',
+            logical_calls_used: 1,
+            physical_calls_used: modelInvocations.length,
+            provisional_reason: provisionalReason,
+            fallback_hops: modelInvocations.filter((item) => item.is_fallback).length,
+            sanitization_applied: historyOutput.trim() !== (generatedHistory || '').trim(),
+            errors_raw_count: rawIssues.length,
+            errors_final_count: finalIssues.length,
+            resolved_by_sanitization: neutralizedIssueStrings,
+            still_blocking_after_sanitization: postSanitizeIssueStrings,
+            reconciliation: {
+                pre_sanitize_issues: preSanitizeIssues,
+                post_sanitize_issues: postSanitizeIssues,
+                neutralized_issues: neutralizedIssues
+            },
+            phase_timings_ms: {
+                extract: 0,
+                generate: generationDurationMs,
+                validate: 0,
+                corrections: 0,
+                total: durationMs
+            },
+            followup_status: 'pending'
+        };
+    }
+
     async generateMedicalHistory(transcription: string, patientName: string = ""): Promise<AIResultWithMetadata> {
         try {
+            if (SINGLE_SHOT_HISTORY_MODE) {
+                return await this.generateMedicalHistorySingleShot(transcription, patientName);
+            }
             this.groq.resetInvocationCounters();
             const extractionResult = await this.extractOnly(transcription);
-            const pipelineResult = await this.generateFromMergedExtractions(
+            return await this.generateFromMergedExtractions(
                 [extractionResult.data],
                 transcription,
                 patientName,
                 extractionResult.meta,
                 extractionResult.classification
             );
-            return pipelineResult;
         } catch (error) {
             this.groq.drainModelInvocations();
             const failureAuditId = this.buildAuditId();
@@ -878,7 +1180,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 audit_id: failureAuditId,
                 audit_data: {
                     patient_name: patientName,
-                    pipeline_version: 'merged-4-phase-v3-strict',
+                    pipeline_version: SINGLE_SHOT_HISTORY_MODE ? 'single-shot-v1' : 'merged-4-phase-v3-strict',
                     models_used: {},
                     extraction_data: null,
                     generation_versions: [],
@@ -923,12 +1225,13 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 correction_rounds_executed: 0,
                 early_stop_reason: 'max_rounds_reached',
                 risk_level: 'high',
-                call_budget_mode: 'two_call_adaptive',
-                logical_calls_used: 2,
+                call_budget_mode: SINGLE_SHOT_HISTORY_MODE ? 'single_shot' : 'two_call_adaptive',
+                logical_calls_used: SINGLE_SHOT_HISTORY_MODE ? 1 : 2,
                 physical_calls_used: 0,
                 provisional_reason: reason,
                 fallback_hops: 0,
-                phase_timings_ms: { extract: 0, generate: 0, validate: 0, corrections: 0, total: 0 }
+                phase_timings_ms: { extract: 0, generate: 0, validate: 0, corrections: 0, total: 0 },
+                followup_status: 'failed'
             };
         }
     }
