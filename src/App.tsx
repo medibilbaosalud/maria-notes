@@ -159,6 +159,16 @@ const AppContent = () => {
         }
     }, [isPlaying, demoData, currentPatientName]);
 
+    // DEBUG: Monitor currentView changes
+    useEffect(() => {
+        console.log('[App] currentView changed to:', currentView);
+    }, [currentView]);
+
+    // DEBUG: Monitor isLoading changes
+    useEffect(() => {
+        console.log('[App] isLoading changed to:', isLoading);
+    }, [isLoading]);
+
     useEffect(() => {
         setShowWelcomeModal(true);
     }, []);
@@ -586,12 +596,24 @@ const AppContent = () => {
         };
 
         const recoverPipelineSession = async () => {
-            if (processingLockRef.current) return;
+            console.log('[App] Checking for recoverable sessions...');
+            if (processingLockRef.current) {
+                console.log('[App] processingLockRef is true, skipping recovery');
+                return;
+            }
             const keys = getApiKeys(apiKey);
-            if (keys.length === 0) return;
+            if (keys.length === 0) {
+                console.log('[App] No API keys found, skipping recovery');
+                return;
+            }
             const recoverable = await getRecoverableSessions();
+            console.log('[App] Recoverable sessions found:', recoverable);
+
             if (!recoverable.length) return;
-            const latest = recoverable.sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
+            const latest = recoverable
+                .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
+                .find((session) => !isLabRun(session.patient_name));
+            if (!latest) return;
             const sessionData = await resumeSession(latest.session_id);
             if (!sessionData) return;
             const finalSegment = sessionData.audio_segments.find((segment) => segment.is_final);
@@ -603,9 +625,9 @@ const AppContent = () => {
             processingLockRef.current = true;
             activeSessionIdRef.current = latest.session_id;
             setCurrentPatientName(latest.patient_name);
-            setCurrentView('result');
-            setIsLoading(true);
             setProcessingStatus('Recuperando sesión pendiente...');
+            console.log('[App] Attempting to recover session:', latest.session_id);
+
             MemoryService.setPipelineBusy(true);
             orchestrator.startConsultation(latest.session_id, latest.patient_name, { recovering: true });
 
@@ -619,7 +641,6 @@ const AppContent = () => {
                 await orchestrator.finalize(recoveredLastBatchIndex, finalSegment.blob);
             } finally {
                 processingLockRef.current = false;
-                setIsLoading(false);
                 MemoryService.setPipelineBusy(false);
             }
         };
@@ -1077,17 +1098,17 @@ const AppContent = () => {
         const MAX_EXTRACTION_TOKENS = 30000; // ~120,000 caracteres - límite seguro para Gemini
         const estimatedTokens = estimateTokens(fullTranscription);
         const isLongConsultation = sortedIndexes.length > 3 || estimatedTokens > 20000;
-        
+
         if (isLongConsultation) {
             setProcessingStatus(`Consultación larga detectada (${sortedIndexes.length} segmentos). Optimizando extracción...`);
         } else {
             setProcessingStatus('Extrayendo datos clinicos de toda la consulta (Gemini)...');
         }
-        
+
         aiService.resetInvocationCounters(sessionId || undefined);
         const sanitizedTranscription = sanitizeTranscriptForExtraction(fullTranscription);
         let extractionInput = sanitizedTranscription;
-        
+
         // Truncamiento inteligente: priorizar información reciente (últimos 2/3) si es muy larga
         if (estimatedTokens > MAX_EXTRACTION_TOKENS) {
             const keepRatio = 0.67; // Mantener últimos 2/3 de la transcripción

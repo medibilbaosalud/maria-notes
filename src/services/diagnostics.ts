@@ -113,6 +113,13 @@ interface DiagnosticRunState {
         quality_score?: number;
         pipeline_status?: string;
         result_status?: string;
+        transcript_truncation?: {
+            original_length: number;
+            truncated_length: number;
+            original_tokens: number;
+            truncated_tokens: number;
+            reason: string;
+        };
     };
 }
 
@@ -136,6 +143,13 @@ export interface FinalizeDiagnosticOutput {
         quality_score?: number;
         pipeline_status?: string;
         result_status?: string;
+        transcript_truncation?: {
+            original_length: number;
+            truncated_length: number;
+            original_tokens: number;
+            truncated_tokens: number;
+            reason: string;
+        };
     };
 }
 
@@ -179,6 +193,13 @@ export interface DiagnosticSummary {
         quality_score?: number;
         pipeline_status?: string;
         result_status?: string;
+        transcript_truncation?: {
+            original_length: number;
+            truncated_length: number;
+            original_tokens: number;
+            truncated_tokens: number;
+            reason: string;
+        };
     };
     root_causes: string[];
     error_catalog: {
@@ -312,7 +333,22 @@ export const recordDiagnosticEvent = (
                 quality_score?: number;
                 pipeline_status?: string;
                 result_status?: string;
+                transcript_truncation?: {
+                    original_length: number;
+                    truncated_length: number;
+                    original_tokens: number;
+                    truncated_tokens: number;
+                    reason: string;
+                };
             };
+        }
+        | {
+            type: 'transcript_truncated';
+            original_length: number;
+            truncated_length: number;
+            original_tokens: number;
+            truncated_tokens: number;
+            reason: string;
         }
 ): void => {
     const run = runStore.get(runId);
@@ -385,6 +421,24 @@ export const recordDiagnosticEvent = (
 
     if (event.type === 'debug_context') {
         run.debug = event.debug;
+        return;
+    }
+
+    if (event.type === 'transcript_truncated') {
+        run.debug = {
+            remaining_errors: run.debug?.remaining_errors || [],
+            provisional_reason: run.debug?.provisional_reason,
+            quality_score: run.debug?.quality_score,
+            pipeline_status: run.debug?.pipeline_status,
+            result_status: run.debug?.result_status,
+            transcript_truncation: {
+                original_length: event.original_length,
+                truncated_length: event.truncated_length,
+                original_tokens: event.original_tokens,
+                truncated_tokens: event.truncated_tokens,
+                reason: event.reason
+            }
+        };
         return;
     }
 
@@ -658,7 +712,8 @@ export const finalizeDiagnosticRun = (
         provisional_reason: undefined,
         quality_score: undefined,
         pipeline_status: undefined,
-        result_status: undefined
+        result_status: undefined,
+        transcript_truncation: undefined
     };
 
     const chunk_count = run.chunks.length;
