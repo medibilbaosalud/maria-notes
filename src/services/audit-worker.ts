@@ -134,6 +134,36 @@ const computeNextAttempt = (attempt: number): string => {
     return new Date(Date.now() + base + jitter).toISOString();
 };
 
+const isNonRetryableOutboxError = (error: unknown): boolean => {
+    const status = Number((error as { status?: number })?.status || 0);
+    if ([400, 401, 403, 404, 409, 410, 422].includes(status)) return true;
+
+    const message = ((error as Error)?.message || '').toLowerCase();
+    if (!message) return false;
+    if (
+        message.includes('http 400')
+        || message.includes('http 401')
+        || message.includes('http 403')
+        || message.includes('http 404')
+        || message.includes('http 409')
+        || message.includes('http 410')
+        || message.includes('http 422')
+        || message.includes('http_400')
+        || message.includes('http_401')
+        || message.includes('http_403')
+        || message.includes('http_404')
+        || message.includes('http_409')
+        || message.includes('http_410')
+        || message.includes('http_422')
+        || message.includes('invalid_pipeline_')
+        || message.includes('relation') && message.includes('does not exist')
+        || message.includes('column') && message.includes('does not exist')
+    ) {
+        return true;
+    }
+    return false;
+};
+
 export const enqueueAuditEvent = async (
     eventType: string,
     payload: Record<string, unknown>
@@ -455,19 +485,23 @@ export const processAuditOutboxOnce = async (): Promise<number> => {
             } catch (error) {
                 metricsSnapshot.worker_failures += 1;
                 const nextAttempts = item.attempts + 1;
-                const deadLetter = nextAttempts >= MAX_ATTEMPTS;
-                if (!deadLetter) {
+                const nonRetryable = isNonRetryableOutboxError(error);
+                const deadLetter = !nonRetryable && nextAttempts >= MAX_ATTEMPTS;
+                if (!deadLetter && !nonRetryable) {
                     metricsSnapshot.retries_scheduled += 1;
                 }
                 if (deadLetter) {
                     metricsSnapshot.dead_letters += 1;
                 }
-                recordDegradationCause((error as Error)?.message || 'unknown_audit_worker_error');
+                const reason = (error as Error)?.message || 'unknown_audit_worker_error';
+                recordDegradationCause(nonRetryable ? `non_retryable:${reason}` : reason);
                 await db.audit_outbox.update(item.id, {
-                    status: deadLetter ? 'dead_letter' : 'pending',
+                    status: nonRetryable ? 'completed' : (deadLetter ? 'dead_letter' : 'pending'),
                     attempts: nextAttempts,
                     next_attempt_at: deadLetter ? item.next_attempt_at : computeNextAttempt(nextAttempts),
-                    last_error: (error as Error)?.message || 'unknown_audit_worker_error',
+                    last_error: nonRetryable
+                        ? `dropped_non_retryable:${reason}`
+                        : reason,
                     updated_at: nowIso()
                 });
             }

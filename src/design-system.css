@@ -60,10 +60,18 @@
     --focus-ring: 0 0 0 3px rgba(38, 166, 154, 0.24);
     --z-modal: 1200;
 
-    /* Transitions */
-    --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-    --duration-fast: 0.2s;
-    --duration-normal: 0.3s;
+    /* Motion Tokens */
+    --motion-duration-fast: 120ms;
+    --motion-duration-normal: 180ms;
+    --motion-duration-slow: 260ms;
+    --motion-ease-base: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --motion-ease-enter: ease-out;
+    --motion-ease-linear: linear;
+
+    /* Legacy aliases */
+    --ease-out: var(--motion-ease-base);
+    --duration-fast: var(--motion-duration-fast);
+    --duration-normal: var(--motion-duration-normal);
 }
 
 /* Dark Mode Support */
@@ -96,11 +104,12 @@ input,
 textarea,
 select,
 a {
-    transition: box-shadow var(--duration-fast) var(--ease-out),
-        border-color var(--duration-fast) var(--ease-out),
-        background-color var(--duration-fast) var(--ease-out),
-        color var(--duration-fast) var(--ease-out),
-        transform var(--duration-fast) var(--ease-out);
+    transition: box-shadow var(--motion-duration-fast) var(--motion-ease-base),
+        border-color var(--motion-duration-fast) var(--motion-ease-base),
+        background-color var(--motion-duration-fast) var(--motion-ease-base),
+        color var(--motion-duration-fast) var(--motion-ease-base),
+        transform var(--motion-duration-fast) var(--motion-ease-base),
+        opacity var(--motion-duration-fast) var(--motion-ease-base);
 }
 
 button:focus-visible,

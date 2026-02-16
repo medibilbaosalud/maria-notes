@@ -3,6 +3,7 @@ import { Search, FileOutput, ChevronRight, Printer, Copy, Check, Pencil, Save, X
 import { motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import { searchMedicalRecords, updateMedicalRecord, type MedicalRecord } from '../services/storage';
+import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
 
 export const ReportsView: React.FC = () => {
@@ -152,8 +153,10 @@ export const ReportsView: React.FC = () => {
                 key={record.record_uuid}
                 className={`reports-result-card ${selectedRecord?.record_uuid === record.record_uuid ? 'active' : ''}`}
                 onClick={() => setSelectedRecord(record)}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
+                whileHover={{ scale: 1.01, y: -1, transition: motionTransitions.fast }}
+                whileTap={{ scale: 0.98, transition: motionTransitions.fast }}
+                transition={motionTransitions.normal}
+                data-ui-state={selectedRecord?.record_uuid === record.record_uuid ? 'active' : 'idle'}
               >
                 <div className="reports-card-header">
                   <span className="reports-patient-name">{record.patient_name}</span>
@@ -181,23 +184,23 @@ export const ReportsView: React.FC = () => {
                   <div className="reports-actions">
                     {isEditingReport ? (
                       <>
-                        <button className="reports-action-button success" onClick={handleSaveReport}>
+                        <button className="reports-action-button success" onClick={handleSaveReport} data-ui-state="success">
                           <Save size={16} /> Guardar
                         </button>
-                        <button className="reports-action-button secondary" onClick={() => setIsEditingReport(false)}>
+                        <button className="reports-action-button secondary" onClick={() => setIsEditingReport(false)} data-ui-state="idle">
                           <X size={16} /> Cancelar
                         </button>
                       </>
                     ) : (
                       <>
-                        <button className="reports-action-button secondary" onClick={handleStartEditReport}>
+                        <button className="reports-action-button secondary" onClick={handleStartEditReport} data-ui-state="idle">
                           <Pencil size={16} /> Editar
                         </button>
-                        <button className="reports-action-button primary" onClick={() => void handleCopy(selectedRecord.medical_report!)}>
+                        <button className="reports-action-button primary" onClick={() => void handleCopy(selectedRecord.medical_report!)} data-ui-state={copied ? 'success' : 'idle'}>
                           {copied ? <Check size={16} /> : <Copy size={16} />}
                           {copied ? 'Copiado' : 'Copiar'}
                         </button>
-                        <button className="reports-action-button success" onClick={() => handlePrint(selectedRecord.medical_report!, selectedRecord.patient_name)}>
+                        <button className="reports-action-button success" onClick={() => handlePrint(selectedRecord.medical_report!, selectedRecord.patient_name)} data-ui-state="idle">
                           <Printer size={16} /> Imprimir
                         </button>
                       </>
@@ -301,7 +304,10 @@ export const ReportsView: React.FC = () => {
           border-radius: 14px;
           cursor: pointer;
           border: 1px solid transparent;
-          transition: all 0.2s;
+          transition: border-color var(--motion-duration-fast) var(--motion-ease-base),
+            background-color var(--motion-duration-fast) var(--motion-ease-base),
+            box-shadow var(--motion-duration-fast) var(--motion-ease-base),
+            transform var(--motion-duration-fast) var(--motion-ease-base);
           position: relative;
           box-shadow: var(--shadow-sm);
         }
@@ -337,6 +343,8 @@ export const ReportsView: React.FC = () => {
           padding: 4px 8px;
           border-radius: 8px;
           font-weight: 500;
+          transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
+            color var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .reports-status-badge.success {
@@ -356,7 +364,7 @@ export const ReportsView: React.FC = () => {
           transform: translateY(-50%);
           color: var(--text-tertiary);
           opacity: 0;
-          transition: opacity 0.2s;
+          transition: opacity var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .reports-result-card:hover .reports-chevron {
@@ -448,7 +456,19 @@ export const ReportsView: React.FC = () => {
           font-size: 0.88rem;
           font-weight: 600;
           cursor: pointer;
-          transition: all 0.2s;
+          transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
+            border-color var(--motion-duration-fast) var(--motion-ease-base),
+            color var(--motion-duration-fast) var(--motion-ease-base),
+            transform var(--motion-duration-fast) var(--motion-ease-base),
+            box-shadow var(--motion-duration-fast) var(--motion-ease-base);
+        }
+
+        .reports-action-button:hover {
+          transform: translateY(-1px);
+        }
+
+        .reports-action-button:active {
+          transform: scale(0.98);
         }
 
         .reports-action-button.primary {

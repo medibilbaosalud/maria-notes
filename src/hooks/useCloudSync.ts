@@ -1,7 +1,14 @@
-// Cloud sync is now permanently enabled by default
+const hasCloudConfig = (): boolean => {
+    const url = String(import.meta.env.VITE_SUPABASE_URL || '').trim();
+    const key = String(import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+    if (!url || !key) return false;
+    if (url.toLowerCase().includes('your_supabase_url')) return false;
+    if (key.toLowerCase().includes('your_supabase_anon_key')) return false;
+    return true;
+};
+
 export const useCloudSync = () => {
-    // Force enabled
-    const isCloudEnabled = true;
+    const isCloudEnabled = hasCloudConfig();
 
     // No-ops for state changes
     const toggleCloud = () => { };
@@ -18,5 +25,5 @@ export const useCloudSync = () => {
 
 // Utility to check cloud sync status without hook
 export const isCloudSyncEnabled = (): boolean => {
-    return true;
+    return hasCloudConfig();
 };

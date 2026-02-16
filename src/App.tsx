@@ -40,6 +40,7 @@ import { PipelineStageTracker } from './components/PipelineStageTracker';
 import { usePipelineStatusViewModel } from './features/ui/usePipelineStatusViewModel';
 import { usePipelineController } from './features/pipeline/usePipelineController';
 import { useSessionRecovery } from './features/pipeline/useSessionRecovery';
+import { fadeSlideInSmall, softScaleTap } from './features/ui/motion-tokens';
 import { safeGetLocalStorage, safeSetLocalStorage } from './utils/safeBrowser';
 
 import './App.css';
@@ -178,7 +179,20 @@ const AppContent = () => {
     const [showWelcomeModal, setShowWelcomeModal] = useState(false);
     const [showWhatsNew, setShowWhatsNew] = useState(false);
     const [currentRecordId, setCurrentRecordId] = useState<string | null>(null);
-    const [livePipelineState, setLivePipelineState] = useState<'idle' | 'recording' | 'transcribing_live' | 'draft_ready' | 'hardening' | 'completed' | 'provisional' | 'failed'>('idle');
+    const [livePipelineState, setLivePipelineState] = useState<
+        'idle'
+        | 'recovering'
+        | 'recording'
+        | 'transcribing_live'
+        | 'processing_partials'
+        | 'awaiting_budget'
+        | 'finalizing'
+        | 'draft_ready'
+        | 'hardening'
+        | 'completed'
+        | 'provisional'
+        | 'failed'
+    >('idle');
 
     const { isPlaying, demoData, startSimulation } = useSimulation();
 
@@ -438,6 +452,38 @@ const AppContent = () => {
             .replace(/\[(MISSING_BATCH|PARTIAL_BATCH)_[^\]]+\]/g, ' ')
             .replace(/\s+/g, ' ')
             .trim();
+    };
+
+    const estimateTokens = (text: string): number => Math.ceil((text || '').length / 4);
+
+    const buildOptimizedExtractionInput = (transcript: string, maxTokens: number) => {
+        const cleaned = transcript.trim();
+        const originalTokens = estimateTokens(cleaned);
+        if (originalTokens <= maxTokens) {
+            return {
+                text: cleaned,
+                isTruncated: false,
+                strategy: 'none',
+                originalTokens,
+                truncatedTokens: originalTokens
+            };
+        }
+
+        const maxChars = Math.max(2_000, maxTokens * 4);
+        const headChars = Math.max(600, Math.floor(maxChars * 0.28));
+        const tailChars = Math.max(1_200, maxChars - headChars);
+        const marker = '\n\n[... CONTENIDO INTERMEDIO OMITIDO POR LONGITUD ...]\n\n';
+        const head = cleaned.slice(0, headChars).trim();
+        const tail = cleaned.slice(-tailChars).trim();
+        const optimized = `${head}${marker}${tail}`.trim();
+
+        return {
+            text: optimized,
+            isTruncated: true,
+            strategy: 'head_tail',
+            originalTokens,
+            truncatedTokens: estimateTokens(optimized)
+        };
     };
 
     const buildLocalProvisionalHistory = (reason: string) => {
@@ -1370,9 +1416,8 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         setTranscription(fullTranscription);
 
         // SINGLE EXTRACTION CALL on the full transcript
-        // OPTIMIZACION: Truncamiento inteligente para consultas muy largas (>15 min)
-        const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
-        const MAX_EXTRACTION_TOKENS = 30000; // ~120,000 caracteres - límite seguro para Gemini
+        // Optimized for long consultations to preserve antecedente + evolucion context.
+        const MAX_EXTRACTION_TOKENS = 30000; // ~120,000 chars
         const estimatedTokens = estimateTokens(fullTranscription);
         const isLongConsultation = sortedIndexes.length > 3 || estimatedTokens > 20000;
 
@@ -1384,22 +1429,22 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
 
         aiService.resetInvocationCounters(sessionId || undefined);
         const sanitizedTranscription = sanitizeTranscriptForExtraction(fullTranscription);
-        let extractionInput = sanitizedTranscription;
+        if (sanitizedTranscription.length < 24) {
+            throw new Error('transcripcion_insuficiente_para_generacion');
+        }
+        const optimizedInput = buildOptimizedExtractionInput(sanitizedTranscription, MAX_EXTRACTION_TOKENS);
+        const extractionInput = optimizedInput.text;
 
-        // Truncamiento inteligente: priorizar información reciente (últimos 2/3) si es muy larga
-        if (estimatedTokens > MAX_EXTRACTION_TOKENS) {
-            const keepRatio = 0.67; // Mantener últimos 2/3 de la transcripción
-            const keepChars = Math.floor(sanitizedTranscription.length * keepRatio);
-            extractionInput = sanitizedTranscription.slice(-keepChars);
-            console.warn(`[App] Transcripción truncada de ${sanitizedTranscription.length} a ${extractionInput.length} caracteres (${estimatedTokens} → ${estimateTokens(extractionInput)} tokens) para evitar timeout`);
+        if (optimizedInput.isTruncated) {
+            console.warn(`[App] Transcripción optimizada (${optimizedInput.strategy}) de ${sanitizedTranscription.length} a ${extractionInput.length} caracteres (${optimizedInput.originalTokens} → ${optimizedInput.truncatedTokens} tokens)`);
             if (runId) {
                 recordDiagnosticEvent(runId, {
                     type: 'transcript_truncated',
                     original_length: sanitizedTranscription.length,
                     truncated_length: extractionInput.length,
-                    original_tokens: estimatedTokens,
-                    truncated_tokens: estimateTokens(extractionInput),
-                    reason: 'exceeds_max_extraction_tokens'
+                    original_tokens: optimizedInput.originalTokens,
+                    truncated_tokens: optimizedInput.truncatedTokens,
+                    reason: `exceeds_max_extraction_tokens:${optimizedInput.strategy}`
                 });
             }
         }
@@ -1426,10 +1471,33 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             field: `batch_${idx + 1}`,
             reason: 'Segmento parcial no disponible durante finalizacion'
         }));
-        const remainingErrors = [
+        let remainingErrors = [
             ...(result.remaining_errors || []),
             ...missingWarnings
         ];
+        let runStatus = result.pipeline_status || (missingBatches.length > 0 ? 'degraded' : 'completed');
+        let resultStatus = result.result_status || (runStatus === 'completed' ? 'completed' : 'provisional');
+        const qualityGate = buildQualityGateFromHistory({
+            medical_history: result.data,
+            result_status: resultStatus,
+            pipeline_status: runStatus,
+            critical_gaps_count: result.critical_gaps?.length || 0
+        });
+        const qualityGateBlocked = !qualityGate.required_sections_ok || Boolean(qualityGate.placeholder_detected);
+        if (qualityGateBlocked) {
+            runStatus = 'degraded';
+            resultStatus = 'provisional';
+            remainingErrors = [
+                ...remainingErrors,
+                {
+                    type: 'quality_gate',
+                    field: qualityGate.blocking_rule_id || 'quality_gate',
+                    reason: qualityGate.blocking_reason || 'quality_gate_blocked'
+                }
+            ];
+        }
+        const effectiveProvisionalReason = result.provisional_reason
+            || (resultStatus === 'provisional' ? (qualityGate.blocking_reason || 'quality_gate_blocked') : undefined);
 
         setHistory(result.data);
         setOriginalHistory(result.data);
@@ -1455,15 +1523,15 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             earlyStopReason: result.early_stop_reason,
             riskLevel: result.risk_level,
             phaseTimingsMs: result.phase_timings_ms,
-            resultStatus: result.result_status,
-            provisionalReason: result.provisional_reason,
+            resultStatus,
+            provisionalReason: effectiveProvisionalReason,
             logicalCallsUsed: result.logical_calls_used,
             physicalCallsUsed: result.physical_calls_used,
             fallbackHops: result.fallback_hops,
             outputTier,
             geminiCallsUsed: result.gemini_calls_used,
             oneCallPolicyApplied: result.one_call_policy_applied,
-            degradedReasonCode: result.degraded_reason_code,
+            degradedReasonCode: result.degraded_reason_code || effectiveProvisionalReason,
             fastPathConfig: {
                 adaptiveValidation: FAST_PATH_ADAPTIVE_VALIDATION,
                 tokenBudgets: FAST_PATH_TOKEN_BUDGETS,
@@ -1473,8 +1541,6 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         });
 
         if (sessionId) {
-            const runStatus = result.pipeline_status || (missingBatches.length > 0 ? 'degraded' : 'completed');
-            const resultStatus = result.result_status || (runStatus === 'completed' ? 'completed' : 'provisional');
             const sttMetrics = sttMetricsRef.current;
             const sttP95 = (() => {
                 const sorted = [...sttMetrics.latenciesMs].sort((a, b) => a - b);
@@ -1497,7 +1563,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                     remaining_errors: remainingErrors.length,
                     pipeline_status: runStatus,
                     result_status: resultStatus,
-                    provisional_reason: result.provisional_reason || null,
+                    provisional_reason: effectiveProvisionalReason || null,
                     output_tier: outputTier,
                     stt_p95_ms: sttP95,
                     stt_concurrency: sttMetrics.concurrency,
@@ -1509,7 +1575,9 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                     strict_policy_violation: GEMINI_ONE_CALL_STRICT ? (result.gemini_calls_used || 0) > 1 : false,
                     draft_ready_at: new Date().toISOString()
                 },
-                error_reason: resultStatus === 'provisional' ? (result.remaining_errors?.[0]?.reason || pipelineRuntimeReason) : undefined
+                error_reason: resultStatus === 'provisional'
+                    ? (effectiveProvisionalReason || remainingErrors[0]?.reason || pipelineRuntimeReason)
+                    : undefined
             });
             void enqueueAuditEvent('pipeline_run_update', {
                 session_id: sessionId,
@@ -1685,14 +1753,14 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 })();
             }
 
-            const qualityGate = buildQualityGateFromHistory({
+            const finalQualityGate = buildQualityGateFromHistory({
                 medical_history: result.data,
-                result_status: result.result_status,
-                pipeline_status: result.pipeline_status,
+                result_status: resultStatus,
+                pipeline_status: runStatus,
                 critical_gaps_count: result.critical_gaps?.length || 0
             });
             if (runId) {
-                recordDiagnosticEvent(runId, { type: 'quality_gate', gate: qualityGate });
+                recordDiagnosticEvent(runId, { type: 'quality_gate', gate: finalQualityGate });
                 if (result.reconciliation) {
                     recordDiagnosticEvent(runId, {
                         type: 'reconciliation',
@@ -1702,23 +1770,23 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 recordDiagnosticEvent(runId, {
                     type: 'debug_context',
                     debug: {
-                        remaining_errors: (result.remaining_errors || []).map((item) => ({
+                        remaining_errors: remainingErrors.map((item) => ({
                             type: item.type,
                             field: item.field,
                             reason: item.reason,
                             severity: (item as { severity?: string }).severity
                         })),
-                        provisional_reason: result.provisional_reason,
+                        provisional_reason: effectiveProvisionalReason,
                         quality_score: result.quality_score,
-                        pipeline_status: result.pipeline_status,
-                        result_status: result.result_status
+                        pipeline_status: runStatus,
+                        result_status: resultStatus
                     }
                 });
                 const finalizeStageStatus = (
-                    !qualityGate.required_sections_ok
-                    || qualityGate.placeholder_detected
-                    || (qualityGate.pipeline_status && qualityGate.pipeline_status !== 'completed')
-                    || (qualityGate.result_status && qualityGate.result_status !== 'completed')
+                    !finalQualityGate.required_sections_ok
+                    || finalQualityGate.placeholder_detected
+                    || (finalQualityGate.pipeline_status && finalQualityGate.pipeline_status !== 'completed')
+                    || (finalQualityGate.result_status && finalQualityGate.result_status !== 'completed')
                 ) ? 'failed' : 'passed';
                 const finalizeErrorDetail = finalizeStageStatus === 'failed'
                     ? buildDiagnosticErrorDetail(new Error('quality_gate_failed'), {
@@ -1728,17 +1796,17 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                         inputType: 'audio',
                         codeOverride: hasInsufficientClinicalSignal({
                             stillBlocking: result.still_blocking_after_sanitization,
-                            remainingErrors: result.remaining_errors
+                            remainingErrors
                         })
                             ? 'insufficient_clinical_signal'
-                            : qualityGate.placeholder_detected
+                            : finalQualityGate.placeholder_detected
                                 ? 'placeholder_detected'
-                                : (!qualityGate.required_sections_ok ? 'required_sections_missing' : 'pipeline_not_completed'),
-                        messageOverride: `quality_gate_failed(required_sections_ok=${String(qualityGate.required_sections_ok)}, pipeline_status=${qualityGate.pipeline_status || 'n/a'}, result_status=${qualityGate.result_status || 'n/a'})`,
+                                : (!finalQualityGate.required_sections_ok ? 'required_sections_missing' : 'pipeline_not_completed'),
+                        messageOverride: `quality_gate_failed(required_sections_ok=${String(finalQualityGate.required_sections_ok)}, pipeline_status=${finalQualityGate.pipeline_status || 'n/a'}, result_status=${finalQualityGate.result_status || 'n/a'})`,
                         phase: 'quality_gate',
                         origin: 'pipeline_policy',
                         blocking: true,
-                        blockingRuleId: qualityGate.blocking_rule_id
+                        blockingRuleId: finalQualityGate.blocking_rule_id
                     })
                     : undefined;
                 recordDiagnosticEvent(runId, {
@@ -1751,7 +1819,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                     error_detail: finalizeErrorDetail
                 });
                 const diagnostics = finalizeDiagnosticRun(runId, {
-                    quality_gate: qualityGate,
+                    quality_gate: finalQualityGate,
                     stt_route_policy: whisperStrict ? 'whisper_strict' : 'default'
                 });
                 if (diagnostics) {
@@ -1811,9 +1879,10 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 finalizeWaitMs: 180_000,
                 onStatusChange: (status) => {
                     setPipelineRuntimeReason(status.reason || '');
-                    if (status.state === 'recording' || status.state === 'transcribing_live' || status.state === 'draft_ready' || status.state === 'hardening' || status.state === 'completed' || status.state === 'provisional' || status.state === 'failed') {
-                        setLivePipelineState(status.state);
-                    }
+                    const nextLiveState = status.state === 'degraded'
+                        ? 'provisional'
+                        : status.state;
+                    setLivePipelineState(nextLiveState);
                     if (status.sessionId && status.patientName) {
                         activeSessionIdRef.current = status.sessionId;
                         void upsertPipelineJob({
@@ -2259,10 +2328,33 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             aiService.resetInvocationCounters(textSessionId);
             recordDiagnosticEvent(diagnosticRunId, { type: 'stage_start', stage: 'single_shot_text_history' });
             const result = await aiService.generateMedicalHistory(text, patientName);
+            let runStatus = result.pipeline_status || 'completed';
+            let resultStatus = result.result_status || (runStatus === 'completed' ? 'completed' : 'provisional');
+            let textRemainingErrors = [...(result.remaining_errors || [])];
+            const textQualityGate = buildQualityGateFromHistory({
+                medical_history: result.data,
+                result_status: resultStatus,
+                pipeline_status: runStatus,
+                critical_gaps_count: result.critical_gaps?.length || 0
+            });
+            if (!textQualityGate.required_sections_ok || Boolean(textQualityGate.placeholder_detected)) {
+                runStatus = 'degraded';
+                resultStatus = 'provisional';
+                textRemainingErrors = [
+                    ...textRemainingErrors,
+                    {
+                        type: 'quality_gate',
+                        field: textQualityGate.blocking_rule_id || 'quality_gate',
+                        reason: textQualityGate.blocking_reason || 'quality_gate_blocked'
+                    }
+                ];
+            }
+            const textProvisionalReason = result.provisional_reason
+                || (resultStatus === 'provisional' ? (textQualityGate.blocking_reason || 'quality_gate_blocked') : undefined);
             recordDiagnosticEvent(diagnosticRunId, {
                 type: 'stage_end',
                 stage: 'single_shot_text_history',
-                status: result.pipeline_status === 'completed' ? 'passed' : 'degraded'
+                status: runStatus === 'completed' ? 'passed' : 'degraded'
             });
 
             setHistory(result.data);
@@ -2273,7 +2365,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 models: { generation: result.model, validation: buildValidationLabel(result.validations) },
                 errorsFixed: 0,
                 versionsCount: (result.corrections_applied || 0) + 1,
-                remainingErrors: result.remaining_errors,
+                remainingErrors: textRemainingErrors.length > 0 ? textRemainingErrors : undefined,
                 validationHistory: result.validations?.flatMap(v => v.errors),
                 extractionMeta: result.extraction_meta,
                 classification: result.classification,
@@ -2290,14 +2382,14 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 earlyStopReason: result.early_stop_reason,
                 riskLevel: result.risk_level,
                 phaseTimingsMs: result.phase_timings_ms,
-                resultStatus: result.result_status,
-                provisionalReason: result.provisional_reason,
+                resultStatus,
+                provisionalReason: textProvisionalReason,
                 logicalCallsUsed: result.logical_calls_used,
                 physicalCallsUsed: result.physical_calls_used,
                 fallbackHops: result.fallback_hops,
                 geminiCallsUsed: result.gemini_calls_used,
                 oneCallPolicyApplied: result.one_call_policy_applied,
-                degradedReasonCode: result.degraded_reason_code,
+                degradedReasonCode: result.degraded_reason_code || textProvisionalReason,
                 fastPathConfig: {
                     adaptiveValidation: FAST_PATH_ADAPTIVE_VALIDATION,
                     tokenBudgets: FAST_PATH_TOKEN_BUDGETS,
@@ -2325,7 +2417,6 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 });
             }
 
-            const runStatus = result.pipeline_status || 'completed';
             void enqueueAuditEvent('pipeline_run_update', {
                 session_id: textSessionId,
                 patient_name: patientName,
@@ -2334,10 +2425,10 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 metadata: {
                     input_type: 'text',
                     corrections_applied: result.corrections_applied || 0,
-                    remaining_errors: result.remaining_errors?.length || 0,
-                    result_status: result.result_status || (runStatus === 'completed' ? 'completed' : 'provisional'),
+                    remaining_errors: textRemainingErrors.length,
+                    result_status: resultStatus,
                     pipeline_status: runStatus,
-                    provisional_reason: result.provisional_reason || null
+                    provisional_reason: textProvisionalReason || null
                 }
             });
             void enqueueAuditEvent('pipeline_attempt', {
@@ -2355,13 +2446,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 }
             });
 
-            const qualityGate = buildQualityGateFromHistory({
-                medical_history: result.data,
-                result_status: result.result_status,
-                pipeline_status: result.pipeline_status,
-                critical_gaps_count: result.critical_gaps?.length || 0
-            });
-            recordDiagnosticEvent(diagnosticRunId, { type: 'quality_gate', gate: qualityGate });
+            recordDiagnosticEvent(diagnosticRunId, { type: 'quality_gate', gate: textQualityGate });
             if (result.reconciliation) {
                 recordDiagnosticEvent(diagnosticRunId, {
                     type: 'reconciliation',
@@ -2371,23 +2456,23 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             recordDiagnosticEvent(diagnosticRunId, {
                 type: 'debug_context',
                 debug: {
-                    remaining_errors: (result.remaining_errors || []).map((item) => ({
+                    remaining_errors: textRemainingErrors.map((item) => ({
                         type: item.type,
                         field: item.field,
                         reason: item.reason,
                         severity: (item as { severity?: string }).severity
                     })),
-                    provisional_reason: result.provisional_reason,
+                    provisional_reason: textProvisionalReason,
                     quality_score: result.quality_score,
-                    pipeline_status: result.pipeline_status,
-                    result_status: result.result_status
+                    pipeline_status: runStatus,
+                    result_status: resultStatus
                 }
             });
             const textPipelineStageStatus = (
-                qualityGate.required_sections_ok
-                && !qualityGate.placeholder_detected
-                && (qualityGate.pipeline_status || 'completed') === 'completed'
-                && (qualityGate.result_status || 'completed') === 'completed'
+                textQualityGate.required_sections_ok
+                && !textQualityGate.placeholder_detected
+                && (textQualityGate.pipeline_status || 'completed') === 'completed'
+                && (textQualityGate.result_status || 'completed') === 'completed'
             ) ? 'passed' : 'failed';
             const textGateErrorDetail = textPipelineStageStatus === 'failed'
                 ? buildDiagnosticErrorDetail(new Error('text_quality_gate_failed'), {
@@ -2395,14 +2480,14 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                     provider: 'pipeline',
                     operation: 'text_quality_gate',
                     inputType: 'text',
-                    codeOverride: qualityGate.placeholder_detected
+                    codeOverride: textQualityGate.placeholder_detected
                         ? 'placeholder_detected'
-                        : (!qualityGate.required_sections_ok ? 'required_sections_missing' : 'pipeline_not_completed'),
-                    messageOverride: `text_quality_gate_failed(required_sections_ok=${String(qualityGate.required_sections_ok)}, pipeline_status=${qualityGate.pipeline_status || 'n/a'}, result_status=${qualityGate.result_status || 'n/a'})`,
+                        : (!textQualityGate.required_sections_ok ? 'required_sections_missing' : 'pipeline_not_completed'),
+                    messageOverride: `text_quality_gate_failed(required_sections_ok=${String(textQualityGate.required_sections_ok)}, pipeline_status=${textQualityGate.pipeline_status || 'n/a'}, result_status=${textQualityGate.result_status || 'n/a'})`,
                     phase: 'quality_gate',
                     origin: 'pipeline_policy',
                     blocking: true,
-                    blockingRuleId: qualityGate.blocking_rule_id
+                    blockingRuleId: textQualityGate.blocking_rule_id
                 })
                 : undefined;
             recordDiagnosticEvent(diagnosticRunId, {
@@ -2414,7 +2499,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 error_detail: textGateErrorDetail
             });
             const diagnostics = finalizeDiagnosticRun(diagnosticRunId, {
-                quality_gate: qualityGate,
+                quality_gate: textQualityGate,
                 stt_route_policy: 'default'
             });
             await saveLabTestLog({
@@ -2550,6 +2635,114 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         ? ''
         : 'Configura una API key válida para iniciar y asegurar recuperación automática.';
 
+    const renderCurrentView = () => {
+        if (currentView === 'record') {
+            return (
+                <div className="view-content">
+                    <PipelineStageTracker
+                        state={pipelineStatusVm.state}
+                        sttP95Ms={pipelineStatusVm.sttP95Ms}
+                        sttConcurrency={pipelineStatusVm.sttConcurrency}
+                        hedgeRate={pipelineStatusVm.hedgeRate}
+                    />
+                    <Recorder
+                        onRecordingComplete={handleRecordingComplete}
+                        onConsultationStart={handleConsultationStart}
+                        canStart={canStartConsultation}
+                        startBlockReason={startBlockReason}
+                    />
+                    <PipelineHealthPanel />
+                </div>
+            );
+        }
+
+        if (currentView === 'history') {
+            return (
+                <Suspense fallback={<div className="view-loading">Cargando historial...</div>}>
+                    <SearchHistory
+                        apiKey={apiKey}
+                        onLoadRecord={(record) => {
+                            setHistory(record.medical_history);
+                            setOriginalHistory(record.original_medical_history || record.medical_history);
+                            setTranscription(record.transcription || '');
+                            setCurrentPatientName(record.patient_name);
+                            setCurrentRecordId(record.record_uuid || null);
+                            setCurrentView('result');
+                        }}
+                    />
+                </Suspense>
+            );
+        }
+
+        if (currentView === 'reports') {
+            return (
+                <Suspense fallback={<div className="view-loading">Cargando informes...</div>}>
+                    <ReportsView />
+                </Suspense>
+            );
+        }
+
+        if (currentView === 'result') {
+            return (
+                <Suspense fallback={<div className="view-loading">Preparando resultado...</div>}>
+                    <HistoryView
+                        content={history}
+                        isLoading={isLoading}
+                        patientName={currentPatientName}
+                        originalContent={originalHistory}
+                        transcription={transcription}
+                        apiKey={apiKey}
+                        onNewConsultation={() => {
+                            if (activeSessionIdRef.current) {
+                                void finalizeSession(activeSessionIdRef.current, {
+                                    status: 'failed',
+                                    result_status: 'failed_recoverable',
+                                    error_reason: 'new_consultation_interrupted'
+                                });
+                            }
+                            setHistory('');
+                            setOriginalHistory('');
+                            setTranscription('');
+                            setCurrentPatientName('');
+                            setPipelineMetadata(undefined);
+                            clearPipelineBuffers();
+                            sessionVersionRef.current += 1;
+                            if (orchestratorRef.current) {
+                                orchestratorRef.current.abort('new_consultation');
+                                orchestratorRef.current = null;
+                            }
+                            resetSessionRuntime();
+                            aiServiceRef.current = null;
+                            activeSessionIdRef.current = null;
+                            setCurrentRecordId(null);
+                            setCurrentView('record');
+                        }}
+                        onContentChange={(newContent) => setHistory(newContent)}
+                        metadata={pipelineMetadata}
+                        recordId={currentRecordId || undefined}
+                        onPersistMedicalHistory={persistMedicalHistory}
+                        onRegenerateSection={SECTION_REGEN_ENABLED ? handleRegenerateSection : undefined}
+                        onGenerateReport={async () => {
+                            const aiService = new AIService(getApiKeys(apiKey));
+                            const res = await aiService.generateMedicalReport(transcription, currentPatientName);
+                            return res.data;
+                        }}
+                    />
+                </Suspense>
+            );
+        }
+
+        return (
+            <Suspense fallback={<div className="view-loading">Cargando laboratorio...</div>}>
+                <AudioTestLab
+                    onClose={() => setCurrentView('record')}
+                    onRunFullPipeline={handleRecordingComplete}
+                    onRunTextPipeline={handleTextPipeline}
+                />
+            </Suspense>
+        );
+    };
+
     return (
         <div className="app-container">
             <SimulationOverlay />
@@ -2581,129 +2774,46 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                     animate={{ opacity: 1, y: 0 }}
                     className="whats-new-trigger"
                     onClick={() => setShowWhatsNew(true)}
+                    {...softScaleTap}
+                    data-ui-state="idle"
                 >
                     <Sparkles size={14} />
                     <span>Novedades: AI v3.0</span>
                 </motion.button>
-                {currentView === 'record' && (
-                    <div className="view-content">
-                        <PipelineStageTracker
-                            state={pipelineStatusVm.state}
-                            sttP95Ms={pipelineStatusVm.sttP95Ms}
-                            sttConcurrency={pipelineStatusVm.sttConcurrency}
-                            hedgeRate={pipelineStatusVm.hedgeRate}
-                        />
-                        <Recorder
-                            onRecordingComplete={handleRecordingComplete}
-                            onConsultationStart={handleConsultationStart}
-                            canStart={canStartConsultation}
-                            startBlockReason={startBlockReason}
-                        />
-                        <PipelineHealthPanel />
-                    </div>
-                )}
+                <AnimatePresence mode="wait" initial={false}>
+                    <motion.div
+                        key={currentView}
+                        className={`app-view-shell app-view-${currentView}`}
+                        variants={fadeSlideInSmall}
+                        initial="initial"
+                        animate="enter"
+                        exit="exit"
+                    >
+                        {renderCurrentView()}
+                    </motion.div>
+                </AnimatePresence>
 
-                {currentView === 'history' && (
-                    <Suspense fallback={<div className="view-loading">Cargando historial...</div>}>
-                        <SearchHistory
-                            apiKey={apiKey}
-                            onLoadRecord={(record) => {
-                                setHistory(record.medical_history);
-                                setOriginalHistory(record.original_medical_history || record.medical_history);
-                                setTranscription(record.transcription || '');
-                                setCurrentPatientName(record.patient_name);
-                                setCurrentRecordId(record.record_uuid || null);
+                <AnimatePresence>
+                    {showSettings && (
+                        <Suspense fallback={<div className="view-loading">Cargando ajustes...</div>}>
+                            <Settings
+                                apiKey={apiKey}
+                                onSave={handleSaveSettings}
+                                onClose={() => setShowSettings(false)}
+                            />
+                        </Suspense>
+                    )}
+                </AnimatePresence>
 
-                                // Set metadata if relevant, though legacy records might lack it
-                                setCurrentView('result');
-                            }}
-                        />
-                    </Suspense>
-                )}
-
-                {currentView === 'reports' && (
-                    <Suspense fallback={<div className="view-loading">Cargando informes...</div>}>
-                        <ReportsView />
-                    </Suspense>
-                )}
-
-                {currentView === 'result' && (
-                    <Suspense fallback={<div className="view-loading">Preparando resultado...</div>}>
-                        <HistoryView
-                            content={history}
-                            isLoading={isLoading}
-                            patientName={currentPatientName}
-                            originalContent={originalHistory}
-                            transcription={transcription}
-                            apiKey={apiKey}
-                            onNewConsultation={() => {
-                                if (activeSessionIdRef.current) {
-                                    void finalizeSession(activeSessionIdRef.current, {
-                                        status: 'failed',
-                                        result_status: 'failed_recoverable',
-                                        error_reason: 'new_consultation_interrupted'
-                                    });
-                                }
-                                setHistory('');
-                                setOriginalHistory('');
-                                setTranscription('');
-                                setCurrentPatientName('');
-                                setPipelineMetadata(undefined);
-                                clearPipelineBuffers();
-                                sessionVersionRef.current += 1;
-                                if (orchestratorRef.current) {
-                                    orchestratorRef.current.abort('new_consultation');
-                                    orchestratorRef.current = null;
-                                }
-                                resetSessionRuntime();
-                                aiServiceRef.current = null;
-                                activeSessionIdRef.current = null;
-                                setCurrentRecordId(null);
-                                setCurrentView('record');
-                            }}
-                            onContentChange={(newContent) => setHistory(newContent)}
-                            metadata={pipelineMetadata}
-                            recordId={currentRecordId || undefined}
-                            onPersistMedicalHistory={persistMedicalHistory}
-                            onRegenerateSection={SECTION_REGEN_ENABLED ? handleRegenerateSection : undefined}
-                            onGenerateReport={async () => {
-                                // Reuse existing report generation logic if possible, or leave handled by HistoryView internal logic if simpler
-                                // For now HistoryView handles generation via its own simple standard prompt if prop not fully passed, 
-                                // but we can pass a closure to reuse AIService. 
-                                const aiService = new AIService(getApiKeys(apiKey));
-                                const res = await aiService.generateMedicalReport(transcription, currentPatientName);
-                                return res.data;
-                            }}
-                        />
-                    </Suspense>
-                )}
-
-                {currentView === 'test-lab' && (
-                    <Suspense fallback={<div className="view-loading">Cargando laboratorio...</div>}>
-                        <AudioTestLab
-                            onClose={() => setCurrentView('record')}
-                            onRunFullPipeline={handleRecordingComplete}
-                            onRunTextPipeline={handleTextPipeline}
-                        />
-                    </Suspense>
-                )}
-                {showSettings && (
-                    <Suspense fallback={<div className="view-loading">Cargando ajustes...</div>}>
-                        <Settings
-                            apiKey={apiKey}
-                            onSave={handleSaveSettings}
-                            onClose={() => setShowSettings(false)}
-                        />
-                    </Suspense>
-                )}
-
-                {showLessons && (
-                    <Suspense fallback={<div className="view-loading">Cargando lecciones...</div>}>
-                        <LessonsPanel
-                            onClose={() => setShowLessons(false)}
-                        />
-                    </Suspense>
-                )}
+                <AnimatePresence>
+                    {showLessons && (
+                        <Suspense fallback={<div className="view-loading">Cargando lecciones...</div>}>
+                            <LessonsPanel
+                                onClose={() => setShowLessons(false)}
+                            />
+                        </Suspense>
+                    )}
+                </AnimatePresence>
             </Layout>
         </div >
     );

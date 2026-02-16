@@ -2,8 +2,12 @@ import { useMemo } from 'react';
 
 export type LivePipelineState =
     | 'idle'
+    | 'recovering'
     | 'recording'
     | 'transcribing_live'
+    | 'processing_partials'
+    | 'finalizing'
+    | 'awaiting_budget'
     | 'draft_ready'
     | 'hardening'
     | 'completed'
@@ -36,4 +40,3 @@ export const usePipelineStatusViewModel = (
         };
     }, [state, metrics.latenciesMs, metrics.concurrency, metrics.hedgedTriggered, metrics.totalChunks]);
 };
-

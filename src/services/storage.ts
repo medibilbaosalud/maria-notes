@@ -27,11 +27,11 @@ const generateUuid = (): string => {
 };
 
 // Map Dexie MedicalRecord fields to Supabase column names.
-// Dexie uses record_uuid / original_medical_history / audit_id / idempotency_key / updated_at
-// but Supabase table has uuid and may not have the extra Dexie-only columns.
+// Dexie uses record_uuid / original_medical_history / audit_id / idempotency_key / updated_at.
+// Supabase canonical schema uses record_uuid as deterministic sync key.
 const toCloudRecord = (record: MedicalRecord) => {
     return {
-        uuid: record.record_uuid,
+        record_uuid: record.record_uuid,
         patient_name: record.patient_name,
         consultation_type: record.consultation_type,
         transcription: record.transcription,
@@ -39,7 +39,8 @@ const toCloudRecord = (record: MedicalRecord) => {
         original_medical_history: record.original_medical_history || null,
         medical_report: record.medical_report || null,
         ai_model: record.ai_model || null,
-        created_at: record.created_at
+        created_at: record.created_at,
+        updated_at: record.updated_at || record.created_at
     };
 };
 
@@ -53,16 +54,16 @@ const syncToCloud = async (record: MedicalRecord, operation: 'insert' | 'update'
             const cloudRecord = toCloudRecord(record);
             const { error } = await client
                 .from('medical_records')
-                .upsert([cloudRecord], { onConflict: 'uuid' });
+                .upsert([cloudRecord], { onConflict: 'record_uuid' });
             if (error) {
                 console.error(`[Cloud Sync] Upsert error (${operation}):`, error.message, error.details);
                 throw error;
             }
-            console.log(`[Cloud Sync] Record ${operation === 'insert' ? 'inserted' : 'updated'}:`, cloudRecord.uuid);
+            console.log(`[Cloud Sync] Record ${operation === 'insert' ? 'inserted' : 'updated'}:`, cloudRecord.record_uuid);
         } else if (operation === 'delete') {
             const { error } = await client.from('medical_records')
                 .delete()
-                .eq('uuid', record.record_uuid);
+                .eq('record_uuid', record.record_uuid);
             if (error) {
                 console.error('[Cloud Sync] Delete error:', error.message);
                 throw error;
@@ -212,7 +213,7 @@ export const syncFromCloud = async (): Promise<number> => {
         let addedCount = 0;
 
         for (const cloudRec of cloudRecords) {
-            const cloudUuid = cloudRec.record_uuid || cloudRec.id || '';
+            const cloudUuid = String(cloudRec.record_uuid || cloudRec.uuid || cloudRec.id || '');
             if (!cloudUuid) continue;
 
             const local = localByUuid.get(cloudUuid);
@@ -656,12 +657,15 @@ export const getPipelineHealthSnapshot = async () => {
         .map((s) => s.next_attempt_at)
         .filter((value): value is string => Boolean(value))
         .sort()[0];
+    const pipelineFailures = failures.filter((failure) => failure.stage !== 'cloud_sync');
+    const cloudSyncFailures = failures.filter((failure) => failure.stage === 'cloud_sync');
 
     return {
         active_sessions: active,
         provisional_sessions: provisional,
         dead_letters: deadLetters,
         next_attempt_at: nextAttempt || null,
-        recent_failures: failures
+        recent_failures: pipelineFailures,
+        cloud_sync_failures: cloudSyncFailures.length
     };
 };

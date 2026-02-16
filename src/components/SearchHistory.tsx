@@ -5,6 +5,7 @@ import { searchMedicalRecords, type MedicalRecord, deleteMedicalRecord, updateMe
 import { isCloudSyncEnabled } from '../hooks/useCloudSync';
 import { AIService } from '../services/ai';
 import ReactMarkdown from 'react-markdown';
+import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
 
 
@@ -12,6 +13,18 @@ interface SearchHistoryProps {
   apiKey: string;
   onLoadRecord?: (record: MedicalRecord) => void;
 }
+
+const modalOverlayVariants = {
+  initial: { opacity: 0 },
+  enter: { opacity: 1, transition: motionTransitions.fast },
+  exit: { opacity: 0, transition: motionTransitions.fast }
+};
+
+const modalContentVariants = {
+  initial: { opacity: 0, scale: 0.98, y: 8 },
+  enter: { opacity: 1, scale: 1, y: 0, transition: motionTransitions.normal },
+  exit: { opacity: 0, scale: 0.98, y: 6, transition: motionTransitions.fast }
+};
 
 
 
@@ -394,6 +407,8 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
     return { history: history?.trim(), notes: notes?.trim() };
   };
 
+  const saveUiState = isSaving ? 'saving' : (lastSaved && isEditingHistory ? 'saved' : 'idle');
+
   return (
     <div className="history-container">
       <div className="search-section">
@@ -414,6 +429,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
             className={`refresh-btn ${isSyncing ? 'syncing' : ''}`}
             onClick={handleRefresh}
             title="Sincronizar con la nube"
+            data-ui-state={isSyncing ? 'active' : 'idle'}
           >
             <RefreshCcw size={20} />
           </button>
@@ -444,8 +460,10 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
                   initial={{ opacity: 0, y: 10 }}
 
                   animate={{ opacity: 1, y: 0 }}
-                  whileHover={{ y: -2, boxShadow: 'var(--shadow-md)' }}
-                  transition={{ duration: 0.2 }}
+                  whileHover={{ y: -2, scale: 1.01, boxShadow: 'var(--shadow-md)', transition: motionTransitions.fast }}
+                  whileTap={{ scale: 0.99, transition: motionTransitions.fast }}
+                  transition={motionTransitions.normal}
+                  data-ui-state={selectedRecord?.record_uuid === record.record_uuid ? 'active' : 'idle'}
                 >
                   <div className="card-content">
                     <div className="card-top">
@@ -486,7 +504,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
-                transition={{ duration: 0.3 }}
+                transition={motionTransitions.normal}
                 className="detail-view"
               >
                 {(() => {
@@ -545,29 +563,42 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
                           <div className="document-header">
                             <span className="doc-label">Historia Médica</span>
                             <div className="doc-actions">
-                              {isSaving && <span style={{ fontSize: '0.8rem', color: '#64748b', marginRight: '1rem', alignSelf: 'center' }}>Guardando...</span>}
-                              {!isSaving && lastSaved && isEditingHistory && <span style={{ fontSize: '0.8rem', color: '#16a34a', marginRight: '1rem', alignSelf: 'center' }}>Guardado</span>}
+                              <AnimatePresence mode="wait" initial={false}>
+                                {saveUiState !== 'idle' && (
+                                  <motion.span
+                                    key={saveUiState}
+                                    className="history-save-indicator"
+                                    data-ui-state={saveUiState}
+                                    initial={{ opacity: 0, y: 3 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -2 }}
+                                    transition={motionTransitions.fast}
+                                  >
+                                    {saveUiState === 'saving' ? 'Guardando...' : 'Guardado'}
+                                  </motion.span>
+                                )}
+                              </AnimatePresence>
                               {!isEditingHistory && (
                                 <>
-                                  <button className="search-icon-btn copy-doc" onClick={() => void handleCopy(history || '')} title="Copiar" aria-label="Copiar historia">
+                                  <button className="search-icon-btn copy-doc" onClick={() => void handleCopy(history || '')} title="Copiar" aria-label="Copiar historia" data-ui-state={copied ? 'success' : 'idle'}>
                                     {copied ? <Check size={16} /> : <Copy size={16} />}
                                   </button>
-                                  <button className="search-icon-btn print-doc" onClick={() => handlePrintHistory(history || '', selectedRecord.patient_name)} title="Imprimir" aria-label="Imprimir historia">
+                                  <button className="search-icon-btn print-doc" onClick={() => handlePrintHistory(history || '', selectedRecord.patient_name)} title="Imprimir" aria-label="Imprimir historia" data-ui-state="idle">
                                     <Printer size={16} />
                                   </button>
                                 </>
                               )}
                               {isEditingHistory ? (
                                 <div className="edit-actions">
-                                  <button className="search-icon-btn save-history" onClick={handleSaveHistory} aria-label="Guardar historia">
+                                  <button className="search-icon-btn save-history" onClick={handleSaveHistory} aria-label="Guardar historia" data-ui-state="success">
                                     <Save size={16} />
                                   </button>
-                                  <button className="search-icon-btn cancel-history" onClick={() => setIsEditingHistory(false)} aria-label="Cancelar edicion de historia">
+                                  <button className="search-icon-btn cancel-history" onClick={() => setIsEditingHistory(false)} aria-label="Cancelar edicion de historia" data-ui-state="idle">
                                     <X size={16} />
                                   </button>
                                 </div>
                               ) : (
-                                <button className="search-icon-btn edit-doc" onClick={handleStartEditingHistory} title="Editar" aria-label="Editar historia">
+                                <button className="search-icon-btn edit-doc" onClick={handleStartEditingHistory} title="Editar" aria-label="Editar historia" data-ui-state="idle">
                                   <Pencil size={16} />
                                 </button>
                               )}
@@ -621,15 +652,17 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
         {showReportModal && (
           <motion.div
             className="search-history-modal-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            variants={modalOverlayVariants}
+            initial="initial"
+            animate="enter"
+            exit="exit"
           >
             <motion.div
               className="search-history-modal-content"
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              variants={modalContentVariants}
+              initial="initial"
+              animate="enter"
+              exit="exit"
             >
               <div className="search-history-modal-header">
                 <h3>Informe Médico Formal</h3>
@@ -761,7 +794,11 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           align-items: center;
           justify-content: center;
           cursor: pointer;
-          transition: all 0.2s;
+          transition: border-color var(--motion-duration-fast) var(--motion-ease-base),
+            color var(--motion-duration-fast) var(--motion-ease-base),
+            background-color var(--motion-duration-fast) var(--motion-ease-base),
+            transform var(--motion-duration-fast) var(--motion-ease-base),
+            box-shadow var(--motion-duration-fast) var(--motion-ease-base);
           box-shadow: var(--shadow-sm);
         }
 
@@ -795,7 +832,9 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           font-size: 1rem;
           color: var(--text-primary);
           box-shadow: var(--shadow-sm);
-          transition: all 0.2s ease;
+          transition: border-color var(--motion-duration-fast) var(--motion-ease-base),
+            box-shadow var(--motion-duration-fast) var(--motion-ease-base),
+            background-color var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .history-search-input:focus {
@@ -843,7 +882,10 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           cursor: pointer;
           position: relative;
           border: 1px solid rgba(0,0,0,0.05);
-          transition: all 0.2s ease;
+          transition: border-color var(--motion-duration-fast) var(--motion-ease-base),
+            background-color var(--motion-duration-fast) var(--motion-ease-base),
+            box-shadow var(--motion-duration-fast) var(--motion-ease-base),
+            transform var(--motion-duration-fast) var(--motion-ease-base);
           box-shadow: var(--shadow-sm);
         }
 
@@ -927,7 +969,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           align-items: center;
           gap: 0.5rem;
           opacity: 0;
-          transition: opacity 0.2s ease;
+          transition: opacity var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .patient-card:hover .card-actions,
@@ -942,7 +984,10 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           border-radius: 8px;
           cursor: pointer;
           color: var(--text-secondary);
-          transition: all 0.2s;
+          transition: border-color var(--motion-duration-fast) var(--motion-ease-base),
+            background-color var(--motion-duration-fast) var(--motion-ease-base),
+            color var(--motion-duration-fast) var(--motion-ease-base),
+            transform var(--motion-duration-fast) var(--motion-ease-base);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -1427,6 +1472,23 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
             display: flex;
             align-items: center;
             gap: 0.5rem;
+        }
+
+        .history-save-indicator {
+          font-size: 0.8rem;
+          margin-right: 1rem;
+          align-self: center;
+          color: #64748b;
+          transition: color var(--motion-duration-fast) var(--motion-ease-base),
+            opacity var(--motion-duration-fast) var(--motion-ease-base);
+        }
+
+        .history-save-indicator[data-ui-state="saving"] {
+          color: #64748b;
+        }
+
+        .history-save-indicator[data-ui-state="saved"] {
+          color: #16a34a;
         }
 
         .search-icon-btn.copy-doc,

@@ -94,11 +94,15 @@
   font-weight: 500;
   cursor: pointer;
   border-radius: var(--radius-md);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
+    color var(--motion-duration-fast) var(--motion-ease-base),
+    transform var(--motion-duration-fast) var(--motion-ease-base);
 }
 
 .settings-btn:hover {
-  background-color: rgba(0, 0, 0, 0.03);
+  background-color: rgba(15, 23, 42, 0.04);
   color: var(--text-primary);
+  transform: translateY(-1px);
 }
 
 .settings-btn:focus-visible {
@@ -135,11 +139,15 @@
   font-weight: 500;
   text-align: left;
   position: relative;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
+    color var(--motion-duration-fast) var(--motion-ease-base),
+    transform var(--motion-duration-fast) var(--motion-ease-base);
 }
 
 .nav-item:hover {
-  background-color: rgba(0, 0, 0, 0.03);
+  background-color: rgba(15, 23, 42, 0.045);
   color: var(--text-primary);
+  transform: translateX(1px);
 }
 
 .nav-item.active {
@@ -157,6 +165,9 @@
   width: 3px;
   border-radius: 999px;
   background: var(--brand-primary);
+  transition: background-color var(--motion-duration-normal) var(--motion-ease-base),
+    transform var(--motion-duration-normal) var(--motion-ease-base),
+    opacity var(--motion-duration-normal) var(--motion-ease-base);
 }
 
 .nav-icon {
@@ -221,4 +232,3 @@
     padding: 1.25rem;
   }
 }
-

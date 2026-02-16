@@ -9,6 +9,7 @@ import { processDoctorFeedback } from '../services/doctor-feedback';
 import type { ExtractionMeta, ConsultationClassification, UncertaintyFlag, FieldEvidence } from '../services/groq';
 import { saveFieldConfirmation, logQualityEvent, saveDoctorSatisfactionEvent } from '../services/supabase';
 import { evaluateAndPersistRuleImpact } from '../services/learning/rule-evaluator';
+import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
 
 interface HistoryViewProps {
@@ -49,6 +50,18 @@ interface HistoryViewProps {
   onPersistMedicalHistory?: (newContent: string, options?: { autosave?: boolean }) => Promise<void> | void;
   onRegenerateSection?: (sectionTitle: string, currentContent: string) => Promise<string>;
 }
+
+const modalOverlayVariants = {
+  initial: { opacity: 0 },
+  enter: { opacity: 1, transition: motionTransitions.fast },
+  exit: { opacity: 0, transition: motionTransitions.fast }
+};
+
+const modalContentVariants = {
+  initial: { opacity: 0, scale: 0.98, y: 8 },
+  enter: { opacity: 1, scale: 1, y: 0, transition: motionTransitions.normal },
+  exit: { opacity: 0, scale: 0.98, y: 6, transition: motionTransitions.fast }
+};
 
 const LoadingMessages = () => {
   const messages = [
@@ -763,6 +776,12 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     ? metadata?.uncertaintyFlags?.find((flag) => flag.field_path === selectedEvidenceField)
     : undefined;
   const aiBaseline = versions.find((item) => item.source === 'ai')?.content || originalHistoryRef.current;
+  const autosaveUiState = isAutosaving ? 'active' : lastSavedAt ? 'success' : 'idle';
+  const autosaveLabel = isAutosaving
+    ? 'Guardando...'
+    : lastSavedAt
+      ? `Guardado ${lastSavedAt.toLocaleTimeString()}`
+      : 'Sin guardar';
   const handleLoadVersion = (version: HistoryVersion) => {
     setEditValue(version.content);
     setIsEditing(true);
@@ -821,6 +840,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         <button
                           className="action-button new-consultation"
                           onClick={onNewConsultation}
+                          data-ui-state="idle"
                         >
                           <Plus size={18} />
                           <span>Nueva Consulta</span>
@@ -831,6 +851,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         id="edit-mode-btn"
                         onClick={handleEditClick}
                         title="Editar texto"
+                        data-ui-state="idle"
                       >
                         <Edit2 size={16} />
                         <span>Editar</span>
@@ -839,12 +860,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         className="action-button secondary"
                         onClick={handleOpenReport}
                         title="Generar informe medico formal"
+                        data-ui-state={hasGeneratedReport ? 'success' : 'idle'}
                       >
                         <FileOutput size={16} />
                         <span>Informe</span>
                       </button>
                       <details className="more-actions-menu" ref={moreActionsRef}>
-                        <summary className="action-button secondary more-actions-trigger" aria-label="Abrir mas acciones">
+                        <summary className="action-button secondary more-actions-trigger" aria-label="Abrir mas acciones" data-ui-state="idle">
                           <MoreHorizontal size={16} />
                           <span>Mas acciones</span>
                         </summary>
@@ -857,6 +879,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                                 setShowSourcesModal(true);
                               }}
                               title="Ver fuentes"
+                              data-ui-state="idle"
                             >
                               <FileText size={16} />
                               <span>Fuentes</span>
@@ -864,25 +887,27 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                           )}
                           <button
                             className="action-button secondary menu-item"
-                            onClick={() => {
-                              moreActionsRef.current?.removeAttribute('open');
-                              setShowCompareModal(true);
-                            }}
-                            title="Comparar IA vs editado"
-                          >
-                            <FileText size={16} />
-                            <span>Comparar</span>
+                              onClick={() => {
+                                moreActionsRef.current?.removeAttribute('open');
+                                setShowCompareModal(true);
+                              }}
+                              title="Comparar IA vs editado"
+                              data-ui-state="idle"
+                            >
+                              <FileText size={16} />
+                              <span>Comparar</span>
                           </button>
                           <button
                             className="action-button secondary menu-item"
-                            onClick={() => {
-                              moreActionsRef.current?.removeAttribute('open');
-                              setShowVersionsModal(true);
-                            }}
-                            title="Ver versiones"
-                          >
-                            <FileText size={16} />
-                            <span>Versiones</span>
+                              onClick={() => {
+                                moreActionsRef.current?.removeAttribute('open');
+                                setShowVersionsModal(true);
+                              }}
+                              title="Ver versiones"
+                              data-ui-state="idle"
+                            >
+                              <FileText size={16} />
+                              <span>Versiones</span>
                           </button>
                           {onRegenerateSection && (
                             <div className="menu-item section-regen-item">
@@ -903,6 +928,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                                 }}
                                 disabled={isRegeneratingSection}
                                 title="Regenerar solo la seccion seleccionada"
+                                data-ui-state={isRegeneratingSection ? 'active' : 'idle'}
                               >
                                 <Sparkles size={16} />
                                 <span>{isRegeneratingSection ? 'Regenerando...' : 'Regenerar seccion'}</span>
@@ -915,6 +941,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                               moreActionsRef.current?.removeAttribute('open');
                               void handleCopy(historyText);
                             }}
+                            data-ui-state={copied ? 'success' : 'idle'}
                           >
                             {copied ? <Check size={16} /> : <Copy size={16} />}
                             <span>{copied ? 'Copiado' : 'Copiar'}</span>
@@ -932,6 +959,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         }}
                         title="Finalizar historia"
                         id="finalize-btn"
+                        data-ui-state={hasFinalized ? 'success' : 'idle'}
                       >
                         <Check size={16} />
                         <span>{hasFinalized ? 'Finalizado' : 'Finalizar'}</span>
@@ -939,11 +967,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     </>
                   ) : (
                     <>
-                      <button className="action-button secondary" onClick={handleCancelEdit}>
+                      <button className="action-button secondary" onClick={handleCancelEdit} data-ui-state="idle">
                         <X size={16} />
                         <span>Cancelar</span>
                       </button>
-                      <button className="action-button primary success" id="save-edit-btn" onClick={handleSaveEdit}>
+                      <button className="action-button primary success" id="save-edit-btn" onClick={handleSaveEdit} data-ui-state="success">
                         <Check size={16} />
                         <span>Guardar</span>
                       </button>
@@ -962,12 +990,22 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   </div>
                 ))}
               </div>
-              <div className={`sync-status ${isOnline ? 'online' : 'offline'}`}>
+              <div className={`sync-status ${isOnline ? 'online' : 'offline'}`} data-ui-state={isOnline ? 'online' : 'offline'}>
                 <span>{isOnline ? 'Online' : 'Sin conexión'}</span>
                 {isEditing && (
-                  <span className="sync-detail">
-                    {isAutosaving ? 'Autosave...' : lastSavedAt ? `Guardado ${lastSavedAt.toLocaleTimeString()}` : 'Sin guardar'}
-                  </span>
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.span
+                      key={`${autosaveUiState}-${autosaveLabel}`}
+                      className="sync-detail"
+                      data-ui-state={autosaveUiState}
+                      initial={{ opacity: 0, y: 3 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -2 }}
+                      transition={motionTransitions.fast}
+                    >
+                      {autosaveLabel}
+                    </motion.span>
+                  </AnimatePresence>
                 )}
               </div>
             </div>
@@ -1224,15 +1262,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         {showReportModal && (
           <motion.div
             className="modal-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            variants={modalOverlayVariants}
+            initial="initial"
+            animate="enter"
+            exit="exit"
           >
             <motion.div
               className="modal-content"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
+              variants={modalContentVariants}
+              initial="initial"
+              animate="enter"
+              exit="exit"
             >
               <div className="modal-header">
                 <h3>Informe Médico Formal</h3>
@@ -1278,15 +1318,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         {showSourcesModal && (
           <motion.div
             className="modal-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            variants={modalOverlayVariants}
+            initial="initial"
+            animate="enter"
+            exit="exit"
           >
             <motion.div
               className="modal-content sources-modal"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
+              variants={modalContentVariants}
+              initial="initial"
+              animate="enter"
+              exit="exit"
             >
               <div className="modal-header">
                 <h3>Fuentes y evidencia</h3>
@@ -1325,15 +1367,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         {showEvidenceModal && (
           <motion.div
             className="modal-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            variants={modalOverlayVariants}
+            initial="initial"
+            animate="enter"
+            exit="exit"
           >
             <motion.div
               className="modal-content evidence-modal"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
+              variants={modalContentVariants}
+              initial="initial"
+              animate="enter"
+              exit="exit"
             >
               <div className="modal-header">
                 <h3>Evidencia guiada</h3>
@@ -1403,15 +1447,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         {showCompareModal && (
           <motion.div
             className="modal-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            variants={modalOverlayVariants}
+            initial="initial"
+            animate="enter"
+            exit="exit"
           >
             <motion.div
               className="modal-content compare-modal"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
+              variants={modalContentVariants}
+              initial="initial"
+              animate="enter"
+              exit="exit"
             >
               <div className="modal-header">
                 <h3>Comparar IA vs editado</h3>
@@ -1465,15 +1511,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         {showVersionsModal && (
           <motion.div
             className="modal-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            variants={modalOverlayVariants}
+            initial="initial"
+            animate="enter"
+            exit="exit"
           >
             <motion.div
               className="modal-content versions-modal"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
+              variants={modalContentVariants}
+              initial="initial"
+              animate="enter"
+              exit="exit"
             >
               <div className="modal-header">
                 <h3>Versiones guardadas</h3>
@@ -1628,7 +1676,26 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           font-size: 0.95rem;
           font-weight: 500;
           cursor: pointer;
-          transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+          transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
+            border-color var(--motion-duration-fast) var(--motion-ease-base),
+            color var(--motion-duration-fast) var(--motion-ease-base),
+            transform var(--motion-duration-fast) var(--motion-ease-base),
+            box-shadow var(--motion-duration-fast) var(--motion-ease-base),
+            opacity var(--motion-duration-fast) var(--motion-ease-base);
+        }
+
+        .history-view-container .action-button:hover {
+          transform: translateY(-1px);
+        }
+
+        .history-view-container .action-button:active {
+          transform: scale(0.98);
+        }
+
+        .history-view-container .action-button:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+          transform: none;
         }
 
         .history-view-container .action-button.new-consultation {
@@ -1639,7 +1706,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         }
         
         .history-view-container .action-button.new-consultation:hover {
-          transform: translateY(-2px);
+          transform: translateY(-1px);
           box-shadow: 0 8px 20px rgba(38, 166, 154, 0.4);
         }
 
@@ -2178,6 +2245,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           justify-content: center;
           z-index: 1000;
           backdrop-filter: blur(4px);
+          transition: opacity var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .history-view-container .modal-content {
@@ -2189,6 +2257,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           display: flex;
           flex-direction: column;
           box-shadow: var(--shadow-lg);
+          transform-origin: center top;
         }
 
         .history-view-container .modal-header {
@@ -2401,6 +2470,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           border: 1px solid #e5e7eb;
           font-size: 0.75rem;
           color: #475569;
+          transition: border-color var(--motion-duration-fast) var(--motion-ease-base),
+            background-color var(--motion-duration-fast) var(--motion-ease-base),
+            color var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .workflow-step.done {
@@ -2415,6 +2487,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           font-size: 0.75rem;
           color: #64748b;
           text-align: right;
+          transition: color var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .sync-status.online span:first-child {
@@ -2428,6 +2501,16 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         .sync-detail {
           font-size: 0.7rem;
           color: #475569;
+          transition: color var(--motion-duration-fast) var(--motion-ease-base),
+            opacity var(--motion-duration-fast) var(--motion-ease-base);
+        }
+
+        .sync-detail[data-ui-state="active"] {
+          color: #0f766e;
+        }
+
+        .sync-detail[data-ui-state="success"] {
+          color: #15803d;
         }
 
         .uncertainty-highlight {

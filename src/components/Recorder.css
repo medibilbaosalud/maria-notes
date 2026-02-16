@@ -13,6 +13,7 @@
   max-width: 720px;
   margin: 0 auto;
   position: relative;
+  transition: box-shadow var(--motion-duration-normal) var(--motion-ease-base);
 }
 
 .recorder-header {
@@ -103,6 +104,9 @@
   font-size: 0.95rem;
   box-sizing: border-box;
   font-family: var(--font-sans);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-base),
+    color var(--motion-duration-fast) var(--motion-ease-base);
 }
 
 .recorder-text-input:focus {
@@ -162,6 +166,7 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 1rem;
+  transition: color var(--motion-duration-fast) var(--motion-ease-base);
 }
 
 .status-dot {
@@ -169,12 +174,34 @@
   height: 8px;
   border-radius: 50%;
   background-color: var(--brand-primary);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-base),
+    opacity var(--motion-duration-fast) var(--motion-ease-base);
 }
 
 .status-text {
   font-size: 0.85rem;
   color: var(--text-secondary);
   font-weight: 500;
+  transition: color var(--motion-duration-fast) var(--motion-ease-base);
+}
+
+.status-indicator[data-ui-state="recording"] .status-text {
+  color: #0f766e;
+}
+
+.status-indicator[data-ui-state="recording"] .status-dot {
+  background-color: #0f766e;
+  box-shadow: 0 0 0 6px rgba(15, 118, 110, 0.14);
+}
+
+.status-indicator[data-ui-state="finalizing"] .status-text {
+  color: #b45309;
+}
+
+.status-indicator[data-ui-state="finalizing"] .status-dot {
+  background-color: #f59e0b;
+  box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.14);
 }
 
 .timer-display {
@@ -198,6 +225,15 @@
   color: var(--brand-primary);
   font-size: 0.8rem;
   font-weight: 600;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
+    color var(--motion-duration-fast) var(--motion-ease-base),
+    border-color var(--motion-duration-fast) var(--motion-ease-base);
+  border: 1px solid rgba(38, 166, 154, 0.2);
+}
+
+.batch-indicator[data-ui-state="active"] {
+  color: #0f766e;
+  background: rgba(20, 184, 166, 0.12);
 }
 
 .pulse-ring {
@@ -231,6 +267,10 @@
   cursor: pointer;
   box-shadow: var(--shadow-md);
   font-family: var(--font-sans);
+  transition: transform var(--motion-duration-fast) var(--motion-ease-base),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-base),
+    opacity var(--motion-duration-fast) var(--motion-ease-base),
+    filter var(--motion-duration-fast) var(--motion-ease-base);
 }
 
 .action-btn.start {
@@ -240,8 +280,10 @@
 
 .action-btn:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  opacity: 0.6;
+  filter: saturate(0.72);
   transform: none !important;
+  box-shadow: var(--shadow-sm);
 }
 
 .action-btn.stop {
@@ -282,4 +324,3 @@
     font-size: 1rem;
   }
 }
-

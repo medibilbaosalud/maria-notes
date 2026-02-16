@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 import { MBSLogo } from './MBSLogo';
 import heroImage from '../assets/maria_notes_hero.png';
+import { fadeSlideInSmall, motionEase, motionTransitions, softScaleTap, statusPulseSoft } from '../features/ui/motion-tokens';
 import './Recorder.css';
 
 interface RecorderProps {
@@ -18,6 +19,7 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, onConsu
   const turboBatchIntervalMs = Number(import.meta.env.VITE_TURBO_RECORDER_BATCH_INTERVAL_MS || 90_000);
   const [patientName, setPatientName] = useState('');
   const [processedBatches, setProcessedBatches] = useState<number[]>([]);
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const patientNameRef = useRef(patientName);
 
   useEffect(() => {
@@ -39,25 +41,40 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, onConsu
     onBatchReady: handleBatchReady,
     onFinalReady: async ({ blob, lastBatchIndex }) => {
       console.log(`[RecorderUI] Final segment ready (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
-      await onRecordingComplete(blob, patientNameRef.current, false, lastBatchIndex);
-      setProcessedBatches([]);
+      try {
+        await onRecordingComplete(blob, patientNameRef.current, false, lastBatchIndex);
+      } finally {
+        setProcessedBatches([]);
+        setIsFinalizing(false);
+      }
     },
     batchIntervalMs: Math.max(60_000, turboBatchIntervalMs)
   });
 
   const patientNameValid = patientNameRef.current.trim().length >= 2;
-  const canStartRecording = canStart && patientNameValid;
+  const canStartRecording = canStart && patientNameValid && !isFinalizing;
 
   const handleStart = async () => {
     if (!canStartRecording) return;
+    setIsFinalizing(false);
     const sessionId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
       ? crypto.randomUUID()
       : `session_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    onConsultationStart?.(sessionId, patientNameRef.current);
     try {
       await startRecording();
+      onConsultationStart?.(sessionId, patientNameRef.current);
     } catch (error) {
       console.error('[RecorderUI] Failed to start recording:', error);
+    }
+  };
+
+  const handleStop = async () => {
+    setIsFinalizing(true);
+    try {
+      await Promise.resolve(stopRecording());
+    } catch (error) {
+      setIsFinalizing(false);
+      throw error;
     }
   };
 
@@ -67,12 +84,20 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, onConsu
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const recorderUiState = isRecording ? 'recording' : isFinalizing ? 'finalizing' : 'ready';
+  const statusMessage = isRecording
+    ? 'Grabando consulta...'
+    : isFinalizing
+      ? 'Procesando final...'
+      : 'Listo para grabar';
+
   return (
     <motion.div
       className="recorder-card"
-      initial={{ scale: 0.95, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      transition={{ duration: 0.4 }}
+      variants={fadeSlideInSmall}
+      initial="initial"
+      animate="enter"
+      exit="exit"
     >
       <div className="recorder-header">
         <div className="logo-wrapper-absolute">
@@ -114,16 +139,25 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, onConsu
       </div>
 
       <div className="visualization-area">
-        <div className="status-indicator">
+        <div className="status-indicator" data-ui-state={recorderUiState}>
           <motion.div
             className="status-dot"
-            animate={{
-              scale: isRecording ? [1, 1.2, 1] : 1,
-              opacity: isRecording ? 1 : 0.5
+            animate={statusPulseSoft(isRecording)}
+            transition={{
+              duration: 1.2,
+              repeat: isRecording ? Infinity : 0,
+              ease: motionEase.base
             }}
-            transition={{ repeat: isRecording ? Infinity : 0, duration: 2 }}
           />
-          <span className="status-text">{isRecording ? 'Grabando consulta...' : 'Listo para grabar'}</span>
+          <motion.span
+            key={statusMessage}
+            className="status-text"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={motionTransitions.fast}
+          >
+            {statusMessage}
+          </motion.span>
         </div>
 
         <AnimatePresence>
@@ -139,7 +173,7 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, onConsu
                     duration: 2.5,
                     repeat: Infinity,
                     delay: i * 1.2,
-                    ease: 'easeOut'
+                    ease: motionEase.out
                   }}
                 />
               ))}
@@ -157,7 +191,9 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, onConsu
               className="batch-indicator"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              transition={motionTransitions.normal}
+              data-ui-state={isFinalizing ? 'active' : 'success'}
             >
               <CheckCircle size={14} />
               <span>{processedBatches.length} parte{processedBatches.length > 1 ? 's' : ''} procesada{processedBatches.length > 1 ? 's' : ''}</span>
@@ -176,10 +212,11 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, onConsu
               disabled={!canStartRecording}
               title={!canStartRecording ? (startBlockReason || 'Completa el preflight antes de iniciar') : undefined}
               aria-label="Iniciar consulta"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+              {...softScaleTap}
               initial={{ y: 10, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
+              transition={motionTransitions.normal}
+              data-ui-state={!canStartRecording ? 'disabled' : 'ready'}
             >
               <Mic size={24} />
               <span>Iniciar Consulta</span>
@@ -188,15 +225,16 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, onConsu
             <motion.button
               key="stop"
               className="action-btn stop"
-              onClick={stopRecording}
+              onClick={() => void handleStop()}
               aria-label="Finalizar y generar historia"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+              {...softScaleTap}
               initial={{ y: 10, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
+              transition={motionTransitions.normal}
+              data-ui-state={isFinalizing ? 'finalizing' : 'recording'}
             >
               <Square size={24} fill="currentColor" />
-              <span>Finalizar y Generar</span>
+              <span>{isFinalizing ? 'Procesando...' : 'Finalizar y Generar'}</span>
             </motion.button>
           )}
         </AnimatePresence>

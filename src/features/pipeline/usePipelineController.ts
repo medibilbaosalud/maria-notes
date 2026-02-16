@@ -1,6 +1,19 @@
 import { useCallback } from 'react';
 
-type SetLiveState = (value: 'recording' | 'idle') => void;
+type SetLiveState = (value:
+    | 'idle'
+    | 'recovering'
+    | 'recording'
+    | 'transcribing_live'
+    | 'processing_partials'
+    | 'awaiting_budget'
+    | 'finalizing'
+    | 'draft_ready'
+    | 'hardening'
+    | 'completed'
+    | 'provisional'
+    | 'failed'
+) => void;
 type SetBusyState = (busy: boolean) => void;
 type StartConsultation = (sessionId: string, patientName: string) => void;
 type StartDiagnosticRun = (sessionId: string, patientName: string) => void;
@@ -30,4 +43,3 @@ export const usePipelineController = (params: UsePipelineControllerParams) => {
         resetSessionRuntime
     };
 };
-

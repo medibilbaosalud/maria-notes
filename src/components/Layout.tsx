@@ -2,6 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Settings, Mic, FileText, FileBarChart, FlaskConical, Lightbulb } from 'lucide-react';
 import { MBSLogo } from './MBSLogo';
+import { motionTransitions } from '../features/ui/motion-tokens';
 import '../design-system.css';
 import './Layout.css';
 
@@ -20,7 +21,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, onOpen
         className="sidebar"
         initial={{ x: -20, opacity: 0 }}
         animate={{ x: 0, opacity: 1 }}
-        transition={{ duration: 0.4, ease: 'easeOut' }}
+        transition={motionTransitions.slow}
       >
         <div className="brand-area">
           <div className="brand-lockup">
@@ -77,14 +78,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, onOpen
       </motion.aside>
 
       <main className="main-content">
-        <motion.div
-          className="content-wrapper"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.1 }}
-        >
-          {children}
-        </motion.div>
+        <div className="content-wrapper">{children}</div>
       </main>
     </div>
   );
@@ -99,7 +93,13 @@ interface NavItemProps {
 
 const NavItem: React.FC<NavItemProps> = ({ icon, label, isActive, onClick }) => {
   return (
-    <button className={`nav-item ${isActive ? 'active' : ''}`} onClick={onClick} aria-label={label} title={label}>
+    <button
+      className={`nav-item ${isActive ? 'active' : ''}`}
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      data-ui-state={isActive ? 'active' : 'idle'}
+    >
       <span className="nav-icon">{icon}</span>
       <span className="nav-label">{label}</span>
     </button>

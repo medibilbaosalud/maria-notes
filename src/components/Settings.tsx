@@ -9,10 +9,12 @@
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Save, Key, Download, Upload, Check, AlertCircle, Cloud, CloudOff, Play } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { downloadBackup, importRecords } from '../services/backup';
 import { useCloudSync } from '../hooks/useCloudSync';
 import { syncFromCloud } from '../services/storage';
 import { useSimulation } from './Simulation/SimulationContext';
+import { motionTransitions } from '../features/ui/motion-tokens';
 
 interface SettingsProps {
   apiKey: string;
@@ -90,8 +92,20 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
 
 
   return (
-    <div className="settings-modal-overlay">
-      <div className="settings-modal-card">
+    <motion.div
+      className="settings-modal-overlay"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={motionTransitions.fast}
+    >
+      <motion.div
+        className="settings-modal-card"
+        initial={{ opacity: 0, scale: 0.98, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.98, y: 6 }}
+        transition={motionTransitions.normal}
+      >
         <div className="settings-modal-header">
           <div className="settings-header-title">
             <div className="settings-icon-bg">
@@ -155,12 +169,22 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
                 />
               </div>
 
-              {backupStatus !== 'idle' && backupStatus !== 'exporting' && backupStatus !== 'importing' && (
-                <div className={`settings-backup-feedback ${backupStatus}`}>
-                  {backupStatus === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
-                  <span>{backupMessage}</span>
-                </div>
-              )}
+              <AnimatePresence mode="wait" initial={false}>
+                {backupStatus !== 'idle' && backupStatus !== 'exporting' && backupStatus !== 'importing' && (
+                  <motion.div
+                    key={backupStatus}
+                    className={`settings-backup-feedback ${backupStatus}`}
+                    data-ui-state={backupStatus}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -3 }}
+                    transition={motionTransitions.fast}
+                  >
+                    {backupStatus === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
+                    <span>{backupMessage}</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {isCloudEnabled && (
                 <div className="settings-cloud-sync-row">
@@ -169,12 +193,25 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
                     className="settings-btn-backup settings-btn-full"
                     onClick={() => void runCloudSync()}
                     disabled={cloudSyncStatus === 'syncing'}
+                    data-ui-state={cloudSyncStatus === 'syncing' ? 'active' : cloudSyncStatus}
                   >
                     {cloudSyncStatus === 'syncing' ? 'Sincronizando...' : 'Sincronizar ahora'}
                   </button>
-                  {cloudSyncStatus !== 'idle' && cloudSyncMessage && (
-                    <p className="settings-help-text settings-help-tight">{cloudSyncMessage}</p>
-                  )}
+                  <AnimatePresence mode="wait" initial={false}>
+                    {cloudSyncStatus !== 'idle' && cloudSyncMessage && (
+                      <motion.p
+                        key={`${cloudSyncStatus}-${cloudSyncMessage}`}
+                        className="settings-help-text settings-help-tight settings-sync-feedback"
+                        data-ui-state={cloudSyncStatus}
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -3 }}
+                        transition={motionTransitions.fast}
+                      >
+                        {cloudSyncMessage}
+                      </motion.p>
+                    )}
+                  </AnimatePresence>
                 </div>
               )}
             </div>
@@ -185,19 +222,27 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
                 <div className="settings-cloud-info">
                   {isCloudEnabled ? <Cloud size={20} /> : <CloudOff size={20} />}
                   <div className="settings-cloud-text">
-                    <span className="settings-cloud-status">Activado (Permanente)</span>
+                    <span className="settings-cloud-status" data-ui-state={isCloudEnabled ? 'success' : 'warning'}>
+                      {isCloudEnabled ? 'Activado (Permanente)' : 'No configurado'}
+                    </span>
                     <span className="settings-cloud-desc">
-                      Los datos se guardan localmente y en Supabase
+                      {isCloudEnabled
+                        ? 'Los datos se guardan localmente y en Supabase'
+                        : 'Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY para activar sync'}
                     </span>
                   </div>
                 </div>
                 <button
                   type="button"
-                  className={`settings-toggle-btn active disabled`}
+                  className={`settings-toggle-btn ${isCloudEnabled ? 'active' : ''} disabled`}
                   onClick={() => { }}
                   disabled={true}
-                  title="Esta opción está activada permanentemente"
-                  aria-label="Sincronización en la nube activada permanentemente"
+                  title={isCloudEnabled
+                    ? 'Esta opción está activada permanentemente'
+                    : 'Faltan credenciales de Supabase en .env'}
+                  aria-label={isCloudEnabled
+                    ? 'Sincronización en la nube activada permanentemente'
+                    : 'Sincronización en la nube no configurada'}
                   style={{ opacity: 0.7, cursor: 'not-allowed' }}
                 >
                   <span className="settings-toggle-knob" />
@@ -229,7 +274,7 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
             </button>
           </div>
         </form>
-      </div>
+      </motion.div>
 
       <style>{`
         .settings-modal-overlay {
@@ -244,7 +289,6 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
           align-items: center;
           justify-content: center;
           z-index: var(--z-modal);
-          animation: fade-in 0.2s ease-out;
           padding: 1rem;
         }
 
@@ -255,7 +299,6 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
           border-radius: 24px;
           box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
           overflow: hidden;
-          animation: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
           border: 1px solid rgba(0, 0, 0, 0.05);
         }
 
@@ -303,6 +346,9 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
           display: flex;
           align-items: center;
           justify-content: center;
+          transition: color var(--motion-duration-fast) var(--motion-ease-base),
+            background-color var(--motion-duration-fast) var(--motion-ease-base),
+            transform var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .settings-close-btn:hover {
@@ -379,6 +425,12 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
           align-items: center;
           gap: 0.5rem;
           border: none;
+          transition: transform var(--motion-duration-fast) var(--motion-ease-base),
+            box-shadow var(--motion-duration-fast) var(--motion-ease-base),
+            background-color var(--motion-duration-fast) var(--motion-ease-base),
+            border-color var(--motion-duration-fast) var(--motion-ease-base),
+            color var(--motion-duration-fast) var(--motion-ease-base),
+            opacity var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .settings-btn-primary {
@@ -431,12 +483,20 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
           border: 1px solid #e2e8f0;
           background: white;
           color: #475569;
+          transition: transform var(--motion-duration-fast) var(--motion-ease-base),
+            box-shadow var(--motion-duration-fast) var(--motion-ease-base),
+            background-color var(--motion-duration-fast) var(--motion-ease-base),
+            border-color var(--motion-duration-fast) var(--motion-ease-base),
+            color var(--motion-duration-fast) var(--motion-ease-base),
+            opacity var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .settings-btn-backup:hover:not(:disabled) {
           background: #f8fafc;
           border-color: var(--brand-primary);
           color: var(--brand-primary);
+          transform: translateY(-1px);
+          box-shadow: var(--shadow-sm);
         }
 
         .settings-btn-backup:disabled {
@@ -504,6 +564,15 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
           font-weight: 600;
           color: var(--text-primary);
           font-size: 0.95rem;
+          transition: color var(--motion-duration-fast) var(--motion-ease-base);
+        }
+
+        .settings-cloud-status[data-ui-state="success"] {
+          color: #0f766e;
+        }
+
+        .settings-cloud-status[data-ui-state="warning"] {
+          color: #92400e;
         }
 
         .settings-cloud-desc {
@@ -534,7 +603,7 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
           border-radius: 50%;
           background: white;
           box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-          transition: transform 0.2s;
+          transition: transform var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .settings-toggle-btn.active .settings-toggle-knob {
@@ -555,26 +624,20 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
           color: #0f766e;
         }
 
-        @keyframes fade-in {
-          from {
-            opacity: 0;
-          }
-
-          to {
-            opacity: 1;
-          }
+        .settings-sync-feedback {
+          transition: color var(--motion-duration-fast) var(--motion-ease-base);
         }
 
-        @keyframes slide-up {
-          from {
-            transform: translateY(20px) scale(0.95);
-            opacity: 0;
-          }
+        .settings-sync-feedback[data-ui-state="syncing"] {
+          color: #0f766e;
+        }
 
-          to {
-            transform: translateY(0) scale(1);
-            opacity: 1;
-          }
+        .settings-sync-feedback[data-ui-state="success"] {
+          color: #15803d;
+        }
+
+        .settings-sync-feedback[data-ui-state="error"] {
+          color: #b91c1c;
         }
 
         @media (max-width: 1024px) {
@@ -596,6 +659,6 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
           }
         }
       `}</style>
-    </div>
+    </motion.div>
   );
 };
