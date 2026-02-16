@@ -16,7 +16,8 @@ import {
 } from './model-registry';
 import { fetchWithRetry, NetworkRequestError, isRetryableStatus } from './net';
 import { BudgetExceededError, getBudgetManager } from './reliability/budget-manager';
-import { getRetryPolicy, getRetryPolicyForTask } from './reliability/retry-policy';
+import { getAdaptiveRetryPolicyForTask, getAdaptiveTimeout, getRetryPolicy } from './reliability/retry-policy';
+import { normalizeAndChunkAudio } from '../utils/audioProcessing';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
@@ -25,6 +26,7 @@ const WHISPER_MODELS = ['whisper-large-v3-turbo', 'whisper-large-v3'];
 
 type TranscriptionOptions = {
     whisperStrict?: boolean;
+    signal?: AbortSignal;
 };
 
 const CHARS_PER_TOKEN = 4;
@@ -91,7 +93,132 @@ class ModelRateLimiter {
     }
 }
 
+interface RouteRuntimeState {
+    inFlight: number;
+    consecutiveFailures: number;
+    recentBudgetFailures: number;
+    recentTimeoutFailures: number;
+    recentThrottleFailures: number;
+    circuitOpenUntil: number;
+}
+
+type RouteFailureKind = 'budget' | 'throttle' | 'timeout' | 'network' | 'http' | 'other';
+
+class AdaptiveRouteController {
+    private states = new Map<string, RouteRuntimeState>();
+    private globalInFlight = 0;
+    private readonly profile = String(import.meta.env.VITE_TURBO_PROFILE || 'aggressive_p95').toLowerCase();
+    private readonly presets = {
+        aggressive_p95: {
+            globalLimit: 8,
+            basePerRouteLimit: 2,
+            baseCooldownMs: 6_000
+        },
+        conservative_cost: {
+            globalLimit: 4,
+            basePerRouteLimit: 1,
+            baseCooldownMs: 10_000
+        }
+    } as const;
+    private readonly selectedPreset =
+        this.presets[this.profile as keyof typeof this.presets] || this.presets.aggressive_p95;
+    private globalLimit = Math.max(2, Number(import.meta.env.VITE_TURBO_GLOBAL_CONCURRENCY_LIMIT || this.selectedPreset.globalLimit));
+    private readonly basePerRouteLimit = Math.max(1, Number(import.meta.env.VITE_TURBO_ROUTE_CONCURRENCY_LIMIT || this.selectedPreset.basePerRouteLimit));
+    private readonly baseCooldownMs = Math.max(1_500, Number(import.meta.env.VITE_TURBO_CIRCUIT_COOLDOWN_MS || this.selectedPreset.baseCooldownMs));
+
+    private ensure(routeKey: string): RouteRuntimeState {
+        const current = this.states.get(routeKey);
+        if (current) return current;
+        const next: RouteRuntimeState = {
+            inFlight: 0,
+            consecutiveFailures: 0,
+            recentBudgetFailures: 0,
+            recentTimeoutFailures: 0,
+            recentThrottleFailures: 0,
+            circuitOpenUntil: 0
+        };
+        this.states.set(routeKey, next);
+        return next;
+    }
+
+    private effectiveRouteLimit(routeKey: string): number {
+        const state = this.ensure(routeKey);
+        let limit = this.basePerRouteLimit;
+        if (state.recentBudgetFailures > 0 || state.recentThrottleFailures > 0) limit -= 1;
+        if (state.consecutiveFailures >= 2) limit = 1;
+        return Math.max(1, limit);
+    }
+
+    getCircuitRetryAfterMs(routeKey: string): number {
+        const state = this.ensure(routeKey);
+        const wait = state.circuitOpenUntil - Date.now();
+        return Math.max(0, wait);
+    }
+
+    isCircuitOpen(routeKey: string): boolean {
+        const state = this.ensure(routeKey);
+        return state.circuitOpenUntil > Date.now();
+    }
+
+    async acquire(routeKey: string): Promise<void> {
+        const state = this.ensure(routeKey);
+        while (true) {
+            if (this.isCircuitOpen(routeKey)) {
+                const waitMs = this.getCircuitRetryAfterMs(routeKey);
+                throw new BudgetExceededError(`route_circuit_open:${routeKey}`, Math.max(250, waitMs), 'minute');
+            }
+            const routeLimit = this.effectiveRouteLimit(routeKey);
+            if (state.inFlight < routeLimit && this.globalInFlight < this.globalLimit) {
+                state.inFlight += 1;
+                this.globalInFlight += 1;
+                return;
+            }
+            await sleep(25);
+        }
+    }
+
+    release(routeKey: string): void {
+        const state = this.ensure(routeKey);
+        state.inFlight = Math.max(0, state.inFlight - 1);
+        this.globalInFlight = Math.max(0, this.globalInFlight - 1);
+    }
+
+    reportSuccess(routeKey: string): void {
+        const state = this.ensure(routeKey);
+        state.consecutiveFailures = 0;
+        state.recentBudgetFailures = Math.max(0, state.recentBudgetFailures - 1);
+        state.recentTimeoutFailures = Math.max(0, state.recentTimeoutFailures - 1);
+        state.recentThrottleFailures = Math.max(0, state.recentThrottleFailures - 1);
+        if (this.globalLimit < 12) {
+            this.globalLimit += 0.05;
+        }
+    }
+
+    reportFailure(routeKey: string, kind: RouteFailureKind, retryAfterMs?: number): void {
+        const state = this.ensure(routeKey);
+        state.consecutiveFailures += 1;
+
+        if (kind === 'budget') state.recentBudgetFailures += 1;
+        if (kind === 'timeout' || kind === 'network') state.recentTimeoutFailures += 1;
+        if (kind === 'throttle') state.recentThrottleFailures += 1;
+
+        if (kind === 'budget' || kind === 'throttle' || kind === 'timeout') {
+            this.globalLimit = Math.max(2, this.globalLimit - 1);
+        }
+
+        const shouldOpenCircuit = state.consecutiveFailures >= 3 || kind === 'budget';
+        if (shouldOpenCircuit) {
+            const jitter = Math.floor(Math.random() * 400);
+            const cooldown = retryAfterMs && retryAfterMs > 0
+                ? Math.min(120_000, retryAfterMs + jitter)
+                : Math.min(60_000, this.baseCooldownMs * Math.max(1, state.consecutiveFailures - 1) + jitter);
+            state.circuitOpenUntil = Math.max(state.circuitOpenUntil, Date.now() + cooldown);
+        }
+    }
+}
+
 const rateLimiter = new ModelRateLimiter();
+const routeController = new AdaptiveRouteController();
 const budgetManager = getBudgetManager();
 
 const THINKING_BUDGET: Record<'low' | 'medium', number> = {
@@ -101,6 +228,7 @@ const THINKING_BUDGET: Record<'low' | 'medium', number> = {
 
 const FAST_PATH_TOKEN_BUDGETS = String(import.meta.env.VITE_FAST_PATH_TOKEN_BUDGETS || 'true').toLowerCase() === 'true';
 const FAST_PATH_ADAPTIVE_VALIDATION = String(import.meta.env.VITE_FAST_PATH_ADAPTIVE_VALIDATION || 'true').toLowerCase() === 'true';
+const GEMINI_ONE_CALL_STRICT = String(import.meta.env.VITE_GEMINI_ONE_CALL_STRICT || 'true').toLowerCase() === 'true';
 
 const TASK_MAX_OUTPUT_TOKENS: Partial<Record<TaskType, number>> = {
     extraction: 900,
@@ -266,6 +394,7 @@ export class GroqService {
     private geminiApiKeys: string[];
     private semanticChecks: SemanticCheckRecord[] = [];
     private modelInvocations: ModelInvocationRecord[] = [];
+    private taskRoutePerf = new Map<string, { ewmaLatencyMs: number; samples: number; failures: number }>();
 
     constructor(apiKeyOrKeys: string | string[]) {
         this.apiKeys = Array.isArray(apiKeyOrKeys) ? apiKeyOrKeys : [apiKeyOrKeys];
@@ -276,6 +405,11 @@ export class GroqService {
             .map((value) => value.trim())
             .filter(Boolean);
         this.geminiApiKeys = Array.from(new Set(geminiEnvKeys));
+        if (GEMINI_ONE_CALL_STRICT && this.geminiApiKeys.length === 0 && this.apiKeys.length > 0) {
+            // In strict mode we still attempt exactly one Gemini request path;
+            // test/staging environments may rely on request interception.
+            this.geminiApiKeys = [this.apiKeys[0]];
+        }
         if (this.apiKeys.length === 0) {
             console.warn('[GroqService] No valid API keys provided');
         }
@@ -319,6 +453,18 @@ export class GroqService {
         return { errorType: 'unknown', errorCode: undefined };
     }
 
+    private mapRouteFailureKind(error: unknown): RouteFailureKind {
+        if (error instanceof BudgetExceededError) return 'budget';
+        const status = this.getErrorStatus(error);
+        if (status === 429) return 'throttle';
+        if (status === 408) return 'timeout';
+        if (typeof status === 'number' && status >= 500) return 'http';
+        const message = ((error as Error)?.message || '').toLowerCase();
+        if (message.includes('timeout') || message.includes('abort')) return 'timeout';
+        if (message.includes('network')) return 'network';
+        return 'other';
+    }
+
     private assertAllowedModel(routeKey: string) {
         if (!isAllowedRouteKey(routeKey)) {
             throw new Error(`model_not_allowed:${routeKey}`);
@@ -330,6 +476,28 @@ export class GroqService {
             ...entry,
             created_at: new Date().toISOString()
         });
+        const perfKey = `${entry.task}|${entry.route_key}`;
+        const current = this.taskRoutePerf.get(perfKey) || { ewmaLatencyMs: entry.latency_ms, samples: 0, failures: 0 };
+        const alpha = 0.2;
+        const nextLatency = current.samples === 0
+            ? entry.latency_ms
+            : Math.round((alpha * entry.latency_ms) + ((1 - alpha) * current.ewmaLatencyMs));
+        this.taskRoutePerf.set(perfKey, {
+            ewmaLatencyMs: nextLatency,
+            samples: current.samples + 1,
+            failures: current.failures + (entry.success ? 0 : 1)
+        });
+    }
+
+    private scoreCandidateForTask(task: TaskType, candidate: ModelCandidate): number {
+        const routeKey = candidate.routeKey || buildRouteKey(candidate.provider, candidate.model);
+        const perf = this.taskRoutePerf.get(`${task}|${routeKey}`);
+        const latencyPenalty = perf ? perf.ewmaLatencyMs : 7_500;
+        const failurePenalty = perf ? (perf.failures * 500) : 0;
+        const circuitPenalty = routeController.isCircuitOpen(routeKey)
+            ? Math.max(1_000, routeController.getCircuitRetryAfterMs(routeKey))
+            : 0;
+        return latencyPenalty + failurePenalty + circuitPenalty;
     }
 
     resetInvocationCounters(_sessionId?: string): void {
@@ -769,9 +937,9 @@ ${schemaHint}`;
         apiKey: string,
         modelName: string,
         prompt: string,
-        options: { temperature?: number; jsonMode?: boolean; maxTokens: number; task: TaskType }
+        options: { temperature?: number; jsonMode?: boolean; maxTokens: number; task: TaskType; signal?: AbortSignal }
     ): Promise<string> {
-        const retryPolicy = getRetryPolicyForTask(options.task);
+        const retryPolicy = getAdaptiveRetryPolicyForTask(options.task, prompt.length);
         const body: Record<string, unknown> = {
             model: modelName,
             messages: [{ role: 'user', content: prompt }],
@@ -791,7 +959,8 @@ ${schemaHint}`;
                     'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(body)
+                body: JSON.stringify(body),
+                signal: options.signal
             },
             {
                 timeoutMs: retryPolicy.timeoutMs,
@@ -807,6 +976,9 @@ ${schemaHint}`;
                         };
                     }
                     if (error instanceof DOMException && error.name === 'AbortError') {
+                        if (options.signal?.aborted) {
+                            return { retryable: false, reason: 'groq_chat_aborted_by_caller' };
+                        }
                         return { retryable: true, reason: 'groq_chat_timeout' };
                     }
                     return { retryable: true, reason: 'groq_chat_network' };
@@ -827,9 +999,12 @@ ${schemaHint}`;
         apiKey: string,
         modelName: string,
         prompt: string,
-        options: { temperature?: number; jsonMode?: boolean; maxTokens: number; task: TaskType; thinking?: 'low' | 'medium' }
+        options: { temperature?: number; jsonMode?: boolean; maxTokens: number; task: TaskType; thinking?: 'low' | 'medium'; signal?: AbortSignal }
     ): Promise<string> {
-        const retryPolicy = getRetryPolicyForTask(options.task);
+        const retryPolicy = getAdaptiveRetryPolicyForTask(options.task, prompt.length);
+        const effectiveRetries = GEMINI_ONE_CALL_STRICT && options.task === 'single_shot_history'
+            ? 0
+            : retryPolicy.retries;
         const isThinking = options.thinking && modelName.startsWith('gemini-');
         const generationConfig: Record<string, unknown> = {
             maxOutputTokens: options.maxTokens
@@ -869,11 +1044,12 @@ ${schemaHint}`;
                 body: JSON.stringify({
                     contents: [{ role: 'user', parts: [{ text: prompt }] }],
                     generationConfig
-                })
+                }),
+                signal: options.signal
             },
             {
                 timeoutMs: retryPolicy.timeoutMs,
-                retries: retryPolicy.retries,
+                retries: effectiveRetries,
                 baseDelayMs: retryPolicy.baseDelayMs,
                 maxDelayMs: retryPolicy.maxDelayMs,
                 classifyError: (error, responseCandidate) => {
@@ -885,6 +1061,9 @@ ${schemaHint}`;
                         };
                     }
                     if (error instanceof DOMException && error.name === 'AbortError') {
+                        if (options.signal?.aborted) {
+                            return { retryable: false, reason: 'gemini_chat_aborted_by_caller' };
+                        }
                         return { retryable: true, reason: 'gemini_chat_timeout' };
                     }
                     return { retryable: true, reason: 'gemini_chat_network' };
@@ -927,16 +1106,19 @@ ${schemaHint}`;
     private async callCandidateWithKeys(
         candidate: ModelCandidate,
         prompt: string,
-        options: { temperature?: number; jsonMode?: boolean; maxTokens: number; task: TaskType }
+        options: { temperature?: number; jsonMode?: boolean; maxTokens: number; task: TaskType; signal?: AbortSignal }
     ): Promise<string> {
         const keys = candidate.provider === 'gemini' ? this.geminiApiKeys : this.apiKeys;
-        if (keys.length === 0) {
+        const effectiveKeys = (GEMINI_ONE_CALL_STRICT && candidate.provider === 'gemini' && options.task === 'single_shot_history')
+            ? keys.slice(0, 1)
+            : keys;
+        if (effectiveKeys.length === 0) {
             throw new Error(`no_api_keys_${candidate.provider}`);
         }
 
         let lastError: unknown = null;
-        for (let i = 0; i < keys.length; i++) {
-            const key = keys[i];
+        for (let i = 0; i < effectiveKeys.length; i++) {
+            const key = effectiveKeys[i];
             try {
                 if (candidate.provider === 'gemini') {
                     try {
@@ -984,18 +1166,34 @@ ${schemaHint}`;
             : this.getDefaultMaxTokens(options.task);
         const requestedMaxTokens = options.maxTokens ?? this.getDefaultMaxTokens(options.task);
         const maxTokens = Math.max(64, Math.min(requestedMaxTokens, taskCap));
+        const dynamicRoutingEnabled = String(import.meta.env.VITE_TURBO_DYNAMIC_ROUTING || 'true').toLowerCase() === 'true';
+        const orderedCandidates = dynamicRoutingEnabled
+            ? [...candidates].sort((a, b) => this.scoreCandidateForTask(options.task, a) - this.scoreCandidateForTask(options.task, b))
+            : candidates;
+        const llmHedgingEnabled = String(import.meta.env.VITE_TURBO_LLM_HEDGING || 'true').toLowerCase() === 'true';
+        const llmHedgeTriggerMs = Math.max(500, Number(import.meta.env.VITE_TURBO_LLM_HEDGE_TRIGGER_MS || 2_200));
         let lastError: unknown = null;
         let highestBudgetWaitMs = 0;
         let highestBudgetScope: 'minute' | 'hour' | 'day' = 'minute';
 
-        for (let i = 0; i < candidates.length; i++) {
-            const candidate = candidates[i];
+        const executeCandidate = async (
+            candidate: ModelCandidate,
+            attemptIndex: number,
+            signal?: AbortSignal
+        ): Promise<{ text: string; model: string }> => {
             const routeKey = candidate.routeKey || buildRouteKey(candidate.provider, candidate.model);
             this.assertAllowedModel(routeKey);
             const estimatedTokens = this.estimateTokens(prompt) + maxTokens;
             const startedAt = Date.now();
+            let routeAcquired = false;
 
             try {
+                if (routeController.isCircuitOpen(routeKey)) {
+                    const retryAfterMs = routeController.getCircuitRetryAfterMs(routeKey);
+                    throw new BudgetExceededError(`route_circuit_open:${routeKey}`, Math.max(250, retryAfterMs), 'minute');
+                }
+                await routeController.acquire(routeKey);
+                routeAcquired = true;
                 budgetManager.consume(routeKey, { requests: 1, tokens: estimatedTokens });
                 await rateLimiter.consume(routeKey, estimatedTokens, 1);
 
@@ -1003,7 +1201,8 @@ ${schemaHint}`;
                     temperature: options.temperature,
                     jsonMode: options.jsonMode,
                     maxTokens,
-                    task: options.task
+                    task: options.task,
+                    signal
                 });
 
                 this.registerInvocation({
@@ -1012,12 +1211,13 @@ ${schemaHint}`;
                     provider: candidate.provider,
                     model: candidate.model,
                     route_key: routeKey,
-                    attempt_index: i,
-                    is_fallback: i > 0,
+                    attempt_index: attemptIndex,
+                    is_fallback: attemptIndex > 0,
                     success: true,
                     latency_ms: Date.now() - startedAt,
                     estimated_tokens: estimatedTokens
                 });
+                routeController.reportSuccess(routeKey);
 
                 return { text, model: `${candidate.provider}:${candidate.model}` };
             } catch (error) {
@@ -1028,8 +1228,8 @@ ${schemaHint}`;
                     provider: candidate.provider,
                     model: candidate.model,
                     route_key: routeKey,
-                    attempt_index: i,
-                    is_fallback: i > 0,
+                    attempt_index: attemptIndex,
+                    is_fallback: attemptIndex > 0,
                     success: false,
                     error_type: classified.errorType,
                     error_code: classified.errorCode,
@@ -1037,12 +1237,72 @@ ${schemaHint}`;
                     estimated_tokens: estimatedTokens
                 });
 
+                const failureKind = this.mapRouteFailureKind(error);
+                const retryAfterMs = error instanceof BudgetExceededError
+                    ? Math.max(0, Number(error.retryAfterMs || 0))
+                    : undefined;
+                routeController.reportFailure(routeKey, failureKind, retryAfterMs);
                 lastError = error;
                 if (error instanceof BudgetExceededError) {
                     highestBudgetWaitMs = Math.max(highestBudgetWaitMs, error.retryAfterMs || 0);
                     highestBudgetScope = error.scope || highestBudgetScope;
                 }
                 await this.delay(120);
+                throw error;
+            } finally {
+                if (routeAcquired) {
+                    routeController.release(routeKey);
+                }
+            }
+        };
+
+        if (llmHedgingEnabled && orderedCandidates.length > 1) {
+            const first = orderedCandidates[0];
+            const second = orderedCandidates[1];
+            const firstController = new AbortController();
+            const secondController = new AbortController();
+            let secondStarted = false;
+            let settled = false;
+            let hedgeTimer: ReturnType<typeof setTimeout> | null = null;
+            let secondPromise: Promise<{ text: string; model: string }> | null = null;
+            const firstPromise = executeCandidate(first, 0, firstController.signal);
+            const hedgedSecond = new Promise<{ text: string; model: string }>((resolve, reject) => {
+                hedgeTimer = setTimeout(() => {
+                    if (settled) {
+                        return;
+                    }
+                    secondStarted = true;
+                    secondPromise = executeCandidate(second, 1, secondController.signal);
+                    void secondPromise.then(resolve).catch(reject);
+                }, llmHedgeTriggerMs);
+            });
+            try {
+                const winner = await Promise.race([firstPromise, hedgedSecond]);
+                settled = true;
+                if (hedgeTimer) clearTimeout(hedgeTimer);
+                firstController.abort();
+                if (secondStarted) secondController.abort();
+                return winner;
+            } catch {
+                // Fallback to normal loop below using remaining candidates.
+            } finally {
+                settled = true;
+                if (hedgeTimer) clearTimeout(hedgeTimer);
+                void firstPromise.catch(() => undefined);
+                const pendingSecond = secondPromise;
+                if (pendingSecond) {
+                    void Promise.resolve(pendingSecond).catch(() => undefined);
+                }
+                void Promise.resolve(hedgedSecond).catch(() => undefined);
+            }
+        }
+
+        for (let i = 0; i < orderedCandidates.length; i++) {
+            const candidate = orderedCandidates[i];
+            try {
+                return await executeCandidate(candidate, i);
+            } catch {
+                // continue fallback chain
             }
         }
 
@@ -1119,7 +1379,6 @@ ${schemaHint}`;
             if (shouldTryConversion) {
                 console.warn(`[Groq] Whisper returned 400 for "${mime || 'unknown'}", retrying with WAV conversion...`);
                 try {
-                    const { normalizeAndChunkAudio } = await import('../utils/audioProcessing');
                     const wavChunks = await normalizeAndChunkAudio(audioBlob);
                     if (wavChunks.length > 0) {
                         const combinedParts: string[] = [];
@@ -1152,9 +1411,24 @@ ${schemaHint}`;
                 const startedAt = Date.now();
                 const routeKey = buildRouteKey('groq', modelName);
                 const estimatedAudioSeconds = Math.max(1, Math.ceil(audioBlob.size / 16_000));
+                let routeAcquired = false;
                 try {
-                    const retryPolicy = getRetryPolicy('transcription');
+                    const baseRetryPolicy = getRetryPolicy('transcription');
+                    const adaptiveTimeoutMs = getAdaptiveTimeout(
+                        'transcription',
+                        Math.ceil(audioBlob.size / 2)
+                    );
+                    const retryPolicy = {
+                        ...baseRetryPolicy,
+                        timeoutMs: adaptiveTimeoutMs
+                    };
                     this.assertAllowedModel(routeKey);
+                    if (routeController.isCircuitOpen(routeKey)) {
+                        const retryAfterMs = routeController.getCircuitRetryAfterMs(routeKey);
+                        throw new BudgetExceededError(`route_circuit_open:${routeKey}`, Math.max(250, retryAfterMs), 'minute');
+                    }
+                    await routeController.acquire(routeKey);
+                    routeAcquired = true;
                     budgetManager.consume(routeKey, { requests: 1, audioSeconds: estimatedAudioSeconds });
                     const formData = new FormData();
                     formData.append('file', audioBlob, fileName);
@@ -1167,7 +1441,8 @@ ${schemaHint}`;
                         {
                             method: 'POST',
                             headers: { 'Authorization': `Bearer ${apiKey}` },
-                            body: formData
+                            body: formData,
+                            signal: options.signal
                         },
                         {
                             timeoutMs: retryPolicy.timeoutMs,
@@ -1183,6 +1458,9 @@ ${schemaHint}`;
                                     };
                                 }
                                 if (error instanceof DOMException && error.name === 'AbortError') {
+                                    if (options.signal?.aborted) {
+                                        return { retryable: false, reason: 'groq_transcription_aborted_by_caller' };
+                                    }
                                     return { retryable: true, reason: 'groq_transcription_timeout' };
                                 }
                                 return { retryable: true, reason: 'groq_transcription_network' };
@@ -1219,6 +1497,7 @@ ${schemaHint}`;
                         latency_ms: Date.now() - startedAt,
                         estimated_tokens: Math.max(1, estimatedAudioSeconds)
                     });
+                    routeController.reportSuccess(routeKey);
                     return { text, model: modelName };
                 } catch (error: any) {
                     console.warn(`[Groq] Whisper ${modelName} failed with current key:`, error);
@@ -1237,6 +1516,11 @@ ${schemaHint}`;
                         latency_ms: Math.max(1, Date.now() - startedAt),
                         estimated_tokens: Math.max(1, estimatedAudioSeconds)
                     });
+                    const failureKind = this.mapRouteFailureKind(error);
+                    const retryAfterMs = error instanceof BudgetExceededError
+                        ? Math.max(0, Number(error.retryAfterMs || 0))
+                        : undefined;
+                    routeController.reportFailure(routeKey, failureKind, retryAfterMs);
                     innerError = error;
                     if (error instanceof BudgetExceededError) {
                         throw error;
@@ -1246,6 +1530,10 @@ ${schemaHint}`;
                         throw error;
                     }
                     await this.delay(500);
+                } finally {
+                    if (routeAcquired) {
+                        routeController.release(routeKey);
+                    }
                 }
             }
             if (options.whisperStrict) {

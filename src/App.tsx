@@ -1,15 +1,8 @@
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react';
 import { Layout } from './components/Layout';
 import { Recorder } from './components/Recorder';
-
-import { SearchHistory } from './components/SearchHistory';
-import { HistoryView } from './components/HistoryView';
-
-import { Settings } from './components/Settings';
 import { AIService } from './services/ai';
-
-import { ReportsView } from './components/ReportsView';
 import type { ExtractionResult, ExtractionMeta, ConsultationClassification, UncertaintyFlag } from './services/groq';
 import { saveLabTestLog } from './services/storage';
 import {
@@ -25,8 +18,6 @@ import {
     purgeExpiredPipelineArtifacts
 } from './services/storage';
 import { logError, upsertConsultationQualitySummary } from './services/supabase';
-import { AudioTestLab } from './components/AudioTestLab';
-import LessonsPanel from './components/LessonsPanel';
 import { MemoryService } from './services/memory';
 import { ConsultationPipelineOrchestrator } from './services/pipeline-orchestrator';
 import { enqueueAuditEvent, startAuditWorker, stopAuditWorker } from './services/audit-worker';
@@ -45,11 +36,22 @@ import { SimulationProvider, useSimulation } from './components/Simulation/Simul
 import { SimulationOverlay } from './components/Simulation/SimulationOverlay';
 import { normalizeAndChunkAudio } from './utils/audioProcessing';
 import { PipelineHealthPanel } from './components/PipelineHealthPanel';
+import { PipelineStageTracker } from './components/PipelineStageTracker';
+import { usePipelineStatusViewModel } from './features/ui/usePipelineStatusViewModel';
+import { usePipelineController } from './features/pipeline/usePipelineController';
+import { useSessionRecovery } from './features/pipeline/useSessionRecovery';
 import { safeGetLocalStorage, safeSetLocalStorage } from './utils/safeBrowser';
 
 import './App.css';
 import { Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+const SearchHistory = lazy(() => import('./components/SearchHistory').then((mod) => ({ default: mod.SearchHistory })));
+const HistoryView = lazy(() => import('./components/HistoryView').then((mod) => ({ default: mod.HistoryView })));
+const Settings = lazy(() => import('./components/Settings').then((mod) => ({ default: mod.Settings })));
+const ReportsView = lazy(() => import('./components/ReportsView').then((mod) => ({ default: mod.ReportsView })));
+const AudioTestLab = lazy(() => import('./components/AudioTestLab').then((mod) => ({ default: mod.AudioTestLab })));
+const LessonsPanel = lazy(() => import('./components/LessonsPanel'));
 
 // API Key from environment variable
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '';
@@ -65,6 +67,40 @@ const FAST_PATH_ADAPTIVE_VALIDATION = String(import.meta.env.VITE_FAST_PATH_ADAP
 const FAST_PATH_TOKEN_BUDGETS = String(import.meta.env.VITE_FAST_PATH_TOKEN_BUDGETS || 'true').toLowerCase() === 'true';
 const FAST_PATH_RETRY_TUNING = String(import.meta.env.VITE_FAST_PATH_RETRY_TUNING || 'true').toLowerCase() === 'true';
 const FAST_PATH_ASYNC_TRIAGE = String(import.meta.env.VITE_FAST_PATH_ASYNC_TRIAGE || 'true').toLowerCase() === 'true';
+const TURBO_PROFILE = String(import.meta.env.VITE_TURBO_PROFILE || 'aggressive_p95').toLowerCase();
+const TURBO_PROFILE_PRESETS = {
+    aggressive_p95: {
+        sttMinConcurrency: 1,
+        sttMaxConcurrency: 4,
+        sttDownThresholdMs: 15_000,
+        sttUpThresholdMs: 6_500,
+        sttChunkSlaMs: 20_000,
+        sttHedgeTriggerMs: 2_000
+    },
+    conservative_cost: {
+        sttMinConcurrency: 1,
+        sttMaxConcurrency: 2,
+        sttDownThresholdMs: 19_000,
+        sttUpThresholdMs: 8_500,
+        sttChunkSlaMs: 30_000,
+        sttHedgeTriggerMs: 3_200
+    }
+} as const;
+const TURBO_PROFILE_CONFIG = TURBO_PROFILE_PRESETS[TURBO_PROFILE as keyof typeof TURBO_PROFILE_PRESETS] || TURBO_PROFILE_PRESETS.aggressive_p95;
+const PIPELINE_V5_TURBO = String(import.meta.env.VITE_PIPELINE_V5_TURBO || 'true').toLowerCase() === 'true';
+const TURBO_HEDGED_REQUESTS = String(
+    import.meta.env.VITE_TURBO_HEDGED_REQUESTS
+    || (TURBO_PROFILE === 'aggressive_p95' ? 'true' : 'false')
+).toLowerCase() === 'true';
+const TURBO_FAST_DRAFT = String(import.meta.env.VITE_TURBO_FAST_DRAFT || 'true').toLowerCase() === 'true';
+const TURBO_HARDENING_ASYNC = String(import.meta.env.VITE_TURBO_HARDENING_ASYNC || 'true').toLowerCase() === 'true';
+const GEMINI_ONE_CALL_STRICT = String(import.meta.env.VITE_GEMINI_ONE_CALL_STRICT || 'true').toLowerCase() === 'true';
+const STT_HEDGE_TRIGGER_MS = Math.max(500, Number(import.meta.env.VITE_STT_HEDGE_TRIGGER_MS || TURBO_PROFILE_CONFIG.sttHedgeTriggerMs));
+const STT_MIN_CONCURRENCY = Math.max(1, Number(import.meta.env.VITE_STT_MIN_CONCURRENCY || TURBO_PROFILE_CONFIG.sttMinConcurrency));
+const STT_MAX_CONCURRENCY = Math.max(STT_MIN_CONCURRENCY, Number(import.meta.env.VITE_STT_MAX_CONCURRENCY || TURBO_PROFILE_CONFIG.sttMaxConcurrency));
+const STT_DOWN_THRESHOLD_MS = Math.max(5_000, Number(import.meta.env.VITE_STT_DOWN_THRESHOLD_MS || TURBO_PROFILE_CONFIG.sttDownThresholdMs));
+const STT_UP_THRESHOLD_MS = Math.max(2_000, Number(import.meta.env.VITE_STT_UP_THRESHOLD_MS || TURBO_PROFILE_CONFIG.sttUpThresholdMs));
+const STT_CHUNK_SLA_MS = Math.max(5_000, Number(import.meta.env.VITE_STT_CHUNK_SLA_MS || TURBO_PROFILE_CONFIG.sttChunkSlaMs));
 
 // Helper to get key array
 const getApiKeys = (userKey?: string) => {
@@ -126,6 +162,11 @@ const AppContent = () => {
         logicalCallsUsed?: number;
         physicalCallsUsed?: number;
         fallbackHops?: number;
+        outputTier?: 'draft' | 'final';
+        hardeningJobId?: string;
+        geminiCallsUsed?: number;
+        oneCallPolicyApplied?: boolean;
+        degradedReasonCode?: string;
         fastPathConfig?: {
             adaptiveValidation: boolean;
             tokenBudgets: boolean;
@@ -137,6 +178,7 @@ const AppContent = () => {
     const [showWelcomeModal, setShowWelcomeModal] = useState(false);
     const [showWhatsNew, setShowWhatsNew] = useState(false);
     const [currentRecordId, setCurrentRecordId] = useState<string | null>(null);
+    const [livePipelineState, setLivePipelineState] = useState<'idle' | 'recording' | 'transcribing_live' | 'draft_ready' | 'hardening' | 'completed' | 'provisional' | 'failed'>('idle');
 
     const { isPlaying, demoData, startSimulation } = useSimulation();
 
@@ -184,11 +226,30 @@ const AppContent = () => {
     const orchestratorRef = useRef<ConsultationPipelineOrchestrator<void> | null>(null);
     const [pipelineRuntimeReason, setPipelineRuntimeReason] = useState<string>('');
     const activeSessionIdRef = useRef<string | null>(null);
+    const sessionVersionRef = useRef(0);
     const processingLockRef = useRef(false);
     const currentViewRef = useRef(currentView);
     const currentPatientRef = useRef(currentPatientName);
     const diagnosticRunBySessionRef = useRef<Map<string, string>>(new Map());
     const diagnosticSummaryBySessionRef = useRef<Map<string, DiagnosticSummary>>(new Map());
+    const sttMetricsRef = useRef<{
+        latenciesMs: number[];
+        concurrency: number;
+        throttleErrors: number;
+        timeoutErrors: number;
+        hedgedTriggered: number;
+        hedgeCancelled: number;
+        totalChunks: number;
+    }>({
+        latenciesMs: [],
+        concurrency: 2,
+        throttleErrors: 0,
+        timeoutErrors: 0,
+        hedgedTriggered: 0,
+        hedgeCancelled: 0,
+        totalChunks: 0
+    });
+    const transcriptPersistQueueRef = useRef<Promise<void>>(Promise.resolve());
 
     useEffect(() => {
         currentViewRef.current = currentView;
@@ -229,6 +290,21 @@ const AppContent = () => {
         if (executionMode !== 'real') return false;
         return (scenarioId || '').toLowerCase().includes('hourly_complex_consultation');
     };
+
+    const maybeStartDiagnosticRunForSession = useCallback((sessionId: string, patientName: string) => {
+        if (!isLabRun(patientName) || diagnosticRunBySessionRef.current.has(sessionId)) return;
+        const diagnosticContext = extractDiagnosticContext(patientName);
+        const runId = startDiagnosticRun({
+            mode: 'hybrid',
+            source: 'audio',
+            patient_name: patientName,
+            scenario_id: diagnosticContext.scenarioId,
+            execution_mode: diagnosticContext.executionMode
+        });
+        diagnosticRunBySessionRef.current.set(sessionId, runId);
+        recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'session_start' });
+        recordDiagnosticEvent(runId, { type: 'stage_end', stage: 'session_start', status: 'passed', duration_ms: 1 });
+    }, []);
 
     const normalizeDiagnosticError = (error: unknown): string => {
         const message = ((error as Error)?.message || '').toLowerCase();
@@ -362,6 +438,30 @@ const AppContent = () => {
             .replace(/\[(MISSING_BATCH|PARTIAL_BATCH)_[^\]]+\]/g, ' ')
             .replace(/\s+/g, ' ')
             .trim();
+    };
+
+    const buildLocalProvisionalHistory = (reason: string) => {
+        return `## MOTIVO DE CONSULTA
+No consta (procesamiento aplazado)
+
+## ANTECEDENTES
+- Alergias: No consta
+- Enfermedades cronicas: No consta
+- Cirugias: No consta
+- Tratamiento habitual: No consta
+
+## ENFERMEDAD ACTUAL
+- Sintomas: No consta
+- Evolucion: No consta
+
+## EXPLORACION / PRUEBAS
+No consta
+
+## DIAGNOSTICO
+No consta
+
+## PLAN
+Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error'}`;
     };
 
 
@@ -540,6 +640,255 @@ const AppContent = () => {
         ).sort((a, b) => a - b);
     };
 
+    const isSessionVersionCurrent = (sessionId: string, sessionVersion: number) => {
+        if (!sessionId) return false;
+        return activeSessionIdRef.current === sessionId && sessionVersionRef.current === sessionVersion;
+    };
+
+    const recordSttLatency = (latencyMs: number) => {
+        const metrics = sttMetricsRef.current;
+        metrics.totalChunks += 1;
+        metrics.latenciesMs.push(Math.max(1, Math.round(latencyMs)));
+        if (metrics.latenciesMs.length > 200) {
+            metrics.latenciesMs = metrics.latenciesMs.slice(metrics.latenciesMs.length - 200);
+        }
+    };
+
+    const adjustSttConcurrencyFromError = (errorMessage: string) => {
+        const metrics = sttMetricsRef.current;
+        const message = (errorMessage || '').toLowerCase();
+        if (message.includes('429') || message.includes('budget_limit')) {
+            metrics.throttleErrors += 1;
+            metrics.concurrency = Math.max(STT_MIN_CONCURRENCY, metrics.concurrency - 1);
+            return;
+        }
+        if (message.includes('timeout') || message.includes('abort')) {
+            metrics.timeoutErrors += 1;
+            metrics.concurrency = Math.max(STT_MIN_CONCURRENCY, metrics.concurrency - 1);
+            return;
+        }
+    };
+
+    const getAdaptiveSttConcurrency = () => {
+        const metrics = sttMetricsRef.current;
+        if (!PIPELINE_V5_TURBO) return 1;
+        const last20 = metrics.latenciesMs.slice(-20);
+        const avg = last20.length > 0
+            ? Math.round(last20.reduce((acc, item) => acc + item, 0) / last20.length)
+            : 0;
+        if (avg > STT_DOWN_THRESHOLD_MS || metrics.throttleErrors > 0) {
+            metrics.concurrency = Math.max(STT_MIN_CONCURRENCY, metrics.concurrency - 1);
+        } else if (avg > 0 && avg < STT_UP_THRESHOLD_MS && metrics.concurrency < STT_MAX_CONCURRENCY) {
+            metrics.concurrency += 1;
+        }
+        return Math.max(STT_MIN_CONCURRENCY, Math.min(STT_MAX_CONCURRENCY, metrics.concurrency));
+    };
+
+    const enqueueTranscriptPersistence = (payload: {
+        session_id: string;
+        batch_index: number;
+        text: string;
+        status: 'completed' | 'failed';
+        error_reason?: string;
+        part_index?: number;
+        latency_ms?: number;
+        model_used?: string;
+    }) => {
+        const maxAttempts = 3;
+        const runPersist = async () => {
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    await saveSegment({
+                        ...payload,
+                        type: 'transcript',
+                        session_version: sessionVersionRef.current,
+                        attempt_id: `${payload.session_id}:${payload.batch_index}:${attempt}`
+                    });
+                    return;
+                } catch (error) {
+                    if (attempt === maxAttempts) {
+                        console.error('[App] transcript persistence failed:', error);
+                        return;
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+                }
+            }
+        };
+
+        transcriptPersistQueueRef.current = transcriptPersistQueueRef.current
+            .then(runPersist)
+            .catch((error) => {
+                console.error('[App] transcript persist queue failure:', error);
+            });
+        return transcriptPersistQueueRef.current;
+    };
+
+    const transcribeWithOptionalHedge = async (
+        aiService: AIService,
+        blob: Blob,
+        options: { whisperStrict: boolean }
+    ) => {
+        const primaryController = new AbortController();
+        const hedgeController = new AbortController();
+        let settled = false;
+        const primary = aiService.transcribeAudio(blob, undefined, undefined, {
+            ...options,
+            signal: primaryController.signal
+        });
+        if (!TURBO_HEDGED_REQUESTS || !PIPELINE_V5_TURBO) {
+            return primary;
+        }
+
+        let hedgeStarted = false;
+        let hedgePromise: Promise<Awaited<ReturnType<AIService['transcribeAudio']>>> | null = null;
+        let hedgeTimer: ReturnType<typeof setTimeout> | null = null;
+        const hedge = new Promise<Awaited<ReturnType<AIService['transcribeAudio']>>>((resolve, reject) => {
+            hedgeTimer = setTimeout(() => {
+                if (settled) {
+                    resolve(primary);
+                    return;
+                }
+                hedgeStarted = true;
+                sttMetricsRef.current.hedgedTriggered += 1;
+                hedgePromise = aiService.transcribeAudio(blob, undefined, undefined, {
+                    ...options,
+                    signal: hedgeController.signal
+                });
+                void hedgePromise.then(resolve).catch(reject);
+            }, STT_HEDGE_TRIGGER_MS);
+        });
+
+        try {
+            const winner = await Promise.race([primary, hedge]);
+            settled = true;
+            if (hedgeTimer) clearTimeout(hedgeTimer);
+            if (hedgeStarted) {
+                hedgeController.abort();
+                sttMetricsRef.current.hedgeCancelled += 1;
+            }
+            primaryController.abort();
+            return winner;
+        } finally {
+            settled = true;
+            if (hedgeTimer) clearTimeout(hedgeTimer);
+            void primary.catch(() => undefined);
+            if (hedgeStarted) {
+                const pendingHedge = hedgePromise;
+                if (pendingHedge) {
+                    void Promise.resolve(pendingHedge).catch(() => undefined);
+                }
+                void Promise.resolve(hedge).catch(() => undefined);
+            }
+        }
+    };
+
+    const transcribeBlobsAdaptive = async (params: {
+        aiService: AIService;
+        blobs: Blob[];
+        batchIndex: number;
+        runId?: string;
+        stage: string;
+        sessionId: string;
+        whisperStrict: boolean;
+    }): Promise<Array<{ partBatchIndex: number; text: string; latencyMs: number; blob: Blob; model: string }>> => {
+        const { aiService, blobs, batchIndex, runId, stage, sessionId, whisperStrict } = params;
+        const concurrency = Math.min(getAdaptiveSttConcurrency(), Math.max(1, blobs.length));
+        const outputs: Array<{ partBatchIndex: number; text: string; latencyMs: number; blob: Blob; model: string }> = [];
+        let next = 0;
+
+        const worker = async () => {
+            while (true) {
+                const idx = next;
+                next += 1;
+                if (idx >= blobs.length) break;
+                const partBlob = blobs[idx];
+                const partBatchIndex = blobs.length > 1 ? (batchIndex * 1000) + idx : batchIndex;
+                const chunkStartedAt = Date.now();
+                try {
+                    const transcriptResult = await transcribeWithOptionalHedge(aiService, partBlob, { whisperStrict });
+                    const latencyMs = Date.now() - chunkStartedAt;
+                    recordSttLatency(latencyMs);
+                    outputs.push({
+                        partBatchIndex,
+                        text: transcriptResult.data,
+                        latencyMs,
+                        blob: partBlob,
+                        model: transcriptResult.model
+                    });
+                    if (runId) {
+                        recordDiagnosticEvent(runId, {
+                            type: 'chunk_result',
+                            batch_index: partBatchIndex,
+                            size_bytes: partBlob.size,
+                            duration_ms: latencyMs,
+                            status: 'passed',
+                            mime_type: partBlob.type
+                        });
+                    }
+                    if (latencyMs > STT_CHUNK_SLA_MS && sessionId) {
+                        void enqueueAuditEvent('pipeline_sla_breach', {
+                            session_id: sessionId,
+                            stage,
+                            batch_index: partBatchIndex,
+                            latency_ms: latencyMs,
+                            threshold_ms: STT_CHUNK_SLA_MS
+                        });
+                    }
+                    void enqueueTranscriptPersistence({
+                        session_id: sessionId,
+                        batch_index: partBatchIndex,
+                        text: transcriptResult.data,
+                        status: 'completed',
+                        part_index: idx,
+                        latency_ms: latencyMs,
+                        model_used: transcriptResult.model
+                    });
+                } catch (error) {
+                    const latencyMs = Date.now() - chunkStartedAt;
+                    adjustSttConcurrencyFromError((error as Error)?.message || '');
+                    const errorDetail = buildDiagnosticErrorDetail(error, {
+                        stage,
+                        batchIndex: partBatchIndex,
+                        provider: 'groq',
+                        operation: 'transcribeAudio',
+                        mimeType: partBlob.type,
+                        chunkBytes: partBlob.size,
+                        inputType: 'audio',
+                        phase: 'stt',
+                        origin: 'model_output',
+                        blocking: true
+                    });
+                    if (runId) {
+                        recordDiagnosticEvent(runId, {
+                            type: 'chunk_result',
+                            batch_index: partBatchIndex,
+                            size_bytes: partBlob.size,
+                            duration_ms: latencyMs,
+                            status: 'failed',
+                            mime_type: partBlob.type,
+                            error_code: errorDetail.code,
+                            error_message: errorDetail.message,
+                            error_detail: errorDetail
+                        });
+                    }
+                    void enqueueTranscriptPersistence({
+                        session_id: sessionId,
+                        batch_index: partBatchIndex,
+                        text: '',
+                        status: 'failed',
+                        error_reason: (error as Error)?.message || 'stt_failed',
+                        part_index: idx,
+                        latency_ms: latencyMs
+                    });
+                    throw error;
+                }
+            }
+        };
+
+        await Promise.all(Array.from({ length: concurrency }, () => worker()));
+        return outputs.sort((a, b) => a.partBatchIndex - b.partBatchIndex);
+    };
+
     // ════════════════════════════════════════════════════════════════
     // PERSONALIZATION & MEMORY INIT
     // ════════════════════════════════════════════════════════════════
@@ -643,6 +992,13 @@ const AppContent = () => {
         };
     }, [apiKey]);
 
+    useSessionRecovery({
+        apiKey,
+        onInitBackground: async () => undefined,
+        onRecoverSession: async () => undefined,
+        disableBackground: true
+    });
+
     const handleSaveSettings = (key: string) => {
         setApiKey(key);
         safeSetLocalStorage('groq_api_key', key);
@@ -722,6 +1078,11 @@ const AppContent = () => {
         auditId?: string;
         aiModel: string;
         idempotencyKey?: string;
+        outputTier?: 'draft' | 'final';
+        supersedesRecordUuid?: string;
+        sourceSessionId?: string;
+        criticalPathMs?: number;
+        hardeningMs?: number;
     }) => {
         const savedRecord = await saveMedicalRecord({
             patient_name: params.patientName,
@@ -731,7 +1092,12 @@ const AppContent = () => {
             original_medical_history: params.medicalHistory,
             audit_id: params.auditId,
             ai_model: params.aiModel,
-            idempotency_key: params.idempotencyKey
+            idempotency_key: params.idempotencyKey,
+            output_tier: params.outputTier,
+            supersedes_record_uuid: params.supersedesRecordUuid,
+            source_session_id: params.sourceSessionId,
+            critical_path_ms: params.criticalPathMs,
+            hardening_ms: params.hardeningMs
         });
         const saved = savedRecord?.[0];
         if (saved?.record_uuid) {
@@ -747,6 +1113,7 @@ const AppContent = () => {
     ) => {
         const partialStartedAt = Date.now();
         const sessionId = orchestratorRef.current?.getStatus().sessionId || '';
+        const sessionVersion = sessionVersionRef.current;
         const runId = sessionId ? diagnosticRunBySessionRef.current.get(sessionId) : undefined;
         const currentPatientName = orchestratorRef.current?.getStatus().patientName || '';
         const diagnosticContext = extractDiagnosticContext(currentPatientName);
@@ -759,91 +1126,66 @@ const AppContent = () => {
                 await upsertConsultationSession({
                     session_id: sessionId,
                     patient_name: orchestratorRef.current?.getStatus().patientName || '',
-                    status: 'transcribing_partial',
+                    status: PIPELINE_V5_TURBO ? 'transcribing_live' : 'transcribing_partial',
                     last_batch_index: batchIndex,
+                    metadata: {
+                        session_version: sessionVersion
+                    },
                     idempotency_key: sessionId
                 });
             }
-            await markSegmentStatus({ session_id: sessionId, batch_index: batchIndex, type: 'audio', status: 'processing' });
+            await markSegmentStatus({ session_id: sessionId, batch_index: batchIndex, type: 'audio', status: 'processing', session_version: sessionVersion });
 
             const safeBlobs = await splitBlobForSafeProcessing(blob, {
                 sessionId,
                 stageName: `partial_${batchIndex}_split`,
                 batchIndex
             });
-            const transcriptParts: string[] = [];
-
-            for (let i = 0; i < safeBlobs.length; i++) {
-                const partBlob = safeBlobs[i];
-                const partBatchIndex = safeBlobs.length > 1 ? (batchIndex * 1000) + i : batchIndex;
-                const chunkStartedAt = Date.now();
-                try {
-                    const transcriptResult = await aiService.transcribeAudio(partBlob, undefined, undefined, {
-                        whisperStrict
-                    });
-                    transcriptParts.push(transcriptResult.data);
-                    if (runId) {
-                        recordDiagnosticEvent(runId, {
-                            type: 'chunk_result',
-                            batch_index: partBatchIndex,
-                            size_bytes: partBlob.size,
-                            duration_ms: Date.now() - chunkStartedAt,
-                            status: 'passed',
-                            mime_type: partBlob.type
-                        });
-                    }
-                    await saveSegment({
-                        session_id: sessionId,
-                        batch_index: partBatchIndex,
-                        type: 'transcript',
-                        text: transcriptResult.data,
-                        status: 'completed'
-                    });
-                    continue;
-                } catch (error) {
-                    const errorDetail = buildDiagnosticErrorDetail(error, {
-                        stage: `partial_${batchIndex}`,
-                        batchIndex: partBatchIndex,
-                        provider: 'groq',
-                        operation: 'transcribeAudio',
-                        mimeType: partBlob.type,
-                        chunkBytes: partBlob.size,
-                        inputType: 'audio',
-                        phase: 'stt',
-                        origin: 'model_output',
-                        blocking: true
-                    });
-                    if (runId) {
-                        recordDiagnosticEvent(runId, {
-                            type: 'chunk_result',
-                            batch_index: partBatchIndex,
-                            size_bytes: partBlob.size,
-                            duration_ms: Date.now() - chunkStartedAt,
-                            status: 'failed',
-                            mime_type: partBlob.type,
-                            error_code: errorDetail.code,
-                            error_message: errorDetail.message,
-                            error_detail: errorDetail
-                        });
-                    }
-                    throw error;
-                }
-                // DEFERRED EXTRACTION: We only transcribe here to save tokens.
-                // Extraction will happen once at the end with the full transcript.
-            }
-
-            const mergedTranscript = transcriptParts.join(' ').trim();
+            const transcriptParts = await transcribeBlobsAdaptive({
+                aiService,
+                blobs: safeBlobs,
+                batchIndex,
+                runId,
+                stage: `partial_${batchIndex}`,
+                sessionId,
+                whisperStrict
+            });
+            const mergedTranscript = transcriptParts.map((item) => item.text).join(' ').trim();
             // Extraction parts are now empty during partial processing
 
+            if (!isSessionVersionCurrent(sessionId, sessionVersion)) {
+                console.warn('[App] Skip stale partial write due to session version drift');
+                return;
+            }
             transcriptionPartsRef.current.set(batchIndex, mergedTranscript);
-            // We no longer set extraction parts here
-            await markSegmentStatus({ session_id: sessionId, batch_index: batchIndex, type: 'audio', status: 'completed' });
+            const checkpointBatches = Array.from(transcriptionPartsRef.current.entries())
+                .filter(([, text]) => Boolean((text || '').trim()))
+                .map(([idx]) => idx)
+                .sort((a, b) => a - b);
+            if (TURBO_FAST_DRAFT && !GEMINI_ONE_CALL_STRICT && mergedTranscript.trim().length > 10) {
+                const capturedSessionVersion = sessionVersion;
+                void aiService.extractOnly(mergedTranscript).then((extractionResult) => {
+                    if (!isSessionVersionCurrent(sessionId, capturedSessionVersion)) return;
+                    extractionPartsRef.current.set(batchIndex, extractionResult.data);
+                    extractionMetaPartsRef.current.set(batchIndex, extractionResult.meta);
+                    classificationPartsRef.current.set(batchIndex, extractionResult.classification);
+                }).catch((error) => {
+                    console.warn(`[App] partial extraction failed for batch ${batchIndex}:`, error);
+                });
+            }
+            await markSegmentStatus({ session_id: sessionId, batch_index: batchIndex, type: 'audio', status: 'completed', session_version: sessionVersion });
             if (sessionId) {
                 await upsertConsultationSession({
                     session_id: sessionId,
                     patient_name: orchestratorRef.current?.getStatus().patientName || '',
                     status: 'uploading_chunks',
                     last_batch_index: batchIndex,
+                    metadata: {
+                        session_version: sessionVersion,
+                        checkpoint_batches: checkpointBatches,
+                        checkpoint_count: checkpointBatches.length,
+                        checkpoint_updated_at: new Date().toISOString()
+                    },
                     idempotency_key: sessionId
                 });
             }
@@ -890,6 +1232,9 @@ const AppContent = () => {
                         status: 'awaiting_budget',
                         result_status: 'failed_recoverable',
                         last_batch_index: batchIndex,
+                        metadata: {
+                            session_version: sessionVersion
+                        },
                         error_reason: error?.message || 'partial_batch_failed',
                         idempotency_key: sessionId
                     });
@@ -898,7 +1243,8 @@ const AppContent = () => {
                         batch_index: batchIndex,
                         type: 'audio',
                         status: 'failed',
-                        error_reason: error?.message || 'partial_batch_failed'
+                        error_reason: error?.message || 'partial_batch_failed',
+                        session_version: sessionVersion
                     });
                 }
                 await logError({
@@ -962,6 +1308,7 @@ const AppContent = () => {
     ) => {
         const finalizeStartedAt = Date.now();
         const sessionId = orchestratorRef.current?.getStatus().sessionId || '';
+        const sessionVersion = sessionVersionRef.current;
         const runId = sessionId ? diagnosticRunBySessionRef.current.get(sessionId) : undefined;
         const diagnosticContext = extractDiagnosticContext(patientName);
         const whisperStrict = isWhisperStrictScenario(diagnosticContext.scenarioId, diagnosticContext.executionMode);
@@ -969,74 +1316,29 @@ const AppContent = () => {
             recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'finalize' });
         }
         setProcessingStatus('Transcribiendo segmento final...');
-        await markSegmentStatus({ session_id: sessionId, batch_index: batchIndex, type: 'audio', status: 'processing' });
+        await markSegmentStatus({ session_id: sessionId, batch_index: batchIndex, type: 'audio', status: 'processing', session_version: sessionVersion });
         const safeFinalBlobs = await splitBlobForSafeProcessing(blob, {
             sessionId,
             stageName: 'final_split',
             batchIndex
         });
-        const finalTranscriptParts: string[] = [];
-        for (let i = 0; i < safeFinalBlobs.length; i++) {
-            const subBlob = safeFinalBlobs[i];
-            const subBatchIndex = safeFinalBlobs.length > 1 ? (batchIndex * 1000) + i : batchIndex;
-            const chunkStartedAt = Date.now();
-            try {
-                const transcriptResult = await aiService.transcribeAudio(subBlob, undefined, undefined, {
-                    whisperStrict
-                });
-                finalTranscriptParts.push(transcriptResult.data);
-                if (runId) {
-                    recordDiagnosticEvent(runId, {
-                        type: 'chunk_result',
-                        batch_index: subBatchIndex,
-                        size_bytes: subBlob.size,
-                        duration_ms: Date.now() - chunkStartedAt,
-                        status: 'passed',
-                        mime_type: subBlob.type
-                    });
-                }
-                await saveSegment({
-                    session_id: sessionId,
-                    batch_index: subBatchIndex,
-                    type: 'transcript',
-                    text: transcriptResult.data,
-                    status: 'completed'
-                });
-                continue;
-            } catch (error) {
-                const errorDetail = buildDiagnosticErrorDetail(error, {
-                    stage: 'finalize',
-                    batchIndex: subBatchIndex,
-                    provider: 'groq',
-                    operation: 'transcribeAudio',
-                    mimeType: subBlob.type,
-                    chunkBytes: subBlob.size,
-                    inputType: 'audio',
-                    phase: 'stt',
-                    origin: 'model_output',
-                    blocking: true
-                });
-                if (runId) {
-                    recordDiagnosticEvent(runId, {
-                        type: 'chunk_result',
-                        batch_index: subBatchIndex,
-                        size_bytes: subBlob.size,
-                        duration_ms: Date.now() - chunkStartedAt,
-                        status: 'failed',
-                        mime_type: subBlob.type,
-                        error_code: errorDetail.code,
-                        error_message: errorDetail.message,
-                        error_detail: errorDetail
-                    });
-                }
-                throw error;
-            }
+        const finalTranscriptParts = await transcribeBlobsAdaptive({
+            aiService,
+            blobs: safeFinalBlobs,
+            batchIndex,
+            runId,
+            stage: 'finalize',
+            sessionId,
+            whisperStrict
+        });
+        const mergedFinalTranscript = finalTranscriptParts.map((item) => item.text).join(' ').trim();
+        if (!isSessionVersionCurrent(sessionId, sessionVersion)) {
+            console.warn('[App] Skip stale finalize write due to session version drift');
+            return;
         }
-
-        const mergedFinalTranscript = finalTranscriptParts.join(' ').trim();
         transcriptionPartsRef.current.set(batchIndex, mergedFinalTranscript);
         // Deferred extraction means we don't set extraction parts yet
-        await markSegmentStatus({ session_id: sessionId, batch_index: batchIndex, type: 'audio', status: 'completed' });
+        await markSegmentStatus({ session_id: sessionId, batch_index: batchIndex, type: 'audio', status: 'completed', session_version: sessionVersion });
 
         if (missingBatches.length > 0) {
             for (const missing of missingBatches) {
@@ -1053,10 +1355,9 @@ const AppContent = () => {
                         field_evidence: []
                     }]);
                 }
-                await saveSegment({
+                void enqueueTranscriptPersistence({
                     session_id: sessionId,
                     batch_index: missing,
-                    type: 'transcript',
                     text: `[MISSING_BATCH_${missing}]`,
                     status: 'failed',
                     error_reason: 'missing_batch'
@@ -1102,17 +1403,23 @@ const AppContent = () => {
                 });
             }
         }
+        const draftStageName = TURBO_FAST_DRAFT ? 'single_shot_history_draft' : 'single_shot_history';
         if (runId) {
-            recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'single_shot_history' });
+            recordDiagnosticEvent(runId, { type: 'stage_start', stage: draftStageName });
         }
         const result = await aiService.generateMedicalHistory(extractionInput, patientName);
         if (runId) {
             recordDiagnosticEvent(runId, {
                 type: 'stage_end',
-                stage: 'single_shot_history',
+                stage: draftStageName,
                 status: result.pipeline_status === 'completed' ? 'passed' : 'degraded'
             });
         }
+        const requiresHardening = TURBO_HARDENING_ASYNC
+            && TURBO_FAST_DRAFT
+            && !GEMINI_ONE_CALL_STRICT
+            && sanitizedTranscription.length > extractionInput.length;
+        const outputTier: 'draft' | 'final' = requiresHardening ? 'draft' : 'final';
 
         const missingWarnings = missingBatches.map((idx) => ({
             type: 'missing_batch',
@@ -1153,6 +1460,10 @@ const AppContent = () => {
             logicalCallsUsed: result.logical_calls_used,
             physicalCallsUsed: result.physical_calls_used,
             fallbackHops: result.fallback_hops,
+            outputTier,
+            geminiCallsUsed: result.gemini_calls_used,
+            oneCallPolicyApplied: result.one_call_policy_applied,
+            degradedReasonCode: result.degraded_reason_code,
             fastPathConfig: {
                 adaptiveValidation: FAST_PATH_ADAPTIVE_VALIDATION,
                 tokenBudgets: FAST_PATH_TOKEN_BUDGETS,
@@ -1164,34 +1475,69 @@ const AppContent = () => {
         if (sessionId) {
             const runStatus = result.pipeline_status || (missingBatches.length > 0 ? 'degraded' : 'completed');
             const resultStatus = result.result_status || (runStatus === 'completed' ? 'completed' : 'provisional');
+            const sttMetrics = sttMetricsRef.current;
+            const sttP95 = (() => {
+                const sorted = [...sttMetrics.latenciesMs].sort((a, b) => a - b);
+                if (sorted.length === 0) return 0;
+                const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * 0.95) - 1));
+                return sorted[idx];
+            })();
             await upsertConsultationSession({
                 session_id: sessionId,
                 patient_name: patientName,
-                status: resultStatus === 'completed' ? 'completed' : 'provisional',
+                status: requiresHardening
+                    ? 'draft_ready'
+                    : (resultStatus === 'completed' ? 'completed' : 'provisional'),
                 result_status: resultStatus,
                 last_batch_index: batchIndex,
                 metadata: {
+                    session_version: sessionVersion,
                     missing_batches: missingBatches,
                     corrections_applied: result.corrections_applied || 0,
                     remaining_errors: remainingErrors.length,
                     pipeline_status: runStatus,
                     result_status: resultStatus,
-                    provisional_reason: result.provisional_reason || null
+                    provisional_reason: result.provisional_reason || null,
+                    output_tier: outputTier,
+                    stt_p95_ms: sttP95,
+                    stt_concurrency: sttMetrics.concurrency,
+                    hedge_rate: sttMetrics.totalChunks > 0 ? Number((sttMetrics.hedgedTriggered / sttMetrics.totalChunks).toFixed(4)) : 0,
+                    hedge_cancelled_count: sttMetrics.hedgeCancelled,
+                    gemini_calls_used: result.gemini_calls_used || 0,
+                    gemini_call_block_reason: GEMINI_ONE_CALL_STRICT ? 'one_call_policy_enforced' : null,
+                    one_call_policy: GEMINI_ONE_CALL_STRICT ? 'strict_single_call' : 'default',
+                    strict_policy_violation: GEMINI_ONE_CALL_STRICT ? (result.gemini_calls_used || 0) > 1 : false,
+                    draft_ready_at: new Date().toISOString()
                 },
                 error_reason: resultStatus === 'provisional' ? (result.remaining_errors?.[0]?.reason || pipelineRuntimeReason) : undefined
             });
             void enqueueAuditEvent('pipeline_run_update', {
                 session_id: sessionId,
                 patient_name: patientName,
-                status: runStatus,
-                outcome: runStatus,
+                status: requiresHardening ? 'draft_ready' : runStatus,
+                outcome: requiresHardening ? 'draft_ready' : runStatus,
                 metadata: {
                     missing_batches: missingBatches,
                     corrections_applied: result.corrections_applied || 0,
                     remaining_errors: remainingErrors.length,
-                    result_status: resultStatus
+                    result_status: resultStatus,
+                    output_tier: outputTier,
+                    gemini_calls_used: result.gemini_calls_used || 0,
+                    one_call_policy: GEMINI_ONE_CALL_STRICT ? 'strict_single_call' : 'default'
                 }
             });
+            if (requiresHardening) {
+                void enqueueAuditEvent('pipeline_draft_ready', {
+                    session_id: sessionId,
+                    patient_name: patientName,
+                    output_tier: 'draft',
+                    draft_ready_at: new Date().toISOString(),
+                    metadata: {
+                        truncated_input_chars: extractionInput.length,
+                        full_input_chars: sanitizedTranscription.length
+                    }
+                });
+            }
             void enqueueAuditEvent('pipeline_attempt', {
                 session_id: sessionId,
                 stage: 'finalize',
@@ -1214,11 +1560,14 @@ const AppContent = () => {
             const savedRecord = await persistPipelineRecord({
                 patientName,
                 consultationType: result.classification?.visit_type || 'unknown',
-                transcription: extractionInput,
+                transcription: fullTranscription,
                 medicalHistory: result.data,
                 auditId: result.audit_id,
                 aiModel: result.model,
-                idempotencyKey: sessionId || undefined
+                idempotencyKey: sessionId || undefined,
+                outputTier,
+                sourceSessionId: sessionId || undefined,
+                criticalPathMs: Date.now() - finalizeStartedAt
             });
             if (QUALITY_TRIAGE_ENABLED && savedRecord?.record_uuid) {
                 void upsertConsultationQualitySummary({
@@ -1228,12 +1577,112 @@ const AppContent = () => {
                     corrected_count: result.corrections_applied || 0
                 });
             }
-            if (sessionId && result.result_status === 'completed') {
+            if (sessionId && result.result_status === 'completed' && !requiresHardening) {
                 await finalizeSession(sessionId, {
                     status: 'completed',
                     result_status: 'completed',
                     purgeArtifacts: true
                 });
+            }
+
+            if (requiresHardening && sessionId) {
+                const draftRecordUuid = savedRecord?.record_uuid;
+                void (async () => {
+                    const hardeningStartedAt = Date.now();
+                    try {
+                        await upsertConsultationSession({
+                            session_id: sessionId,
+                            patient_name: patientName,
+                            status: 'hardening',
+                            result_status: 'provisional',
+                            last_batch_index: batchIndex,
+                            metadata: {
+                                session_version: sessionVersion,
+                                output_tier: 'draft',
+                                hardening_started_at: new Date().toISOString()
+                            },
+                            idempotency_key: sessionId
+                        });
+                        const hardenedResult = await aiService.generateMedicalHistory(sanitizedTranscription, patientName);
+                        if (!isSessionVersionCurrent(sessionId, sessionVersion)) return;
+                        const hardenedOutputTier: 'draft' | 'final' = 'final';
+                        const promotedRecord = await persistPipelineRecord({
+                            patientName,
+                            consultationType: hardenedResult.classification?.visit_type || result.classification?.visit_type || 'unknown',
+                            transcription: fullTranscription,
+                            medicalHistory: hardenedResult.data,
+                            auditId: hardenedResult.audit_id,
+                            aiModel: hardenedResult.model,
+                            idempotencyKey: `${sessionId}_hardening`,
+                            outputTier: hardenedOutputTier,
+                            supersedesRecordUuid: draftRecordUuid,
+                            sourceSessionId: sessionId,
+                            criticalPathMs: Date.now() - finalizeStartedAt,
+                            hardeningMs: Date.now() - hardeningStartedAt
+                        });
+
+                        setHistory(hardenedResult.data);
+                        setOriginalHistory(hardenedResult.data);
+                        setPipelineMetadata((prev) => ({
+                            ...(prev || {
+                                corrections: 0,
+                                models: { generation: hardenedResult.model, validation: buildValidationLabel(hardenedResult.validations) },
+                                errorsFixed: 0,
+                                versionsCount: 1
+                            }),
+                            outputTier: hardenedOutputTier
+                        }));
+
+                        await upsertConsultationSession({
+                            session_id: sessionId,
+                            patient_name: patientName,
+                            status: 'completed',
+                            result_status: 'completed',
+                            last_batch_index: batchIndex,
+                            metadata: {
+                                session_version: sessionVersion,
+                                output_tier: hardenedOutputTier,
+                                final_ready_at: new Date().toISOString(),
+                                promoted_from_record_uuid: draftRecordUuid || null,
+                                promoted_to_record_uuid: promotedRecord?.record_uuid || null
+                            },
+                            idempotency_key: sessionId
+                        });
+                        await finalizeSession(sessionId, {
+                            status: 'completed',
+                            result_status: 'completed',
+                            purgeArtifacts: true
+                        });
+                        void enqueueAuditEvent('pipeline_final_promoted', {
+                            session_id: sessionId,
+                            patient_name: patientName,
+                            supersedes_record_uuid: draftRecordUuid || null,
+                            promoted_record_uuid: promotedRecord?.record_uuid || null,
+                            hardening_ms: Date.now() - hardeningStartedAt
+                        });
+                    } catch (hardeningError) {
+                        console.error('[App] hardening async failed:', hardeningError);
+                        await upsertConsultationSession({
+                            session_id: sessionId,
+                            patient_name: patientName,
+                            status: 'provisional',
+                            result_status: 'provisional',
+                            last_batch_index: batchIndex,
+                            error_reason: (hardeningError as Error)?.message || 'hardening_failed',
+                            metadata: {
+                                session_version: sessionVersion,
+                                output_tier: 'draft',
+                                hardening_failed_at: new Date().toISOString()
+                            },
+                            idempotency_key: sessionId
+                        });
+                        void enqueueAuditEvent('pipeline_hardening_failed', {
+                            session_id: sessionId,
+                            patient_name: patientName,
+                            error_message: (hardeningError as Error)?.message || 'hardening_failed'
+                        });
+                    }
+                })();
             }
 
             const qualityGate = buildQualityGateFromHistory({
@@ -1315,7 +1764,7 @@ const AppContent = () => {
                 await saveLabTestLog({
                     test_name: patientName,
                     input_type: 'audio',
-                    transcription: extractionInput,
+                    transcription: fullTranscription,
                     medical_history: result.data,
                     metadata: {
                         corrections: result.corrections_applied || 0,
@@ -1362,6 +1811,9 @@ const AppContent = () => {
                 finalizeWaitMs: 180_000,
                 onStatusChange: (status) => {
                     setPipelineRuntimeReason(status.reason || '');
+                    if (status.state === 'recording' || status.state === 'transcribing_live' || status.state === 'draft_ready' || status.state === 'hardening' || status.state === 'completed' || status.state === 'provisional' || status.state === 'failed') {
+                        setLivePipelineState(status.state);
+                    }
                     if (status.sessionId && status.patientName) {
                         activeSessionIdRef.current = status.sessionId;
                         void upsertPipelineJob({
@@ -1400,6 +1852,7 @@ const AppContent = () => {
                                     : undefined,
                             last_batch_index: Math.max(status.nextExpectedBatch, status.processedBatches[status.processedBatches.length - 1] || 0),
                             metadata: {
+                                session_version: sessionVersionRef.current,
                                 processed_batches: status.processedBatches,
                                 pending_batches: status.pendingBatches,
                                 missing_batches: status.missingBatches,
@@ -1437,35 +1890,47 @@ const AppContent = () => {
         return orchestratorRef.current;
     };
 
+    const { initializeSessionRuntime, resetSessionRuntime } = usePipelineController({
+        setLivePipelineState: (value) => setLivePipelineState(value),
+        setPipelineBusy: (busy) => MemoryService.setPipelineBusy(busy),
+        startConsultation: (sessionId: string, patientName: string) => {
+            const keys = getApiKeys(apiKey);
+            if (keys.length === 0) return;
+            const aiService = aiServiceRef.current || new AIService(keys);
+            aiServiceRef.current = aiService;
+            const orchestrator = ensureOrchestrator(aiService);
+            orchestrator.startConsultation(sessionId, patientName);
+        },
+        maybeStartDiagnosticRun: maybeStartDiagnosticRunForSession
+    });
+
     const handleConsultationStart = (sessionId: string, patientName: string) => {
         if (!PIPELINE_V4_ENABLED) return;
         const keys = getApiKeys(apiKey);
         if (keys.length === 0) return;
         const aiService = aiServiceRef.current || new AIService(keys);
         aiServiceRef.current = aiService;
-        const orchestrator = ensureOrchestrator(aiService);
         activeSessionIdRef.current = sessionId;
-        orchestrator.startConsultation(sessionId, patientName);
-        if (isLabRun(patientName) && !diagnosticRunBySessionRef.current.has(sessionId)) {
-            const diagnosticContext = extractDiagnosticContext(patientName);
-            const runId = startDiagnosticRun({
-                mode: 'hybrid',
-                source: 'audio',
-                patient_name: patientName,
-                scenario_id: diagnosticContext.scenarioId,
-                execution_mode: diagnosticContext.executionMode
-            });
-            diagnosticRunBySessionRef.current.set(sessionId, runId);
-            recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'session_start' });
-            recordDiagnosticEvent(runId, { type: 'stage_end', stage: 'session_start', status: 'passed', duration_ms: 1 });
-        }
-        MemoryService.setPipelineBusy(true);
+        sessionVersionRef.current += 1;
+        sttMetricsRef.current = {
+            latenciesMs: [],
+            concurrency: 2,
+            throttleErrors: 0,
+            timeoutErrors: 0,
+            hedgedTriggered: 0,
+            hedgeCancelled: 0,
+            totalChunks: 0
+        };
+        initializeSessionRuntime(sessionId, patientName);
         setPipelineRuntimeReason('');
         void upsertConsultationSession({
             session_id: sessionId,
             patient_name: patientName,
             status: 'recording',
             last_batch_index: 0,
+            metadata: {
+                session_version: sessionVersionRef.current
+            },
             idempotency_key: sessionId
         });
         void enqueueAuditEvent('pipeline_run_update', {
@@ -1516,8 +1981,10 @@ const AppContent = () => {
                 severity: 'error'
             });
 
-            alert('Error processing audio. See console for details.');
-            setCurrentView('record');
+            const provisional = buildLocalProvisionalHistory(error?.message || 'legacy_pipeline_failed');
+            setHistory(provisional);
+            setOriginalHistory(provisional);
+            setCurrentView('result');
             clearPipelineBuffers();
         } finally {
             setIsLoading(false);
@@ -1553,24 +2020,25 @@ const AppContent = () => {
                 ? crypto.randomUUID()
                 : `session_${Date.now()}_${Math.random().toString(16).slice(2)}`;
             activeSessionIdRef.current = sessionId;
-            orchestrator.startConsultation(sessionId, patientName);
-            if (isLabRun(patientName) && !diagnosticRunBySessionRef.current.has(sessionId)) {
-                const diagnosticContext = extractDiagnosticContext(patientName);
-                const runId = startDiagnosticRun({
-                    mode: 'hybrid',
-                    source: 'audio',
-                    patient_name: patientName,
-                    scenario_id: diagnosticContext.scenarioId,
-                    execution_mode: diagnosticContext.executionMode
-                });
-                diagnosticRunBySessionRef.current.set(sessionId, runId);
-            }
-            MemoryService.setPipelineBusy(true);
+            sessionVersionRef.current += 1;
+            sttMetricsRef.current = {
+                latenciesMs: [],
+                concurrency: 2,
+                throttleErrors: 0,
+                timeoutErrors: 0,
+                hedgedTriggered: 0,
+                hedgeCancelled: 0,
+                totalChunks: 0
+            };
+            initializeSessionRuntime(sessionId, patientName);
             await upsertConsultationSession({
                 session_id: sessionId,
                 patient_name: patientName,
                 status: 'recording',
                 last_batch_index: 0,
+                metadata: {
+                    session_version: sessionVersionRef.current
+                },
                 idempotency_key: sessionId
             });
         }
@@ -1583,6 +2051,7 @@ const AppContent = () => {
                         session_id: currentSessionId,
                         batch_index: batchIndex,
                         type: 'audio',
+                        session_version: sessionVersionRef.current,
                         blob,
                         status: 'pending',
                         is_final: false
@@ -1592,6 +2061,9 @@ const AppContent = () => {
                         patient_name: patientName,
                         status: 'uploading_chunks',
                         last_batch_index: batchIndex,
+                        metadata: {
+                            session_version: sessionVersionRef.current
+                        },
                         idempotency_key: currentSessionId
                     });
                 }
@@ -1609,6 +2081,7 @@ const AppContent = () => {
                     session_id: activeSessionId,
                     batch_index: batchIndex,
                     type: 'audio',
+                    session_version: sessionVersionRef.current,
                     blob,
                     status: 'pending',
                     is_final: true
@@ -1618,6 +2091,9 @@ const AppContent = () => {
                     patient_name: patientName,
                     status: 'finalizing',
                     last_batch_index: batchIndex,
+                    metadata: {
+                        session_version: sessionVersionRef.current
+                    },
                     idempotency_key: activeSessionId
                 });
             }
@@ -1721,6 +2197,9 @@ const AppContent = () => {
                         status: 'awaiting_budget',
                         result_status: 'failed_recoverable',
                         last_batch_index: batchIndex,
+                        metadata: {
+                            session_version: sessionVersionRef.current
+                        },
                         error_reason: error?.message || 'v4_pipeline_failed',
                         idempotency_key: sessionId
                     });
@@ -1729,8 +2208,10 @@ const AppContent = () => {
                 console.error('[App] Failed to persist v4 pipeline failure audit:', auditError);
             }
             clearPipelineBuffers();
-            setCurrentView('record');
-            alert('Error processing audio. See console for details.');
+            const provisional = buildLocalProvisionalHistory(error?.message || 'v4_pipeline_failed');
+            setHistory(provisional);
+            setOriginalHistory(provisional);
+            setCurrentView('result');
         } finally {
             if (!isPartialBatch) {
                 setIsLoading(false);
@@ -1814,6 +2295,9 @@ const AppContent = () => {
                 logicalCallsUsed: result.logical_calls_used,
                 physicalCallsUsed: result.physical_calls_used,
                 fallbackHops: result.fallback_hops,
+                geminiCallsUsed: result.gemini_calls_used,
+                oneCallPolicyApplied: result.one_call_policy_applied,
+                degradedReasonCode: result.degraded_reason_code,
                 fastPathConfig: {
                     adaptiveValidation: FAST_PATH_ADAPTIVE_VALIDATION,
                     tokenBudgets: FAST_PATH_TOKEN_BUDGETS,
@@ -2061,6 +2545,7 @@ const AppContent = () => {
 
     const availableApiKeys = getApiKeys(apiKey);
     const canStartConsultation = availableApiKeys.length > 0;
+    const pipelineStatusVm = usePipelineStatusViewModel(livePipelineState, sttMetricsRef.current);
     const startBlockReason = canStartConsultation
         ? ''
         : 'Configura una API key válida para iniciar y asegurar recuperación automática.';
@@ -2102,6 +2587,12 @@ const AppContent = () => {
                 </motion.button>
                 {currentView === 'record' && (
                     <div className="view-content">
+                        <PipelineStageTracker
+                            state={pipelineStatusVm.state}
+                            sttP95Ms={pipelineStatusVm.sttP95Ms}
+                            sttConcurrency={pipelineStatusVm.sttConcurrency}
+                            hedgeRate={pipelineStatusVm.hedgeRate}
+                        />
                         <Recorder
                             onRecordingComplete={handleRecordingComplete}
                             onConsultationStart={handleConsultationStart}
@@ -2113,92 +2604,105 @@ const AppContent = () => {
                 )}
 
                 {currentView === 'history' && (
-                    <SearchHistory
-                        apiKey={apiKey}
-                        onLoadRecord={(record) => {
-                            setHistory(record.medical_history);
-                            setOriginalHistory(record.original_medical_history || record.medical_history);
-                            setTranscription(record.transcription || '');
-                            setCurrentPatientName(record.patient_name);
-                            setCurrentRecordId(record.record_uuid || null);
+                    <Suspense fallback={<div className="view-loading">Cargando historial...</div>}>
+                        <SearchHistory
+                            apiKey={apiKey}
+                            onLoadRecord={(record) => {
+                                setHistory(record.medical_history);
+                                setOriginalHistory(record.original_medical_history || record.medical_history);
+                                setTranscription(record.transcription || '');
+                                setCurrentPatientName(record.patient_name);
+                                setCurrentRecordId(record.record_uuid || null);
 
-                            // Set metadata if relevant, though legacy records might lack it
-                            setCurrentView('result');
-                        }}
-                    />
+                                // Set metadata if relevant, though legacy records might lack it
+                                setCurrentView('result');
+                            }}
+                        />
+                    </Suspense>
                 )}
 
                 {currentView === 'reports' && (
-                    <ReportsView />
+                    <Suspense fallback={<div className="view-loading">Cargando informes...</div>}>
+                        <ReportsView />
+                    </Suspense>
                 )}
 
                 {currentView === 'result' && (
-                    <HistoryView
-                        content={history}
-                        isLoading={isLoading}
-                        patientName={currentPatientName}
-                        originalContent={originalHistory}
-                        transcription={transcription}
-                        apiKey={apiKey}
-                        onNewConsultation={() => {
-                            if (activeSessionIdRef.current) {
-                                void finalizeSession(activeSessionIdRef.current, {
-                                    status: 'failed',
-                                    result_status: 'failed_recoverable',
-                                    error_reason: 'new_consultation_interrupted'
-                                });
-                            }
-                            setHistory('');
-                            setOriginalHistory('');
-                            setTranscription('');
-                            setCurrentPatientName('');
-                            setPipelineMetadata(undefined);
-                            clearPipelineBuffers();
-                            if (orchestratorRef.current) {
-                                orchestratorRef.current.abort('new_consultation');
-                                orchestratorRef.current = null;
-                            }
-                            MemoryService.setPipelineBusy(false);
-                            aiServiceRef.current = null;
-                            activeSessionIdRef.current = null;
-                            setCurrentRecordId(null);
-                            setCurrentView('record');
-                        }}
-                        onContentChange={(newContent) => setHistory(newContent)}
-                        metadata={pipelineMetadata}
-                        recordId={currentRecordId || undefined}
-                        onPersistMedicalHistory={persistMedicalHistory}
-                        onRegenerateSection={SECTION_REGEN_ENABLED ? handleRegenerateSection : undefined}
-                        onGenerateReport={async () => {
-                            // Reuse existing report generation logic if possible, or leave handled by HistoryView internal logic if simpler
-                            // For now HistoryView handles generation via its own simple standard prompt if prop not fully passed, 
-                            // but we can pass a closure to reuse AIService. 
-                            const aiService = new AIService(getApiKeys(apiKey));
-                            const res = await aiService.generateMedicalReport(transcription, currentPatientName);
-                            return res.data;
-                        }}
-                    />
+                    <Suspense fallback={<div className="view-loading">Preparando resultado...</div>}>
+                        <HistoryView
+                            content={history}
+                            isLoading={isLoading}
+                            patientName={currentPatientName}
+                            originalContent={originalHistory}
+                            transcription={transcription}
+                            apiKey={apiKey}
+                            onNewConsultation={() => {
+                                if (activeSessionIdRef.current) {
+                                    void finalizeSession(activeSessionIdRef.current, {
+                                        status: 'failed',
+                                        result_status: 'failed_recoverable',
+                                        error_reason: 'new_consultation_interrupted'
+                                    });
+                                }
+                                setHistory('');
+                                setOriginalHistory('');
+                                setTranscription('');
+                                setCurrentPatientName('');
+                                setPipelineMetadata(undefined);
+                                clearPipelineBuffers();
+                                sessionVersionRef.current += 1;
+                                if (orchestratorRef.current) {
+                                    orchestratorRef.current.abort('new_consultation');
+                                    orchestratorRef.current = null;
+                                }
+                                resetSessionRuntime();
+                                aiServiceRef.current = null;
+                                activeSessionIdRef.current = null;
+                                setCurrentRecordId(null);
+                                setCurrentView('record');
+                            }}
+                            onContentChange={(newContent) => setHistory(newContent)}
+                            metadata={pipelineMetadata}
+                            recordId={currentRecordId || undefined}
+                            onPersistMedicalHistory={persistMedicalHistory}
+                            onRegenerateSection={SECTION_REGEN_ENABLED ? handleRegenerateSection : undefined}
+                            onGenerateReport={async () => {
+                                // Reuse existing report generation logic if possible, or leave handled by HistoryView internal logic if simpler
+                                // For now HistoryView handles generation via its own simple standard prompt if prop not fully passed, 
+                                // but we can pass a closure to reuse AIService. 
+                                const aiService = new AIService(getApiKeys(apiKey));
+                                const res = await aiService.generateMedicalReport(transcription, currentPatientName);
+                                return res.data;
+                            }}
+                        />
+                    </Suspense>
                 )}
 
                 {currentView === 'test-lab' && (
-                    <AudioTestLab
-                        onClose={() => setCurrentView('record')}
-                        onRunFullPipeline={handleRecordingComplete}
-                        onRunTextPipeline={handleTextPipeline}
-                    />
+                    <Suspense fallback={<div className="view-loading">Cargando laboratorio...</div>}>
+                        <AudioTestLab
+                            onClose={() => setCurrentView('record')}
+                            onRunFullPipeline={handleRecordingComplete}
+                            onRunTextPipeline={handleTextPipeline}
+                        />
+                    </Suspense>
                 )}
                 {showSettings && (
-                    <Settings
-                        apiKey={apiKey}
-                        onSave={handleSaveSettings}
-                        onClose={() => setShowSettings(false)}
-                    />
+                    <Suspense fallback={<div className="view-loading">Cargando ajustes...</div>}>
+                        <Settings
+                            apiKey={apiKey}
+                            onSave={handleSaveSettings}
+                            onClose={() => setShowSettings(false)}
+                        />
+                    </Suspense>
                 )}
 
                 {showLessons && (
-                    <LessonsPanel
-                        onClose={() => setShowLessons(false)}
-                    />
+                    <Suspense fallback={<div className="view-loading">Cargando lecciones...</div>}>
+                        <LessonsPanel
+                            onClose={() => setShowLessons(false)}
+                        />
+                    </Suspense>
                 )}
             </Layout>
         </div >

@@ -5,6 +5,7 @@ import { AnimatePresence } from 'framer-motion';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { normalizeAndChunkAudio } from '../utils/audioProcessing';
 import type { LabTestLog } from '../services/db';
+import { clearLabTestLogs, getLabTestLogs } from '../services/storage';
 
 interface AudioTestLabProps {
   onClose: () => void;
@@ -151,7 +152,6 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
   );
 
   const loadLogs = React.useCallback(async () => {
-    const { getLabTestLogs } = await import('../services/storage');
     const logs = await getLabTestLogs();
     setHistoryLogs(logs);
     const latest = logs.find((log) => isDiagnosticLog(log)) || null;
@@ -446,7 +446,6 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
                   className="audio-lab-clear-btn"
                   onClick={async () => {
                     if (confirm('Borrar todo el historial de pruebas?')) {
-                      const { clearLabTestLogs } = await import('../services/storage');
                       await clearLabTestLogs();
                       setHistoryLogs([]);
                       setLatestDiagnostic(null);

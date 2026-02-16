@@ -80,6 +80,15 @@ export async function fetchWithRetry(
     for (let attempt = 0; attempt <= merged.retries; attempt++) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), merged.timeoutMs);
+        const externalSignal = init.signal;
+        const onExternalAbort = () => controller.abort();
+        if (externalSignal) {
+            if (externalSignal.aborted) {
+                controller.abort();
+            } else {
+                externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+            }
+        }
 
         try {
             const response = await fetch(input, {
@@ -87,6 +96,9 @@ export async function fetchWithRetry(
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
+            if (externalSignal) {
+                externalSignal.removeEventListener('abort', onExternalAbort);
+            }
 
             if (response.ok) return response;
 
@@ -108,6 +120,9 @@ export async function fetchWithRetry(
             await sleep(computeBackoffDelay(attempt, merged.baseDelayMs, merged.maxDelayMs));
         } catch (rawError) {
             clearTimeout(timeoutId);
+            if (externalSignal) {
+                externalSignal.removeEventListener('abort', onExternalAbort);
+            }
 
             if (rawError instanceof NetworkRequestError) {
                 throw rawError;

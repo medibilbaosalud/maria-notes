@@ -363,6 +363,35 @@ const processPipelineAttempt = async (payload: Record<string, unknown>) => {
     if (error) throw error;
 };
 
+const processPipelineMarker = async (eventType: string, payload: Record<string, unknown>) => {
+    if (!supabase) return;
+    const sessionId = String(payload.session_id || '');
+    if (!sessionId) return;
+    const { data: run } = await supabase
+        .from('ai_pipeline_runs')
+        .select('id')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    const { error } = await supabase.from('ai_pipeline_attempts').insert([{
+        run_id: run?.id || null,
+        session_id: sessionId,
+        stage: eventType,
+        attempt_index: 0,
+        status: 'completed',
+        started_at: nowIso(),
+        finished_at: nowIso(),
+        duration_ms: 0,
+        error_code: null,
+        error_message: null,
+        metadata: payload || {},
+        created_at: nowIso()
+    }]);
+    if (error) throw error;
+};
+
 const processItem = async (item: AuditOutboxItem) => {
     switch (item.event_type) {
         case 'pipeline_audit_bundle':
@@ -374,8 +403,15 @@ const processItem = async (item: AuditOutboxItem) => {
         case 'pipeline_attempt':
             await processPipelineAttempt(item.payload);
             return;
+        case 'pipeline_draft_ready':
+        case 'pipeline_final_promoted':
+        case 'pipeline_hardening_failed':
+        case 'pipeline_sla_breach':
+            await processPipelineMarker(item.event_type, item.payload);
+            return;
         default:
-            throw new Error(`unsupported_audit_event:${item.event_type}`);
+            // Keep unknown events non-blocking so telemetry never breaks the critical path.
+            return;
     }
 };
 

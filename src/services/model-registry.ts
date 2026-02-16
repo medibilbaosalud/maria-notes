@@ -64,7 +64,7 @@ const GEMINI_TEXT_CHAIN_LOW: ModelCandidate[] = [
 ];
 
 const GEMINI_TEXT_CHAIN_MEDIUM: ModelCandidate[] = [
-    candidate('gemini', 'gemini-3-flash', { thinking: 'medium' }),
+    candidate('gemini', 'gemini-3-flash', { thinking: 'low' }),
     candidate('gemini', 'gemini-2.5-flash', { thinking: 'medium' }),
     candidate('gemini', 'gemini-2.5-flash-lite', { thinking: 'low' }),
     candidate('gemini', 'gemma-3-27b-it', { thinking: 'low' }),
@@ -154,6 +154,8 @@ const parseJson = <T>(raw: string | undefined, fallback: T): T => {
     }
 };
 
+const GEMINI_ONE_CALL_STRICT = String(import.meta.env.VITE_GEMINI_ONE_CALL_STRICT || 'true').toLowerCase() === 'true';
+
 const parseCandidateInput = (value: unknown): ModelCandidate | null => {
     if (typeof value === 'string') {
         const trimmed = value.trim();
@@ -237,6 +239,19 @@ const buildTaskPreferences = (): Record<TaskType, ModelCandidate[]> => {
         const base = override && override.length > 0 ? override : output[task];
         output[task] = withAllowlist(base);
     });
+    if (GEMINI_ONE_CALL_STRICT) {
+        const strictSingleShot = withAllowlist([candidate('gemini', 'gemini-3-flash', { thinking: 'low' })]);
+        if (strictSingleShot.length > 0) {
+            output.single_shot_history = strictSingleShot;
+        }
+        (Object.keys(output) as TaskType[]).forEach((task) => {
+            if (task === 'single_shot_history') return;
+            const nonGemini = output[task].filter((entry) => entry.provider !== 'gemini');
+            if (nonGemini.length > 0) {
+                output[task] = nonGemini;
+            }
+        });
+    }
     return output;
 };
 

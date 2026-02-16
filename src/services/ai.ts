@@ -92,12 +92,21 @@ export interface AIResultWithMetadata extends AIResult<string> {
         }>;
     };
     followup_status?: 'pending' | 'completed' | 'degraded' | 'failed';
+    output_tier?: 'draft' | 'final';
+    supersedes_record_id?: string;
+    promotion_candidate?: boolean;
+    hardening_job_id?: string;
+    gemini_calls_used?: number;
+    one_call_policy_applied?: boolean;
+    degraded_reason_code?: string;
 }
 
 const FAST_PATH_ADAPTIVE_VALIDATION = String(import.meta.env.VITE_FAST_PATH_ADAPTIVE_VALIDATION || 'true').toLowerCase() === 'true';
 const FAST_PATH_ASYNC_TRIAGE = String(import.meta.env.VITE_FAST_PATH_ASYNC_TRIAGE || 'true').toLowerCase() === 'true';
 const TWO_CALL_ADAPTIVE_MODE = String(import.meta.env.VITE_TWO_CALL_ADAPTIVE_MODE || 'true').toLowerCase() === 'true';
 const SINGLE_SHOT_HISTORY_MODE = String(import.meta.env.VITE_SINGLE_SHOT_HISTORY_MODE || 'true').toLowerCase() === 'true';
+const GEMINI_ONE_CALL_STRICT = String(import.meta.env.VITE_GEMINI_ONE_CALL_STRICT || 'true').toLowerCase() === 'true';
+const SINGLE_SHOT_ASYNC_FOLLOWUP = String(import.meta.env.VITE_SINGLE_SHOT_ASYNC_FOLLOWUP || 'false').toLowerCase() === 'true';
 
 export class AIService {
     private groq: GroqService;
@@ -395,7 +404,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
         audioInput: Blob | string,
         mimeType?: string,
         legacyAudioBlob?: Blob,
-        options?: { whisperStrict?: boolean }
+        options?: { whisperStrict?: boolean; signal?: AbortSignal }
     ): Promise<AIResult<string>> {
         let audioBlob: Blob | null = null;
 
@@ -817,7 +826,11 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                     validate: validationDurationMs,
                     corrections: correctionDurationMs,
                     total: durationMs
-                }
+                },
+                output_tier: 'final',
+                gemini_calls_used: modelInvocations.filter((item) => item.provider === 'gemini').length,
+                one_call_policy_applied: GEMINI_ONE_CALL_STRICT,
+                degraded_reason_code: provisionalReason
             };
         } catch (error) {
             this.groq.drainModelInvocations();
@@ -854,7 +867,11 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                     validate: 0,
                     corrections: 0,
                     total: 0
-                }
+                },
+                output_tier: 'final',
+                gemini_calls_used: 0,
+                one_call_policy_applied: GEMINI_ONE_CALL_STRICT,
+                degraded_reason_code: reason
             };
         }
     }
@@ -1099,14 +1116,17 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
             console.error('[AIService] Failed to enqueue single-shot audit event:', error);
         });
 
-        this.startAsyncGroqFollowup({
-            sessionId: auditId,
-            patientName,
-            transcription,
-            generatedHistory: historyOutput,
-            extraction: singleShot.extraction,
-            extractionMeta: []
-        });
+        if (SINGLE_SHOT_ASYNC_FOLLOWUP && !GEMINI_ONE_CALL_STRICT) {
+            this.startAsyncGroqFollowup({
+                sessionId: auditId,
+                patientName,
+                transcription,
+                generatedHistory: historyOutput,
+                extraction: singleShot.extraction,
+                extractionMeta: []
+            });
+        }
+        const geminiCallsUsed = modelInvocations.filter((item) => item.provider === 'gemini').length;
 
         return {
             data: historyOutput,
@@ -1153,7 +1173,11 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 corrections: 0,
                 total: durationMs
             },
-            followup_status: 'pending'
+            followup_status: SINGLE_SHOT_ASYNC_FOLLOWUP && !GEMINI_ONE_CALL_STRICT ? 'pending' : 'completed',
+            output_tier: 'final',
+            gemini_calls_used: geminiCallsUsed,
+            one_call_policy_applied: GEMINI_ONE_CALL_STRICT,
+            degraded_reason_code: provisionalReason
         };
     }
 
@@ -1231,7 +1255,11 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                 provisional_reason: reason,
                 fallback_hops: 0,
                 phase_timings_ms: { extract: 0, generate: 0, validate: 0, corrections: 0, total: 0 },
-                followup_status: 'failed'
+                followup_status: 'failed',
+                output_tier: 'final',
+                gemini_calls_used: 0,
+                one_call_policy_applied: GEMINI_ONE_CALL_STRICT,
+                degraded_reason_code: reason
             };
         }
     }

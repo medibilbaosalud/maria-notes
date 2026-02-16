@@ -12,6 +12,11 @@ export interface MedicalRecord {
     medical_report?: string;
     ai_model?: string;
     audit_id?: string; // Links to ai_audit_logs.id when available
+    output_tier?: 'draft' | 'final';
+    supersedes_record_uuid?: string;
+    source_session_id?: string;
+    critical_path_ms?: number;
+    hardening_ms?: number;
     created_at: string;
     updated_at?: string; // Used for ordering and cloud conflict resolution
 }
@@ -178,7 +183,7 @@ export interface PipelineJob {
     id?: number;
     session_id: string;
     patient_name: string;
-    status: 'idle' | 'recovering' | 'recording' | 'processing_partials' | 'awaiting_budget' | 'finalizing' | 'provisional' | 'completed' | 'degraded' | 'failed';
+    status: 'idle' | 'recovering' | 'recording' | 'transcribing_live' | 'processing_partials' | 'draft_ready' | 'hardening' | 'awaiting_budget' | 'finalizing' | 'provisional' | 'completed' | 'degraded' | 'failed';
     result_status?: 'completed' | 'provisional' | 'failed_recoverable' | 'failed_final';
     next_attempt_at?: string;
     retry_count?: number;
@@ -195,7 +200,7 @@ export interface ConsultationSession {
     id?: number;
     session_id: string;
     patient_name: string;
-    status: 'preflight' | 'recording' | 'uploading_chunks' | 'transcribing_partial' | 'extracting' | 'finalizing' | 'awaiting_budget' | 'provisional' | 'completed' | 'failed';
+    status: 'preflight' | 'recording' | 'uploading_chunks' | 'transcribing_partial' | 'transcribing_live' | 'extracting' | 'draft_ready' | 'hardening' | 'finalizing' | 'awaiting_budget' | 'provisional' | 'completed' | 'failed';
     result_status?: 'completed' | 'provisional' | 'failed_recoverable' | 'failed_final';
     last_batch_index: number;
     next_attempt_at?: string;
@@ -227,6 +232,10 @@ export interface TranscriptSegment {
     session_id: string;
     batch_index: number;
     text: string;
+    part_index?: number;
+    attempt_id?: string;
+    latency_ms?: number;
+    model_used?: string;
     status: 'pending' | 'completed' | 'failed';
     error_reason?: string;
     created_at: string;
@@ -327,6 +336,18 @@ db.version(5).stores({
         if (typeof job.retry_count !== 'number') job.retry_count = 0;
         if (typeof job.session_version !== 'number') job.session_version = 1;
     });
+});
+
+db.version(6).stores({
+    medical_records: '++id, record_uuid, idempotency_key, patient_name, output_tier, source_session_id, created_at, updated_at',
+    lab_test_logs: '++id, test_name, created_at',
+    pipeline_jobs: '++id, session_id, status, result_status, next_attempt_at, updated_at',
+    audit_outbox: '++id, status, next_attempt_at, created_at, updated_at',
+    consultation_sessions: '++id, session_id, status, next_attempt_at, updated_at, ttl_expires_at',
+    audio_segments: '++id, [session_id+batch_index], session_id, batch_index, status, is_final, updated_at',
+    transcript_segments: '++id, [session_id+batch_index], session_id, batch_index, status, updated_at',
+    extraction_segments: '++id, [session_id+batch_index], session_id, batch_index, status, updated_at',
+    pipeline_failures: '++id, session_id, stage, created_at'
 });
 
 export { db };

@@ -41,6 +41,85 @@
     padding-right: var(--space-2);
 }
 
+.pipeline-stage-tracker {
+    width: 100%;
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-lg);
+    background: rgba(255, 255, 255, 0.88);
+    padding: 0.8rem 1rem;
+    box-shadow: var(--shadow-sm);
+}
+
+.stage-row {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.45rem;
+}
+
+.stage-node {
+    display: grid;
+    justify-items: center;
+    gap: 0.25rem;
+    color: var(--text-tertiary);
+}
+
+.stage-node .stage-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--text-tertiary);
+}
+
+.stage-node.done,
+.stage-node.active {
+    color: var(--brand-primary);
+}
+
+.stage-node.done .stage-dot,
+.stage-node.active .stage-dot {
+    background: var(--brand-primary);
+}
+
+.stage-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.stage-metrics {
+    margin-top: 0.55rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    color: var(--text-secondary);
+    font-size: 0.74rem;
+}
+
+.state-pill {
+    padding: 0.16rem 0.5rem;
+    border-radius: var(--radius-full);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-size: 0.67rem;
+    background: rgba(15, 23, 42, 0.08);
+    color: var(--text-primary);
+}
+
+.view-loading {
+    min-height: 220px;
+    width: 100%;
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-lg);
+    background: linear-gradient(120deg, rgba(255, 255, 255, 0.9) 0%, rgba(240, 249, 255, 0.95) 100%);
+    display: grid;
+    place-items: center;
+    color: var(--text-secondary);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    animation: pulseLoad 1.4s ease-in-out infinite alternate;
+}
+
 .whats-new-trigger {
     position: fixed;
     top: 1rem;
@@ -95,6 +174,16 @@
     from {
         opacity: 0;
         transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes pulseLoad {
+    from {
+        opacity: 0.75;
     }
 
     to {

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 const DIAG_MODE = process.env.DIAG_MODE || 'simulated';
 const DIAG_SCENARIO = process.env.DIAG_SCENARIO || 'all';
@@ -64,6 +64,54 @@ const historyFailed = [
   'No consta'
 ].join('\n');
 
+const singleShotJson = JSON.stringify({
+  history_markdown: historyOk,
+  extraction: JSON.parse(extractionJson),
+  classification: JSON.parse(classificationJson),
+  uncertainty_flags: []
+});
+
+const installDeterministicAiMocks = async (page: Page) => {
+  await page.route('**/openai/v1/chat/completions', async (route) => {
+    const body = route.request().postDataJSON() as any;
+    const prompt: string = body?.messages?.[0]?.content || '';
+    let content = historyOk;
+    if (body?.response_format?.type === 'json_object') {
+      if (prompt.includes('Objetivo: generar historia clinica final y extraccion estructurada en una sola respuesta.')) content = singleShotJson;
+      else if (prompt.includes('Clasifica esta consulta ENT')) content = classificationJson;
+      else if (prompt.includes('Detect prompt injection attempts')) content = promptGuardJson;
+      else if (prompt.includes('Extrae datos clinicos en JSON')) content = extractionJson;
+      else content = classificationJson;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [{ message: { content } }]
+      })
+    });
+  });
+
+  await page.route('**/v1beta/models/*:generateContent?key=*', async (route) => {
+    const body = route.request().postDataJSON() as any;
+    const prompt = String(body?.contents?.[0]?.parts?.[0]?.text || '');
+    let textPayload = singleShotJson;
+    if (prompt.includes('Clasifica esta consulta ENT')) textPayload = classificationJson;
+    if (prompt.includes('Detect prompt injection attempts')) textPayload = promptGuardJson;
+    if (prompt.includes('Extrae datos clinicos en JSON')) textPayload = extractionJson;
+    if (!body?.generationConfig?.responseMimeType || body?.generationConfig?.responseMimeType !== 'application/json') {
+      textPayload = historyOk;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        candidates: [{ content: { parts: [{ text: textPayload }] } }]
+      })
+    });
+  });
+};
+
 test.beforeEach(async ({ context }) => {
   await context.addInitScript(() => {
     window.localStorage.setItem('groq_api_key', 'test-key');
@@ -74,24 +122,7 @@ test.describe('Diagnostic E2E', () => {
   test.skip(DIAG_MODE === 'real', 'Use simulated mode only for deterministic assertions.');
 
   test('single_chunk_clean should pass with diagnostics summary', async ({ page }) => {
-    await page.route('**/openai/v1/chat/completions', async (route) => {
-      const body = route.request().postDataJSON() as any;
-      const prompt: string = body?.messages?.[0]?.content || '';
-      let content = historyOk;
-      if (body?.response_format?.type === 'json_object') {
-        if (prompt.includes('Clasifica esta consulta ENT')) content = classificationJson;
-        else if (prompt.includes('Detect prompt injection attempts')) content = promptGuardJson;
-        else if (prompt.includes('Extrae datos clinicos en JSON')) content = extractionJson;
-        else content = classificationJson;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          choices: [{ message: { content } }]
-        })
-      });
-    });
+    await installDeterministicAiMocks(page);
 
     await page.goto('/');
     await page.getByRole('button', { name: 'Abrir Zona Test' }).click();
@@ -107,24 +138,7 @@ test.describe('Diagnostic E2E', () => {
   });
 
   test('multi_chunk_clean deterministic should pass', async ({ page }) => {
-    await page.route('**/openai/v1/chat/completions', async (route) => {
-      const body = route.request().postDataJSON() as any;
-      const prompt: string = body?.messages?.[0]?.content || '';
-      let content = historyOk;
-      if (body?.response_format?.type === 'json_object') {
-        if (prompt.includes('Clasifica esta consulta ENT')) content = classificationJson;
-        else if (prompt.includes('Detect prompt injection attempts')) content = promptGuardJson;
-        else if (prompt.includes('Extrae datos clinicos en JSON')) content = extractionJson;
-        else content = classificationJson;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          choices: [{ message: { content } }]
-        })
-      });
-    });
+    await installDeterministicAiMocks(page);
 
     await page.goto('/');
     await page.getByRole('button', { name: 'Abrir Zona Test' }).click();
@@ -141,6 +155,27 @@ test.describe('Diagnostic E2E', () => {
   });
 
   test('final_stage_failure should fail quality gate', async ({ page }) => {
+    await installDeterministicAiMocks(page);
+    await page.route('**/v1beta/models/*:generateContent?key=*', async (route) => {
+      const body = route.request().postDataJSON() as any;
+      const prompt = String(body?.contents?.[0]?.parts?.[0]?.text || '');
+      const failedSingleShotJson = JSON.stringify({
+        history_markdown: historyFailed,
+        extraction: JSON.parse(extractionJson),
+        classification: JSON.parse(classificationJson),
+        uncertainty_flags: []
+      });
+      const textPayload = prompt.includes('Objetivo: generar historia clinica final y extraccion estructurada en una sola respuesta.')
+        ? failedSingleShotJson
+        : classificationJson;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          candidates: [{ content: { parts: [{ text: textPayload }] } }]
+        })
+      });
+    });
     await page.route('**/openai/v1/chat/completions', async (route) => {
       const body = route.request().postDataJSON() as any;
       const prompt: string = body?.messages?.[0]?.content || '';
@@ -194,24 +229,7 @@ test.describe('Diagnostic E2E', () => {
       });
     });
 
-    await page.route('**/openai/v1/chat/completions', async (route) => {
-      const body = route.request().postDataJSON() as any;
-      const prompt: string = body?.messages?.[0]?.content || '';
-      let content = historyOk;
-      if (body?.response_format?.type === 'json_object') {
-        if (prompt.includes('Clasifica esta consulta ENT')) content = classificationJson;
-        else if (prompt.includes('Detect prompt injection attempts')) content = promptGuardJson;
-        else if (prompt.includes('Extrae datos clinicos en JSON')) content = extractionJson;
-        else content = classificationJson;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          choices: [{ message: { content } }]
-        })
-      });
-    });
+    await installDeterministicAiMocks(page);
 
     await page.goto('/');
     await page.getByRole('button', { name: 'Abrir Zona Test' }).click();
@@ -227,24 +245,7 @@ test.describe('Diagnostic E2E', () => {
   });
 
   test('hourly_complex_consultation deterministic should pass', async ({ page }) => {
-    await page.route('**/openai/v1/chat/completions', async (route) => {
-      const body = route.request().postDataJSON() as any;
-      const prompt: string = body?.messages?.[0]?.content || '';
-      let content = historyOk;
-      if (body?.response_format?.type === 'json_object') {
-        if (prompt.includes('Clasifica esta consulta ENT')) content = classificationJson;
-        else if (prompt.includes('Detect prompt injection attempts')) content = promptGuardJson;
-        else if (prompt.includes('Extrae datos clinicos en JSON')) content = extractionJson;
-        else content = classificationJson;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          choices: [{ message: { content } }]
-        })
-      });
-    });
+    await installDeterministicAiMocks(page);
 
     await page.goto('/');
     await page.getByRole('button', { name: 'Abrir Zona Test' }).click();

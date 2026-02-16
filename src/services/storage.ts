@@ -90,6 +90,11 @@ export const saveMedicalRecord = async (
         record_uuid?: string;
         ai_model?: string;
         idempotency_key?: string;
+        output_tier?: 'draft' | 'final';
+        supersedes_record_uuid?: string;
+        source_session_id?: string;
+        critical_path_ms?: number;
+        hardening_ms?: number;
     }
 ): Promise<MedicalRecord[] | null> => {
     try {
@@ -388,10 +393,15 @@ export const saveSegment = async (segment: {
     session_id: string;
     batch_index: number;
     type: SegmentType;
+    session_version?: number;
     status?: SegmentStatus;
     is_final?: boolean;
     blob?: Blob;
     text?: string;
+    part_index?: number;
+    attempt_id?: string;
+    latency_ms?: number;
+    model_used?: string;
     extraction?: ExtractionResult;
     classification?: ConsultationClassification;
     meta?: ExtractionMeta[];
@@ -400,6 +410,11 @@ export const saveSegment = async (segment: {
     error_reason?: string;
 }): Promise<void> => {
     const now = nowIso();
+    const session = await db.consultation_sessions.where('session_id').equals(segment.session_id).first();
+    const currentSessionVersion = Number((session?.metadata as { session_version?: number } | undefined)?.session_version || 0);
+    if (typeof segment.session_version === 'number' && currentSessionVersion > segment.session_version) {
+        return;
+    }
     const status = segment.status || 'pending';
     const normalizeStoredStatus = (
         value: SegmentStatus
@@ -437,6 +452,10 @@ export const saveSegment = async (segment: {
             session_id: segment.session_id,
             batch_index: segment.batch_index,
             text: segment.text || '',
+            part_index: typeof segment.part_index === 'number' ? segment.part_index : existing?.part_index,
+            attempt_id: segment.attempt_id || existing?.attempt_id,
+            latency_ms: typeof segment.latency_ms === 'number' ? segment.latency_ms : existing?.latency_ms,
+            model_used: segment.model_used || existing?.model_used,
             status: normalizeStoredStatus(status),
             error_reason: segment.error_reason,
             created_at: existing?.created_at || now,
@@ -473,12 +492,18 @@ export const markSegmentStatus = async (update: {
     session_id: string;
     batch_index: number;
     type: SegmentType;
+    session_version?: number;
     status: SegmentStatus;
     error_reason?: string;
     retry_count?: number;
     next_attempt_at?: string;
 }): Promise<void> => {
     const now = nowIso();
+    const session = await db.consultation_sessions.where('session_id').equals(update.session_id).first();
+    const currentSessionVersion = Number((session?.metadata as { session_version?: number } | undefined)?.session_version || 0);
+    if (typeof update.session_version === 'number' && currentSessionVersion > update.session_version) {
+        return;
+    }
     const normalizeStoredStatus = (
         value: SegmentStatus
     ): 'pending' | 'completed' | 'failed' => {
@@ -527,7 +552,7 @@ export const loadRecoverableSession = async (sessionId?: string) => {
     } else {
         session = await db.consultation_sessions
             .where('status')
-            .anyOf('recording', 'uploading_chunks', 'transcribing_partial', 'extracting', 'finalizing', 'awaiting_budget', 'provisional')
+            .anyOf('recording', 'uploading_chunks', 'transcribing_partial', 'transcribing_live', 'extracting', 'draft_ready', 'hardening', 'finalizing', 'awaiting_budget', 'provisional')
             .reverse()
             .sortBy('updated_at')
             .then((rows) => rows[rows.length - 1]);
@@ -555,7 +580,7 @@ export const getRecoverableSessions = async (): Promise<ConsultationSession[]> =
     const now = nowIso();
     const sessions = await db.consultation_sessions
         .where('status')
-        .anyOf('recording', 'uploading_chunks', 'transcribing_partial', 'extracting', 'finalizing', 'awaiting_budget', 'provisional')
+        .anyOf('recording', 'uploading_chunks', 'transcribing_partial', 'transcribing_live', 'extracting', 'draft_ready', 'hardening', 'finalizing', 'awaiting_budget', 'provisional')
         .toArray();
     return sessions.filter((session) => session.ttl_expires_at >= now);
 };
@@ -624,7 +649,7 @@ export const getPipelineHealthSnapshot = async () => {
         db.pipeline_failures.orderBy('created_at').reverse().limit(50).toArray()
     ]);
 
-    const active = sessions.filter((s) => ['recording', 'uploading_chunks', 'transcribing_partial', 'extracting', 'finalizing', 'awaiting_budget'].includes(s.status)).length;
+    const active = sessions.filter((s) => ['recording', 'uploading_chunks', 'transcribing_partial', 'transcribing_live', 'extracting', 'draft_ready', 'hardening', 'finalizing', 'awaiting_budget'].includes(s.status)).length;
     const provisional = sessions.filter((s) => s.status === 'provisional').length;
     const deadLetters = outbox.filter((item) => item.status === 'dead_letter').length;
     const nextAttempt = sessions

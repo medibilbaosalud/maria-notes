@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 import { MBSLogo } from './MBSLogo';
 import heroImage from '../assets/maria_notes_hero.png';
+import './Recorder.css';
 
 interface RecorderProps {
   onRecordingComplete: (blob: Blob, patientName: string, isPartialBatch?: boolean, batchIndex?: number) => Promise<void> | void;
@@ -14,6 +15,7 @@ interface RecorderProps {
 }
 
 export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, onConsultationStart, canStart = true, startBlockReason = '' }) => {
+  const turboBatchIntervalMs = Number(import.meta.env.VITE_TURBO_RECORDER_BATCH_INTERVAL_MS || 90_000);
   const [patientName, setPatientName] = useState('');
   const [processedBatches, setProcessedBatches] = useState<number[]>([]);
   const patientNameRef = useRef(patientName);
@@ -40,7 +42,7 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, onConsu
       await onRecordingComplete(blob, patientNameRef.current, false, lastBatchIndex);
       setProcessedBatches([]);
     },
-    batchIntervalMs: 5 * 60 * 1000
+    batchIntervalMs: Math.max(60_000, turboBatchIntervalMs)
   });
 
   const patientNameValid = patientNameRef.current.trim().length >= 2;
@@ -82,10 +84,10 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, onConsu
         </div>
 
         <div className="inputs-row">
-          <div className="input-group" style={{ width: '100%' }}>
+          <div className="input-group recorder-input-group">
             <label>Nombre del Paciente</label>
             <div className="input-wrapper">
-              <Stethoscope size={20} className="input-icon" style={{ color: 'var(--brand-primary)' }} />
+              <Stethoscope size={20} className="input-icon input-icon-brand" />
               <input
                 type="text"
                 placeholder="Nombre y apellidos..."
@@ -199,285 +201,6 @@ export const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, onConsu
           )}
         </AnimatePresence>
       </div>
-
-      <style>{`
-        .recorder-card {
-          background: rgba(255, 255, 255, 0.7);
-          backdrop-filter: blur(20px);
-          -webkit-backdrop-filter: blur(20px);
-          border-radius: 24px;
-          padding: 2rem;
-          box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
-          border: 1px solid rgba(255, 255, 255, 0.4);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          width: 100%;
-          max-width: 720px;
-          margin: 0 auto;
-          position: relative;
-        }
-
-        .recorder-header {
-          width: 100%;
-          margin-bottom: 2rem;
-          position: relative;
-          z-index: 20;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 1.5rem;
-        }
-
-        .logo-wrapper-absolute {
-          position: absolute;
-          top: -1rem;
-          left: 0;
-          opacity: 0.8;
-        }
-
-        .hero-image-container {
-          width: 180px;
-          height: 180px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          margin-top: 1rem;
-          margin-bottom: 1rem;
-        }
-
-        .hero-image {
-          width: 100%;
-          height: 100%;
-          object-fit: contain;
-          filter: drop-shadow(0 10px 15px rgba(38, 166, 154, 0.2));
-        }
-
-        .inputs-row {
-          display: flex;
-          justify-content: center;
-          width: 100%;
-        }
-
-        .input-group {
-          display: flex;
-          flex-direction: column;
-          gap: 0.45rem;
-          max-width: 430px;
-          width: 100%;
-        }
-
-        .input-group label {
-          font-size: 0.75rem;
-          font-weight: 600;
-          color: var(--text-tertiary);
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-
-        .input-wrapper {
-          position: relative;
-          display: flex;
-          align-items: center;
-        }
-
-        .input-icon {
-          position: absolute;
-          left: 1rem;
-          color: var(--text-secondary);
-          pointer-events: none;
-        }
-
-        .recorder-text-input {
-          width: 100%;
-          padding: 0.75rem 1rem 0.75rem 2.5rem;
-          border-radius: 8px;
-          border: none;
-          background: #f1f5f9;
-          color: var(--text-primary);
-          font-size: 0.95rem;
-          box-sizing: border-box;
-          font-family: var(--font-sans);
-        }
-
-        .recorder-text-input:focus {
-          outline: none;
-          background: white;
-          box-shadow: 0 0 0 2px var(--brand-primary);
-        }
-
-        .hint-row {
-          margin-top: 0.15rem;
-          display: flex;
-          align-items: center;
-          gap: 0.35rem;
-        }
-
-        .hint-chip {
-          font-size: 0.72rem;
-          font-weight: 700;
-          border-radius: 999px;
-          padding: 0.15rem 0.55rem;
-        }
-
-        .hint-chip.ok {
-          color: #065f46;
-          background: #d1fae5;
-        }
-
-        .hint-chip.warn {
-          color: #92400e;
-          background: #fef3c7;
-        }
-
-        .warning-text {
-          color: #b45309;
-        }
-
-        .error-text {
-          color: #b91c1c;
-        }
-
-        .visualization-area {
-          position: relative;
-          width: 260px;
-          height: 240px;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          margin-bottom: 1rem;
-          z-index: 10;
-        }
-
-        .status-indicator {
-          position: absolute;
-          top: 0;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-bottom: 1rem;
-        }
-
-        .status-dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background-color: var(--brand-primary);
-        }
-
-        .status-text {
-          font-size: 0.85rem;
-          color: var(--text-secondary);
-          font-weight: 500;
-        }
-
-        .timer-display {
-          font-size: 4rem;
-          font-weight: 300;
-          color: var(--text-primary);
-          font-variant-numeric: tabular-nums;
-          z-index: 2;
-          letter-spacing: -1px;
-        }
-
-        .batch-indicator {
-          position: absolute;
-          bottom: 0;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          padding: 6px 12px;
-          background: rgba(38, 166, 154, 0.1);
-          border-radius: 20px;
-          color: var(--brand-primary);
-          font-size: 0.8rem;
-          font-weight: 600;
-        }
-
-        .pulse-ring {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          width: 100%;
-          height: 100%;
-          border-radius: 50%;
-          border: 1px solid var(--brand-primary);
-          pointer-events: none;
-        }
-
-        .controls-area {
-          width: 100%;
-          display: flex;
-          justify-content: center;
-          z-index: 10;
-        }
-
-        .action-btn {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 16px 40px;
-          border-radius: 16px;
-          border: none;
-          font-size: 1.1rem;
-          font-weight: 600;
-          cursor: pointer;
-          box-shadow: var(--shadow-md);
-          font-family: var(--font-sans);
-        }
-
-        .action-btn.start {
-          background: var(--brand-vibrant);
-          color: white;
-        }
-
-        .action-btn:disabled {
-          cursor: not-allowed;
-          opacity: 0.45;
-          transform: none !important;
-        }
-
-        .action-btn.stop {
-          background-color: #26a69a !important;
-          color: white;
-        }
-
-        @media (max-width: 1024px) {
-          .recorder-card {
-            padding: 1.25rem;
-            border-radius: 20px;
-          }
-
-          .logo-wrapper-absolute {
-            left: auto;
-            right: 0;
-            top: -0.7rem;
-          }
-
-          .hero-image-container {
-            width: 145px;
-            height: 145px;
-            margin-top: 0.25rem;
-            margin-bottom: 0.75rem;
-          }
-
-          .visualization-area {
-            width: 220px;
-            height: 196px;
-          }
-
-          .timer-display {
-            font-size: 3.25rem;
-          }
-
-          .action-btn {
-            padding: 14px 26px;
-            font-size: 1rem;
-          }
-        }
-      `}</style>
     </motion.div>
   );
 };
