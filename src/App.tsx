@@ -2807,7 +2807,6 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                         startBlockReason={startBlockReason}
                         processingLabel={processingLabel}
                         activeEngine={activeEngine}
-                        activeEngine={activeEngine}
                         activeModel={activeModel}
                     />
                 </div>
