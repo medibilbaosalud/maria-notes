@@ -944,27 +944,27 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                           )}
                           <button
                             className="action-button secondary menu-item"
-                              onClick={() => {
-                                moreActionsRef.current?.removeAttribute('open');
-                                setShowCompareModal(true);
-                              }}
-                              title="Comparar IA vs editado"
-                              data-ui-state="idle"
-                            >
-                              <FileText size={16} />
-                              <span>Comparar</span>
+                            onClick={() => {
+                              moreActionsRef.current?.removeAttribute('open');
+                              setShowCompareModal(true);
+                            }}
+                            title="Comparar IA vs editado"
+                            data-ui-state="idle"
+                          >
+                            <FileText size={16} />
+                            <span>Comparar</span>
                           </button>
                           <button
                             className="action-button secondary menu-item"
-                              onClick={() => {
-                                moreActionsRef.current?.removeAttribute('open');
-                                setShowVersionsModal(true);
-                              }}
-                              title="Ver versiones"
-                              data-ui-state="idle"
-                            >
-                              <FileText size={16} />
-                              <span>Versiones</span>
+                            onClick={() => {
+                              moreActionsRef.current?.removeAttribute('open');
+                              setShowVersionsModal(true);
+                            }}
+                            title="Ver versiones"
+                            data-ui-state="idle"
+                          >
+                            <FileText size={16} />
+                            <span>Versiones</span>
                           </button>
                           {onRegenerateSection && (
                             <div className="menu-item section-regen-item">
@@ -1654,70 +1654,110 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
         .notes-column {
           flex: 1;
-          min-width: 280px;
-          position: sticky;
-          top: 0;
+                          >
+                            Copiar
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <style>{`
+        .history - view - container {
+          height: 100%;
+        width: 100%; /* Ensure full width */
+        overflow-y: auto;
+        padding-bottom: 2rem;
         }
 
-  .document-card {
+        .history-layout {
+          display: flex;
+        gap: 2rem;
+        align-items: flex-start;
+        max-width: 1200px;
+        margin: 0 auto;
+        }
+
+        .document-column {
+          flex: 3;
+        min-width: 0;
+        }
+
+        .notes-column {
+          flex: 1;
+        min-width: 280px;
+        position: sticky;
+        top: 0;
+        }
+
+        .document-card {
           background: white;
-          border-radius: 16px;
-          box-shadow: var(--shadow-md);
-          /* overflow: hidden; Removed to prevent clipping */
-          border: 1px solid var(--glass-border);
-          position: relative;
+        border-radius: 16px;
+        box-shadow: var(--shadow-md);
+        border: 1px solid var(--glass-border);
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        overflow: hidden;
         }
 
         .document-header {
           display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 1rem 2rem;
-          background: #f8fafc;
-          border-bottom: 1px solid var(--glass-border);
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 2rem;
+        background: #f8fafc;
+        border-bottom: 1px solid var(--glass-border);
         }
 
         .classification-banner {
           display: flex;
-          gap: 10px;
-          align-items: center;
-          padding: 0.75rem 2rem;
-          background: #f1f5f9;
-          border-bottom: 1px solid #e2e8f0;
-          font-size: 0.85rem;
-          color: #334155;
+        gap: 10px;
+        align-items: center;
+        padding: 0.75rem 2rem;
+        background: #f1f5f9;
+        border-bottom: 1px solid #e2e8f0;
+        font-size: 0.85rem;
+        color: #334155;
         }
 
         .classification-pill {
           background: #e2e8f0;
-          color: #0f172a;
-          padding: 2px 8px;
-          border-radius: 999px;
-          font-weight: 600;
-          font-size: 0.75rem;
+        color: #0f172a;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-weight: 600;
+        font-size: 0.75rem;
         }
 
         .provisional-review-banner {
           display: flex;
-          align-items: center;
-          gap: 0.6rem;
-          margin: 0.75rem 2rem 0;
-          padding: 0.7rem 0.9rem;
-          border: 1px solid #fdba74;
-          background: #fff7ed;
-          color: #9a3412;
-          border-radius: 10px;
-          font-size: 0.86rem;
-          font-weight: 600;
+        align-items: center;
+        gap: 0.6rem;
+        margin: 0.75rem 2rem 0;
+        padding: 0.7rem 0.9rem;
+        border: 1px solid #fdba74;
+        background: #fff7ed;
+        color: #9a3412;
+        border-radius: 10px;
+        font-size: 0.86rem;
+        font-weight: 600;
         }
 
         .doc-title {
           display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          font-weight: 600;
-          color: var(--text-primary);
-          font-size: 1.1rem;
+        align-items: center;
+        gap: 0.75rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        font-size: 1.1rem;
         }
 
         .doc-icon {
@@ -1726,32 +1766,32 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
         .doc-actions {
           display: flex;
-          align-items: center;
-          gap: 1rem;
+        align-items: center;
+        gap: 1rem;
         }
 
         .history-view-container .action-buttons-group {
           display: flex;
-          align-items: center;
-          gap: 0.6rem;
+        align-items: center;
+        gap: 0.6rem;
         }
 
         .history-view-container .action-button {
           display: flex;
-          align-items: center;
-          gap: 0.6rem;
-          padding: 0.6rem 1.2rem;
-          border-radius: 12px;
-          border: none;
-          font-size: 0.95rem;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
-            border-color var(--motion-duration-fast) var(--motion-ease-base),
-            color var(--motion-duration-fast) var(--motion-ease-base),
-            transform var(--motion-duration-fast) var(--motion-ease-base),
-            box-shadow var(--motion-duration-fast) var(--motion-ease-base),
-            opacity var(--motion-duration-fast) var(--motion-ease-base);
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.6rem 1.2rem;
+        border-radius: 12px;
+        border: none;
+        font-size: 0.95rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
+        border-color var(--motion-duration-fast) var(--motion-ease-base),
+        color var(--motion-duration-fast) var(--motion-ease-base),
+        transform var(--motion-duration-fast) var(--motion-ease-base),
+        box-shadow var(--motion-duration-fast) var(--motion-ease-base),
+        opacity var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .history-view-container .action-button:hover {
@@ -1764,41 +1804,41 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
         .history-view-container .action-button:disabled {
           opacity: 0.6;
-          cursor: not-allowed;
-          transform: none;
+        cursor: not-allowed;
+        transform: none;
         }
 
         .history-view-container .action-button.new-consultation {
           background: var(--brand-gradient);
-          color: white;
-          box-shadow: 0 4px 12px rgba(38, 166, 154, 0.3);
-          font-weight: 600;
+        color: white;
+        box-shadow: 0 4px 12px rgba(38, 166, 154, 0.3);
+        font-weight: 600;
         }
-        
+
         .history-view-container .action-button.new-consultation:hover {
           transform: translateY(-1px);
-          box-shadow: 0 8px 20px rgba(38, 166, 154, 0.4);
+        box-shadow: 0 8px 20px rgba(38, 166, 154, 0.4);
         }
 
         .history-view-container .action-button.copy-btn {
           background: white;
-          color: var(--text-secondary);
-          border: 1px solid var(--glass-border);
-          box-shadow: var(--shadow-sm);
+        color: var(--text-secondary);
+        border: 1px solid var(--glass-border);
+        box-shadow: var(--shadow-sm);
         }
-        
+
         .history-view-container .action-button.copy-btn:hover {
-          border-color: var(--brand-primary);
-          color: var(--brand-primary);
-          background: #f0fdfa;
-          transform: translateY(-1px);
-          box-shadow: var(--shadow-md);
+          border - color: var(--brand-primary);
+        color: var(--brand-primary);
+        background: #f0fdfa;
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-md);
         }
 
         .history-view-container .action-button.primary {
           background: var(--bg-secondary);
-          color: var(--text-primary);
-          border: 1px solid var(--glass-border);
+        color: var(--text-primary);
+        border: 1px solid var(--glass-border);
         }
 
         .history-view-container .action-button.primary:hover {
@@ -1807,17 +1847,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
         .history-view-container .action-button.secondary {
           background: transparent;
-          color: var(--brand-primary);
-          border: 1px solid var(--brand-primary);
+        color: var(--brand-primary);
+        border: 1px solid var(--brand-primary);
         }
-        
+
         .history-view-container .action-button.secondary:hover {
           background: rgba(38, 166, 154, 0.05);
         }
 
         .history-view-container .action-button.success {
           background: #10b981;
-          color: white;
+        color: white;
         }
 
         .more-actions-menu {
@@ -1825,9 +1865,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         }
 
         .more-actions-trigger {
-          list-style: none;
-          user-select: none;
-          cursor: pointer;
+          list - style: none;
+        user-select: none;
+        cursor: pointer;
         }
 
         .more-actions-trigger::-webkit-details-marker {
@@ -1835,95 +1875,97 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         }
 
         .more-actions-trigger:focus-visible {
-          box-shadow: var(--focus-ring);
+          box - shadow: var(--focus-ring);
         }
 
         .more-actions-popover {
           position: absolute;
-          right: 0;
-          top: calc(100% + 0.35rem);
-          min-width: 190px;
-          border: 1px solid var(--border-soft);
-          background: white;
-          border-radius: 12px;
-          box-shadow: var(--shadow-lg);
-          padding: 0.45rem;
-          display: grid;
-          gap: 0.35rem;
-          z-index: 12;
+        right: 0;
+        top: calc(100% + 0.35rem);
+        min-width: 190px;
+        border: 1px solid var(--border-soft);
+        background: white;
+        border-radius: 12px;
+        box-shadow: var(--shadow-lg);
+        padding: 0.45rem;
+        display: grid;
+        gap: 0.35rem;
+        z-index: 12;
         }
 
         .menu-item {
           width: 100%;
-          justify-content: flex-start;
+        justify-content: flex-start;
         }
 
         .section-regen-item {
           display: grid;
-          gap: 0.5rem;
-          padding: 0.25rem 0;
+        gap: 0.5rem;
+        padding: 0.25rem 0;
         }
 
         .section-regen-select {
           width: 100%;
-          border: 1px solid #cbd5e1;
-          border-radius: 8px;
-          font-size: 0.8rem;
-          padding: 0.35rem 0.5rem;
-          background: #ffffff;
-          color: #0f172a;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        font-size: 0.8rem;
+        padding: 0.35rem 0.5rem;
+        background: #ffffff;
+        color: #0f172a;
         }
 
         .document-content {
-          padding: 3rem;
-          font-family: 'Georgia', serif;
-          color: #334155;
-          line-height: 1.6;
-          font-size: 1.05rem;
+          padding: 2rem;
+        font-size: 1rem;
+        line-height: 1.7;
+        color: var(--text-primary);
+        overflow-y: auto;
+        flex: 1;
+        min-height: 0;
         }
 
         /* Markdown Styles */
         .history-view-container .markdown-body h1, .history-view-container .markdown-body h2, .history-view-container .markdown-body h3 {
-          margin-top: 1.5em;
-          margin-bottom: 0.75em;
-          color: #1e293b;
-          font-family: var(--font-sans);
+          margin - top: 1.5em;
+        margin-bottom: 0.75em;
+        color: #1e293b;
+        font-family: var(--font-sans);
         }
-        
-        .history-view-container .markdown-body h1 { font-size: 1.5em; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.3em; }
-        .history-view-container .markdown-body h2 { font-size: 1.25em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary); margin-top: 2em; }
-        .history-view-container .markdown-body p { margin-bottom: 1em; }
-        .history-view-container .markdown-body ul { padding-left: 1.5em; margin-bottom: 1em; }
+
+        .history-view-container .markdown-body h1 {font - size: 1.5em; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.3em; }
+        .history-view-container .markdown-body h2 {font - size: 1.25em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary); margin-top: 2em; }
+        .history-view-container .markdown-body p {margin - bottom: 1em; }
+        .history-view-container .markdown-body ul {padding - left: 1.5em; margin-bottom: 1em; }
 
         /* Remaining Errors Warning */
         .remaining-errors-warning {
           margin: 1.5rem 2rem;
-          padding: 1rem 1.5rem;
-          background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
-          border: 1px solid #fca5a5;
-          border-left: 4px solid #ef4444;
-          border-radius: 12px;
+        padding: 1rem 1.5rem;
+        background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+        border: 1px solid #fca5a5;
+        border-left: 4px solid #ef4444;
+        border-radius: 12px;
         }
 
         .remaining-errors-warning .warning-header {
           display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          color: #dc2626;
-          font-weight: 600;
-          font-size: 0.95rem;
-          margin-bottom: 0.75rem;
+        align-items: center;
+        gap: 0.5rem;
+        color: #dc2626;
+        font-weight: 600;
+        font-size: 0.95rem;
+        margin-bottom: 0.75rem;
         }
 
         .remaining-errors-warning .error-list {
           margin: 0;
-          padding-left: 1.5rem;
-          font-size: 0.9rem;
-          color: #991b1b;
+        padding-left: 1.5rem;
+        font-size: 0.9rem;
+        color: #991b1b;
         }
 
         .remaining-errors-warning .error-list li {
-          margin-bottom: 0.5rem;
+          margin - bottom: 0.5rem;
         }
 
         .remaining-errors-warning .error-list li strong {
@@ -1932,632 +1974,426 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
         .uncertainty-panel {
           margin: 1.5rem 2rem 2rem;
-          padding: 1rem;
-          border-radius: 12px;
-          background: #fefce8;
-          border: 1px solid #fde68a;
+        padding: 1rem;
+        border-radius: 12px;
+        background: #fefce8;
+        border: 1px solid #fde68a;
         }
 
         .quality-triage-panel {
           margin: 1rem 2rem 0;
-          border: 1px solid #bfdbfe;
-          background: #eff6ff;
-          border-radius: 12px;
-          padding: 0.9rem 1rem;
-          display: grid;
-          gap: 0.65rem;
+        border: 1px solid #bfdbfe;
+        background: #eff6ff;
+        border-radius: 12px;
+        padding: 0.9rem 1rem;
+        display: grid;
+        gap: 0.65rem;
         }
 
         .quality-triage-header {
           display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 0.75rem;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75rem;
         }
 
         .quality-title {
-          font-weight: 700;
-          color: #1e3a8a;
-          font-size: 0.9rem;
+          font - weight: 700;
+        color: #1e3a8a;
+        font-size: 0.9rem;
         }
 
         .quality-score {
-          font-size: 0.8rem;
-          color: #1d4ed8;
-          background: #dbeafe;
-          border-radius: 999px;
-          padding: 4px 10px;
-          font-weight: 600;
+          font - size: 0.8rem;
+        color: #1d4ed8;
+        background: #dbeafe;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-weight: 600;
         }
 
         .quality-actions-list {
           margin: 0;
-          padding-left: 1rem;
-          color: #1e3a8a;
-          font-size: 0.85rem;
-          display: grid;
-          gap: 0.35rem;
+        padding-left: 1rem;
+        color: #1e3a8a;
+        font-size: 0.85rem;
+        display: grid;
+        gap: 0.35rem;
         }
 
         .critical-gaps-row {
           display: flex;
-          flex-wrap: wrap;
-          gap: 0.5rem;
+        flex-wrap: wrap;
+        gap: 0.5rem;
         }
 
         .gap-chip {
-          font-size: 0.75rem;
-          border-radius: 999px;
-          padding: 0.3rem 0.55rem;
-          border: 1px solid transparent;
-          font-weight: 600;
+          font - size: 0.75rem;
+        border-radius: 999px;
+        padding: 0.3rem 0.55rem;
+        border: 1px solid transparent;
+        font-weight: 600;
         }
 
         .gap-chip.critical {
           background: #fee2e2;
-          color: #b91c1c;
-          border-color: #fecaca;
+        color: #b91c1c;
+        border-color: #fecaca;
         }
 
         .gap-chip.major {
           background: #ffedd5;
-          color: #c2410c;
-          border-color: #fed7aa;
+        color: #c2410c;
+        border-color: #fed7aa;
         }
 
         .gap-chip.minor {
           background: #fef9c3;
-          color: #854d0e;
-          border-color: #fde68a;
+        color: #854d0e;
+        border-color: #fde68a;
         }
 
         .uncertainty-header {
           display: flex;
-          align-items: center;
-          gap: 8px;
-          font-weight: 600;
-          color: #92400e;
-          margin-bottom: 0.75rem;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+        color: #92400e;
+        margin-bottom: 0.75rem;
         }
 
         .uncertainty-list {
-          list-style: none;
-          padding: 0;
-          margin: 0;
-          display: grid;
-          gap: 0.75rem;
+          list - style: none;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        gap: 0.75rem;
         }
 
         .uncertainty-item {
           display: flex;
-          justify-content: space-between;
-          gap: 1rem;
-          padding: 0.75rem;
-          background: #fff7ed;
-          border-radius: 10px;
-          border: 1px solid #fed7aa;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.75rem;
+        background: #fff7ed;
+        border-radius: 10px;
+        border: 1px solid #fed7aa;
         }
 
         .uncertainty-details {
           display: flex;
-          flex-direction: column;
-          gap: 4px;
-          font-size: 0.85rem;
-          color: #7c2d12;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 0.85rem;
+        color: #7c2d12;
         }
 
         .uncertainty-intro {
-          font-size: 0.9rem;
-          color: #92400e;
-          margin: 0 0 1rem 0;
-          line-height: 1.5;
+          font - size: 0.9rem;
+        color: #92400e;
+        margin: 0 0 1rem 0;
+        line-height: 1.5;
         }
 
         .uncertainty-value {
-          font-weight: 600;
-          color: #c2410c;
-          background: #ffedd5;
-          padding: 2px 8px;
-          border-radius: 6px;
-          font-size: 0.85rem;
+          font - weight: 600;
+        color: #c2410c;
+        background: #ffedd5;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-size: 0.85rem;
         }
 
         .uncertainty-reason {
-          font-size: 0.8rem;
-          color: #9a3412;
-          font-style: italic;
+          font - size: 0.8rem;
+        color: #9a3412;
+        font-style: italic;
         }
 
         .uncertainty-details em {
-          font-style: normal;
-          color: #9a3412;
+          font - style: normal;
+        color: #9a3412;
         }
 
         .uncertainty-actions {
           display: flex;
-          gap: 0.5rem;
-          align-items: center;
+        gap: 0.5rem;
+        align-items: center;
         }
 
         .uncertainty-bulk-actions {
           display: flex;
-          flex-wrap: wrap;
-          gap: 0.5rem;
-          margin-bottom: 0.75rem;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
         }
-
-        .flag-action {
-          border: none;
-          padding: 6px 12px;
-          border-radius: 999px;
-          font-size: 0.75rem;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .flag-action.confirm {
-          background: #16a34a;
-          color: white;
-        }
-
-        .flag-action.reject {
-          background: #f97316;
-          color: white;
-        }
-
-        .flag-action:disabled {
-          opacity: 0.6;
-          cursor: default;
-        }
-
-        .sources-modal {
-          max-width: 720px;
-          width: 92%;
-          max-height: 80vh;
-          overflow: hidden;
-        }
-
-        .sources-body {
-          max-height: 60vh;
-          overflow-y: auto;
-          display: grid;
-          gap: 1rem;
-        }
-
-        .source-group h4 {
-          margin: 0 0 0.5rem 0;
-          font-size: 0.9rem;
-          color: #0f172a;
-        }
-
-        .source-entry {
-          border: 1px solid #e2e8f0;
-          border-radius: 10px;
-          padding: 0.75rem;
-          background: #f8fafc;
-          margin-bottom: 0.5rem;
-        }
-
-        .source-meta {
-          display: flex;
-          justify-content: space-between;
-          font-size: 0.75rem;
-          color: #475569;
-          margin-bottom: 0.5rem;
-        }
-
-        .source-value {
-          font-weight: 600;
-          color: #0f172a;
-        }
-
-        .source-snippet {
-          margin: 0;
-          font-size: 0.85rem;
-          color: #1e293b;
-          white-space: pre-wrap;
-        }
-        .maria-notes-card {
-          background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
-          border-radius: 16px;
-          padding: 1.5rem;
-          box-shadow: var(--shadow-sm);
-          border: 1px solid rgba(251, 191, 36, 0.2);
-        }
-
-        .notes-header {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          font-weight: 600;
-          color: #92400e;
-          margin-bottom: 1rem;
-          font-size: 0.95rem;
-        }
-
-        .notes-content {
-          font-size: 0.9rem;
-          color: #78350f;
-          line-height: 1.5;
-        }
-
-        .loading-container {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 50%, #f0fdfa 100%);
-          z-index: 2000;
-          gap: 2.5rem;
-          overflow: hidden;
-        }
-
-        .background-shapes {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            z-index: -1;
-        }
-
-        .shape {
-            position: absolute;
-            border-radius: 50%;
-            filter: blur(80px);
-            opacity: 0.6;
-            animation: float 20s infinite ease-in-out;
-        }
-
-        .shape-1 {
-            top: -10%;
-            left: -10%;
-            width: 500px;
-            height: 500px;
-            background: rgba(38, 166, 154, 0.15);
-            animation-delay: 0s;
-        }
-
-        .shape-2 {
-            bottom: -20%;
-            right: -10%;
-            width: 600px;
-            height: 600px;
-            background: rgba(0, 191, 165, 0.1);
-            animation-delay: -5s;
-        }
-
-        .shape-3 {
-            top: 40%;
-            left: 40%;
-            width: 300px;
-            height: 300px;
-            background: rgba(128, 203, 196, 0.15);
-            animation-delay: -10s;
-        }
-
-        @keyframes float {
-            0%, 100% { transform: translate(0, 0) scale(1); }
-            33% { transform: translate(30px, -50px) scale(1.1); }
-            66% { transform: translate(-20px, 20px) scale(0.9); }
-        }
-
-        .history-view-container .spinner-wrapper {
-            position: relative;
-            width: 100px;
-            height: 100px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .loading-ring {
-          position: absolute;
-          width: 100%;
-          height: 100%;
-          border: 3px solid transparent;
-          border-top-color: var(--brand-primary);
-          border-right-color: var(--brand-secondary);
-          border-radius: 50%;
-        }
-        
-        .logo-center {
-            z-index: 2;
-        }
-        
-        .loading-text-wrapper {
-            height: 32px;
-            overflow: hidden;
-            text-align: center;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 300px;
-        }
-        
-        .loading-text {
-            font-size: 1.2rem;
-            font-weight: 500;
-            color: var(--text-primary);
-            letter-spacing: 0.3px;
-            background: linear-gradient(90deg, var(--brand-dark), var(--brand-primary));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
         .empty-state {
           display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          height: 100%;
-          min-height: 400px;
-          gap: 1rem;
-          color: var(--text-tertiary);
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        min-height: 400px;
+        gap: 1rem;
+        color: var(--text-tertiary);
         }
 
         /* Modal Styles */
         .history-view-container .modal-overlay {
           position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0, 0, 0, 0.5);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 1000;
-          backdrop-filter: blur(4px);
-          transition: opacity var(--motion-duration-fast) var(--motion-ease-base);
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        backdrop-filter: blur(4px);
+        transition: opacity var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .history-view-container .modal-content {
           background: white;
-          width: 90%;
-          max-width: 800px;
-          height: 85vh;
-          border-radius: 20px;
-          display: flex;
-          flex-direction: column;
-          box-shadow: var(--shadow-lg);
-          transform-origin: center top;
+        width: 90%;
+        max-width: 800px;
+        height: 85vh;
+        border-radius: 20px;
+        display: flex;
+        flex-direction: column;
+        box-shadow: var(--shadow-lg);
+        transform-origin: center top;
         }
 
         .history-view-container .modal-header {
           padding: 1.5rem;
-          border-bottom: 1px solid var(--glass-border);
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
+        border-bottom: 1px solid var(--glass-border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
         }
 
         .history-view-container .modal-header h3 {
           margin: 0;
-          font-family: var(--font-display);
-          color: var(--text-primary);
+        font-family: var(--font-display);
+        color: var(--text-primary);
         }
-        
+
         .history-view-container .close-btn {
           background: none;
-          border: none;
-          cursor: pointer;
-          color: var(--text-secondary);
+        border: none;
+        cursor: pointer;
+        color: var(--text-secondary);
         }
 
         .history-view-container .modal-body {
           flex: 1;
-          padding: 1.5rem;
-          overflow: hidden;
-          display: flex;
-          flex-direction: column;
+        padding: 1.5rem;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
         }
 
         .report-editor {
           width: 100%;
-          height: 100%;
-          border: 1px solid var(--glass-border);
-          border-radius: 12px;
-          padding: 2rem;
-          font-family: 'Georgia', serif;
-          font-size: 1.1rem;
-          line-height: 1.6;
-          resize: none;
-          outline: none;
-          background: #fdfdfd;
+        height: 100%;
+        border: 1px solid var(--glass-border);
+        border-radius: 12px;
+        padding: 2rem;
+        font-family: 'Georgia', serif;
+        font-size: 1.1rem;
+        line-height: 1.6;
+        resize: none;
+        outline: none;
+        background: #fdfdfd;
         }
 
         .report-editor:focus {
-          border-color: var(--brand-primary);
+          border - color: var(--brand-primary);
         }
 
         .history-view-container .modal-footer {
           padding: 1.5rem;
-          border-top: 1px solid var(--glass-border);
-          display: flex;
-          justify-content: flex-end;
-          gap: 1rem;
+        border-top: 1px solid var(--glass-border);
+        display: flex;
+        justify-content: flex-end;
+        gap: 1rem;
         }
 
         .history-view-container .modal-content.evidence-modal,
         .history-view-container .modal-content.compare-modal,
         .history-view-container .modal-content.versions-modal {
-          max-width: 880px;
+          max - width: 880px;
         }
 
         .history-view-container .modal-body.evidence-body,
         .history-view-container .modal-body.versions-body {
-          max-height: 60vh;
-          overflow-y: auto;
-          display: flex;
-          flex-direction: column;
-          gap: 1rem;
+          max - height: 60vh;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
         }
 
         .modal-subtitle {
-          font-size: 0.85rem;
-          color: #475569;
-          margin-bottom: 0.25rem;
+          font - size: 0.85rem;
+        color: #475569;
+        margin-bottom: 0.25rem;
         }
 
         .evidence-entry {
-          border-radius: 10px;
-          border: 1px solid #e2e8f0;
-          padding: 0.75rem;
-          background: #f8fafc;
+          border - radius: 10px;
+        border: 1px solid #e2e8f0;
+        padding: 0.75rem;
+        background: #f8fafc;
         }
 
         .evidence-meta {
           display: flex;
-          flex-wrap: wrap;
-          gap: 0.5rem;
-          font-size: 0.75rem;
-          color: #475569;
-          margin-bottom: 0.5rem;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        font-size: 0.75rem;
+        color: #475569;
+        margin-bottom: 0.5rem;
         }
 
         .source-label {
-          font-weight: 600;
-          color: #0f172a;
+          font - weight: 600;
+        color: #0f172a;
         }
 
         .compare-grid {
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 1rem;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
         }
 
         .compare-column h4 {
-          margin-top: 0;
-          margin-bottom: 0.5rem;
-          font-size: 0.85rem;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          color: #0f172a;
+          margin - top: 0;
+        margin-bottom: 0.5rem;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #0f172a;
         }
 
         .compare-textarea {
           width: 100%;
-          min-height: 220px;
-          border-radius: 12px;
-          border: 1px solid #cbd5f5;
-          padding: 1rem;
-          font-family: 'Georgia', serif;
-          font-size: 1rem;
-          line-height: 1.6;
-          background: #f8fafc;
-          resize: none;
+        min-height: 220px;
+        border-radius: 12px;
+        border: 1px solid #cbd5f5;
+        padding: 1rem;
+        font-family: 'Georgia', serif;
+        font-size: 1rem;
+        line-height: 1.6;
+        background: #f8fafc;
+        resize: none;
         }
 
         .versions-list {
-          list-style: none;
-          margin: 0;
-          padding: 0;
-          display: flex;
-          flex-direction: column;
-          gap: 1rem;
+          list - style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
         }
 
         .versions-item {
           display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 0.75rem 1rem;
-          border-radius: 10px;
-          border: 1px solid #e5e7eb;
-          background: #fff;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem 1rem;
+        border-radius: 10px;
+        border: 1px solid #e5e7eb;
+        background: #fff;
         }
 
         .versions-meta {
           display: flex;
-          flex-direction: column;
-          gap: 0.25rem;
+        flex-direction: column;
+        gap: 0.25rem;
         }
 
         .versions-meta span {
-          font-size: 0.8rem;
-          color: #64748b;
+          font - size: 0.8rem;
+        color: #64748b;
         }
 
         .versions-actions {
           display: flex;
-          gap: 0.5rem;
+        gap: 0.5rem;
         }
 
         .command-bar {
-          margin-top: 0.75rem;
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          flex-wrap: wrap;
-          font-size: 0.85rem;
-          color: #475569;
+          margin - top: 0.75rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        font-size: 0.85rem;
+        color: #475569;
         }
 
         .command-chip {
           border: 1px solid #bae6fd;
-          background: #e0f2fe;
-          color: #0f172a;
-          padding: 0.35rem 0.9rem;
-          border-radius: 999px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        background: #e0f2fe;
+        color: #0f172a;
+        padding: 0.35rem 0.9rem;
+        border-radius: 999px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
 
         .command-chip:hover {
           transform: translateY(-1px);
-          box-shadow: 0 3px 8px rgba(15, 118, 110, 0.2);
+        box-shadow: 0 3px 8px rgba(15, 118, 110, 0.2);
         }
 
         .workflow-bar {
-          margin-top: 1rem;
-          padding: 0 2rem 1rem;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 1rem;
+          margin - top: 1rem;
+        padding: 0 2rem 1rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
         }
 
         .workflow-steps {
           display: flex;
-          gap: 0.75rem;
-          flex-wrap: wrap;
+        gap: 0.75rem;
+        flex-wrap: wrap;
         }
 
         .workflow-step {
           display: flex;
-          align-items: center;
-          gap: 0.35rem;
-          padding: 0.35rem 0.75rem;
-          border-radius: 999px;
-          border: 1px solid #e5e7eb;
-          font-size: 0.75rem;
-          color: #475569;
-          transition: border-color var(--motion-duration-fast) var(--motion-ease-base),
-            background-color var(--motion-duration-fast) var(--motion-ease-base),
-            color var(--motion-duration-fast) var(--motion-ease-base);
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.35rem 0.75rem;
+        border-radius: 999px;
+        border: 1px solid #e5e7eb;
+        font-size: 0.75rem;
+        color: #475569;
+        transition: border-color var(--motion-duration-fast) var(--motion-ease-base),
+        background-color var(--motion-duration-fast) var(--motion-ease-base),
+        color var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .workflow-step.done {
           background: #dcfce7;
-          border-color: #86efac;
-          color: #15803d;
+        border-color: #86efac;
+        color: #15803d;
         }
 
         .sync-status {
           display: flex;
-          flex-direction: column;
-          font-size: 0.75rem;
-          color: #64748b;
-          text-align: right;
-          transition: color var(--motion-duration-fast) var(--motion-ease-base);
+        flex-direction: column;
+        font-size: 0.75rem;
+        color: #64748b;
+        text-align: right;
+        transition: color var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .sync-status.online span:first-child {
@@ -2569,10 +2405,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         }
 
         .sync-detail {
-          font-size: 0.7rem;
-          color: #475569;
-          transition: color var(--motion-duration-fast) var(--motion-ease-base),
-            opacity var(--motion-duration-fast) var(--motion-ease-base);
+          font - size: 0.7rem;
+        color: #475569;
+        transition: color var(--motion-duration-fast) var(--motion-ease-base),
+        opacity var(--motion-duration-fast) var(--motion-ease-base);
         }
 
         .sync-detail[data-ui-state="active"] {
@@ -2585,12 +2421,12 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
         .uncertainty-highlight {
           background: #fef3c7;
-          border: 1px dashed #f59e0b;
-          color: #92400e;
-          padding: 0 4px;
-          border-radius: 4px;
-          font-weight: 600;
-          cursor: pointer;
+        border: 1px dashed #f59e0b;
+        color: #92400e;
+        padding: 0 4px;
+        border-radius: 4px;
+        font-weight: 600;
+        cursor: pointer;
         }
 
         .uncertainty-highlight:hover {
@@ -2599,149 +2435,149 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
         .flag-action.ghost {
           border: 1px solid #cbd5f5;
-          background: #f8fafc;
-          color: #0f172a;
+        background: #f8fafc;
+        color: #0f172a;
         }
 
         .history-view-container .loading-state {
           display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          height: 100%;
-          gap: 1rem;
-          color: var(--text-secondary);
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        gap: 1rem;
+        color: var(--text-secondary);
         }
 
         .history-view-container .spinner {
           width: 30px;
-          height: 30px;
-          border: 3px solid var(--bg-tertiary);
-          border-top-color: var(--brand-primary);
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
+        height: 30px;
+        border: 3px solid var(--bg-tertiary);
+        border-top-color: var(--brand-primary);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
         }
 
         @keyframes spin {
-          to { transform: rotate(360deg); }
+          to {transform: rotate(360deg); }
         }
 
         /* Markdown Styles for Medical Report */
         .history-view-container .markdown-body {
-            color: #334155;
-            line-height: 1.7;
-            font-size: 1rem;
+          color: #334155;
+        line-height: 1.7;
+        font-size: 1rem;
         }
 
         .history-view-container .markdown-body h2 {
-            font-size: 1.1rem;
-            font-weight: 700;
-            color: #0f766e; /* Teal-700 */
-            margin-top: 1.5rem;
-            margin-bottom: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            border-bottom: 2px solid #e2e8f0;
-            padding-bottom: 0.25rem;
+          font - size: 1.1rem;
+        font-weight: 700;
+        color: #0f766e; /* Teal-700 */
+        margin-top: 1.5rem;
+        margin-bottom: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        border-bottom: 2px solid #e2e8f0;
+        padding-bottom: 0.25rem;
         }
 
         .history-view-container .markdown-body h3 {
-            font-size: 1rem;
-            font-weight: 600;
-            color: #475569;
-            margin-top: 1.25rem;
-            margin-bottom: 0.5rem;
+          font - size: 1rem;
+        font-weight: 600;
+        color: #475569;
+        margin-top: 1.25rem;
+        margin-bottom: 0.5rem;
         }
 
         .history-view-container .markdown-body p {
-            margin-bottom: 1rem;
-            text-align: justify;
+          margin - bottom: 1rem;
+        text-align: justify;
         }
 
         .history-view-container .markdown-body ul {
-            list-style-type: none; /* Removed bullets for clean "Form" look */
-            padding-left: 0;       /* Align with headers */
-            margin-bottom: 1rem;
+          list - style - type: none; /* Removed bullets for clean "Form" look */
+        padding-left: 0;       /* Align with headers */
+        margin-bottom: 1rem;
         }
 
         .history-view-container .markdown-body li {
-            margin-bottom: 0.5rem;
-            border-bottom: 1px dashed #f1f5f9; /* Subtle separator line */
-            padding-bottom: 0.25rem;
+          margin - bottom: 0.5rem;
+        border-bottom: 1px dashed #f1f5f9; /* Subtle separator line */
+        padding-bottom: 0.25rem;
         }
-        
+
         .history-view-container .markdown-body li:last-child {
-            border-bottom: none;
+          border - bottom: none;
         }
 
         .history-view-container .markdown-body strong {
-            color: #1e293b;
-            font-weight: 600;
+          color: #1e293b;
+        font-weight: 600;
         }
 
         @media (max-width: 1200px) {
-          .history-layout {
-            gap: 1rem;
-            max-width: 100%;
+          .history - layout {
+          gap: 1rem;
+        max-width: 100%;
           }
 
-          .history-view-container .action-buttons-group {
-            gap: 0.4rem;
-            flex-wrap: wrap;
-            justify-content: flex-end;
+        .history-view-container .action-buttons-group {
+          gap: 0.4rem;
+        flex-wrap: wrap;
+        justify-content: flex-end;
           }
 
-          .history-view-container .action-button {
-            padding: 0.5rem 0.85rem;
-            font-size: 0.85rem;
+        .history-view-container .action-button {
+          padding: 0.5rem 0.85rem;
+        font-size: 0.85rem;
           }
         }
 
         @media (max-width: 1024px) {
-          .history-layout {
-            flex-direction: column;
+          .history - layout {
+          flex - direction: column;
           }
 
-          .notes-column {
-            min-width: 0;
-            width: 100%;
-            position: static;
+        .notes-column {
+          min - width: 0;
+        width: 100%;
+        position: static;
           }
 
-          .history-view-container .document-header {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 0.8rem;
+        .history-view-container .document-header {
+          flex - direction: column;
+        align-items: flex-start;
+        gap: 0.8rem;
           }
 
-          .history-view-container .action-buttons-group {
-            width: 100%;
-            justify-content: flex-start;
+        .history-view-container .action-buttons-group {
+          width: 100%;
+        justify-content: flex-start;
           }
 
-          .document-content {
-            padding: 1.25rem;
+        .document-content {
+          padding: 1.25rem;
           }
 
-          .workflow-bar {
-            padding: 0 1.25rem 1rem;
-            flex-direction: column;
-            align-items: flex-start;
+        .workflow-bar {
+          padding: 0 1.25rem 1rem;
+        flex-direction: column;
+        align-items: flex-start;
           }
 
-          .classification-banner {
-            padding: 0.75rem 1.25rem;
-            flex-wrap: wrap;
+        .classification-banner {
+          padding: 0.75rem 1.25rem;
+        flex-wrap: wrap;
           }
 
-          .uncertainty-item {
-            flex-direction: column;
-            align-items: flex-start;
+        .uncertainty-item {
+          flex - direction: column;
+        align-items: flex-start;
           }
 
-          .more-actions-popover {
-            left: 0;
-            right: auto;
+        .more-actions-popover {
+          left: 0;
+        right: auto;
           }
         }
       `}</style>
