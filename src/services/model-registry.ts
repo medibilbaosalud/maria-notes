@@ -55,6 +55,11 @@ const candidate = (provider: ModelProvider, model: string, options: { thinking?:
 const GEMINI_TEXT_CHAIN_LOW: ModelCandidate[] = [
     candidate('gemini', 'gemini-3-flash', { thinking: 'low' }),
     candidate('gemini', 'gemini-2.5-flash', { thinking: 'low' }),
+    candidate('gemini', 'gemini-3-pro', { thinking: 'low' }), // Added
+    candidate('gemini', 'gemini-2.5-pro', { thinking: 'low' }), // Added
+    candidate('gemini', 'gemini-2.0-pro-exp', { thinking: 'low' }), // Added
+    candidate('gemini', 'gemini-2.0-flash', { thinking: 'low' }), // Added
+    candidate('gemini', 'gemini-2.0-flash-exp', { thinking: 'low' }), // Added
     candidate('gemini', 'gemini-2.5-flash-lite', { thinking: 'low' }),
     candidate('gemini', 'gemma-3-27b-it', { thinking: 'low' }),
     candidate('gemini', 'gemma-3-12b-it', { thinking: 'low' }),
@@ -66,6 +71,10 @@ const GEMINI_TEXT_CHAIN_LOW: ModelCandidate[] = [
 const GEMINI_TEXT_CHAIN_MEDIUM: ModelCandidate[] = [
     candidate('gemini', 'gemini-3-flash', { thinking: 'low' }),
     candidate('gemini', 'gemini-2.5-flash', { thinking: 'medium' }),
+    candidate('gemini', 'gemini-3-pro', { thinking: 'medium' }), // Added (High reasoning fallback)
+    candidate('gemini', 'gemini-2.5-pro', { thinking: 'medium' }), // Added
+    candidate('gemini', 'gemini-2.0-pro-exp', { thinking: 'medium' }), // Added
+    candidate('gemini', 'gemini-2.0-flash', { thinking: 'medium' }), // Added
     candidate('gemini', 'gemini-2.5-flash-lite', { thinking: 'low' }),
     candidate('gemini', 'gemma-3-27b-it', { thinking: 'low' }),
     candidate('gemini', 'gemma-3-12b-it', { thinking: 'low' }),
@@ -128,7 +137,12 @@ const DEFAULT_ALLOWED_CANDIDATES: ModelCandidate[] = [
     candidate('gemini', 'gemini-2.5-flash-native-audio-dialog'),
     candidate('gemini', 'gemini-2.5-flash-preview-tts'),
     candidate('gemini', 'gemini-embedding-1'),
-    candidate('gemini', 'gemini-robotics-er-1.5-preview')
+    candidate('gemini', 'gemini-robotics-er-1.5-preview'),
+    candidate('gemini', 'gemini-3-pro'),
+    candidate('gemini', 'gemini-2.5-pro'),
+    candidate('gemini', 'gemini-2.0-pro-exp'),
+    candidate('gemini', 'gemini-2.0-flash'),
+    candidate('gemini', 'gemini-2.0-flash-exp')
 ];
 
 const uniqueCandidates = (items: ModelCandidate[]): ModelCandidate[] => {
@@ -312,7 +326,13 @@ export const MODEL_LIMITS: Record<string, ModelLimits> = {
     'gemini:gemini-robotics-er-1.5-preview': { requestsPerMinute: 10, requestsPerDay: 20, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
     'gemini:gemini-embedding-1': { requestsPerMinute: 100, requestsPerDay: 1000, tokensPerMinute: 30000, tokensPerDay: 5000000, contextWindowTokens: 8192 },
     'gemini:gemini-2.5-flash-preview-tts': { requestsPerMinute: 3, requestsPerDay: 10, tokensPerMinute: 10000, tokensPerDay: 300000, contextWindowTokens: 32000 },
-    'gemini:gemini-2.5-flash-native-audio-dialog': { requestsPerMinute: 200, requestsPerDay: 0, tokensPerMinute: 1000000, tokensPerDay: 0, contextWindowTokens: 128000 }
+    'gemini:gemini-2.5-flash-native-audio-dialog': { requestsPerMinute: 200, requestsPerDay: 0, tokensPerMinute: 1000000, tokensPerDay: 0, contextWindowTokens: 128000 },
+    // New Models (Reasoning / Pro) - 15 RPM typical for Pay-as-you-go or High tier
+    'gemini:gemini-3-pro': { requestsPerMinute: 15, requestsPerDay: 50, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
+    'gemini:gemini-2.5-pro': { requestsPerMinute: 15, requestsPerDay: 50, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
+    'gemini:gemini-2.0-pro-exp': { requestsPerMinute: 15, requestsPerDay: 50, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
+    'gemini:gemini-2.0-flash': { requestsPerMinute: 15, requestsPerDay: 50, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
+    'gemini:gemini-2.0-flash-exp': { requestsPerMinute: 15, requestsPerDay: 50, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 }
 };
 
 const mergeLimitOverrides = (): void => {

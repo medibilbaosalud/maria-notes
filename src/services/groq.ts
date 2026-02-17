@@ -1038,9 +1038,7 @@ ${schemaHint}`;
             ? 0
             : retryPolicy.retries;
         const isThinking = options.thinking && modelName.startsWith('gemini-');
-        const generationConfig: Record<string, unknown> = {
-            maxOutputTokens: options.maxTokens
-        };
+        const generationConfig: Record<string, unknown> = {};
 
         // Gemini 3+ requires temperature=1.0 (default) when thinking is active;
         // omit temperature entirely so the API uses its default.
