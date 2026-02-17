@@ -18,7 +18,6 @@ interface RecorderProps {
   processingLabel?: string;
   activeEngine?: ActiveEngine;
   activeModel?: string;
-  modelUpdatedAt?: number;
 }
 
 export const Recorder: React.FC<RecorderProps> = ({
@@ -28,8 +27,7 @@ export const Recorder: React.FC<RecorderProps> = ({
   startBlockReason = '',
   processingLabel = 'Listo para grabar',
   activeEngine = 'idle',
-  activeModel = '',
-  modelUpdatedAt
+  activeModel = ''
 }) => {
   const turboBatchIntervalMs = Number(import.meta.env.VITE_TURBO_RECORDER_BATCH_INTERVAL_MS || 90_000);
   const listboxId = useId();
