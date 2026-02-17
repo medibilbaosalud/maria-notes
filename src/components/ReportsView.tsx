@@ -1,12 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Search, FileOutput, ChevronRight, Printer, Copy, Check, Pencil, Save, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import { searchMedicalRecords, updateMedicalRecord, type MedicalRecord } from '../services/storage';
+import { processDoctorFeedbackV2 } from '../services/doctor-feedback';
+import { evaluateAndPersistRuleImpactV2 } from '../services/learning/rule-evaluator';
 import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
 
-export const ReportsView: React.FC = () => {
+interface ReportsViewProps {
+  apiKey?: string;
+}
+
+export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MedicalRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -14,6 +20,36 @@ export const ReportsView: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [isEditingReport, setIsEditingReport] = useState(false);
   const [editedReportContent, setEditedReportContent] = useState('');
+
+  const queueReportLearning = useCallback((record: MedicalRecord, beforeReport: string, afterReport: string) => {
+    void processDoctorFeedbackV2({
+      transcription: record.transcription || '',
+      aiText: beforeReport || '',
+      doctorText: afterReport || '',
+      apiKey,
+      recordId: record.record_uuid,
+      auditId: record.audit_id,
+      source: 'report_save',
+      artifactType: 'medical_report',
+      allowAutosaveLearn: true
+    }).then((learningResult) => {
+      if (!learningResult?.candidate_ids?.length) return;
+      void evaluateAndPersistRuleImpactV2({
+        candidateIds: learningResult.candidate_ids,
+        aiOutput: beforeReport || '',
+        doctorOutput: afterReport || '',
+        source: 'report_save',
+        artifactType: 'medical_report',
+        metadata: {
+          record_id: record.record_uuid,
+          audit_id: record.audit_id || null,
+          learning_event_ids: learningResult.event_ids
+        }
+      });
+    }).catch((error) => {
+      console.warn('[ReportsView] learning V2 failed:', error);
+    });
+  }, [apiKey]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,10 +85,12 @@ export const ReportsView: React.FC = () => {
   const handleSaveReport = async () => {
     if (!selectedRecord) return;
     try {
+      const beforeReport = selectedRecord.medical_report || '';
       const updated = await updateMedicalRecord(selectedRecord.record_uuid, { medical_report: editedReportContent });
       if (updated && updated.length > 0) {
         setSelectedRecord({ ...selectedRecord, medical_report: editedReportContent });
         setResults(results.map((r) => r.record_uuid === selectedRecord.record_uuid ? { ...r, medical_report: editedReportContent } : r));
+        queueReportLearning(selectedRecord, beforeReport, editedReportContent);
         setIsEditingReport(false);
       } else {
         alert('No se pudo guardar el informe.');

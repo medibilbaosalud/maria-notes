@@ -389,12 +389,28 @@ export interface ModelInvocationRecord {
     created_at: string;
 }
 
+export interface ModelInvocationEvent {
+    status: 'start' | 'success' | 'error';
+    task: string;
+    phase: string;
+    provider: ModelProvider;
+    model: string;
+    route_key: string;
+    attempt_index: number;
+    is_fallback: boolean;
+    latency_ms?: number;
+    error_type?: string;
+    error_code?: string;
+    created_at: string;
+}
+
 export class GroqService {
     private apiKeys: string[];
     private geminiApiKeys: string[];
     private semanticChecks: SemanticCheckRecord[] = [];
     private modelInvocations: ModelInvocationRecord[] = [];
     private taskRoutePerf = new Map<string, { ewmaLatencyMs: number; samples: number; failures: number }>();
+    private modelInvocationListener?: (event: ModelInvocationEvent) => void;
 
     constructor(apiKeyOrKeys: string | string[]) {
         this.apiKeys = Array.isArray(apiKeyOrKeys) ? apiKeyOrKeys : [apiKeyOrKeys];
@@ -502,6 +518,22 @@ export class GroqService {
 
     resetInvocationCounters(_sessionId?: string): void {
         this.modelInvocations = [];
+    }
+
+    setModelInvocationListener(listener?: (event: ModelInvocationEvent) => void): void {
+        this.modelInvocationListener = listener;
+    }
+
+    private emitModelInvocation(event: Omit<ModelInvocationEvent, 'created_at'>): void {
+        if (!this.modelInvocationListener) return;
+        try {
+            this.modelInvocationListener({
+                ...event,
+                created_at: new Date().toISOString()
+            });
+        } catch (error) {
+            console.warn('[GroqService] model invocation listener failed:', error);
+        }
     }
 
     getInvocationCounters(_sessionId?: string): {
@@ -1188,6 +1220,16 @@ ${schemaHint}`;
             let routeAcquired = false;
 
             try {
+                this.emitModelInvocation({
+                    status: 'start',
+                    task: options.task,
+                    phase: options.phase || options.task,
+                    provider: candidate.provider,
+                    model: candidate.model,
+                    route_key: routeKey,
+                    attempt_index: attemptIndex,
+                    is_fallback: attemptIndex > 0
+                });
                 if (routeController.isCircuitOpen(routeKey)) {
                     const retryAfterMs = routeController.getCircuitRetryAfterMs(routeKey);
                     throw new BudgetExceededError(`route_circuit_open:${routeKey}`, Math.max(250, retryAfterMs), 'minute');
@@ -1218,6 +1260,17 @@ ${schemaHint}`;
                     estimated_tokens: estimatedTokens
                 });
                 routeController.reportSuccess(routeKey);
+                this.emitModelInvocation({
+                    status: 'success',
+                    task: options.task,
+                    phase: options.phase || options.task,
+                    provider: candidate.provider,
+                    model: candidate.model,
+                    route_key: routeKey,
+                    attempt_index: attemptIndex,
+                    is_fallback: attemptIndex > 0,
+                    latency_ms: Math.max(1, Date.now() - startedAt)
+                });
 
                 return { text, model: `${candidate.provider}:${candidate.model}` };
             } catch (error) {
@@ -1235,6 +1288,19 @@ ${schemaHint}`;
                     error_code: classified.errorCode,
                     latency_ms: Math.max(1, Date.now() - startedAt),
                     estimated_tokens: estimatedTokens
+                });
+                this.emitModelInvocation({
+                    status: 'error',
+                    task: options.task,
+                    phase: options.phase || options.task,
+                    provider: candidate.provider,
+                    model: candidate.model,
+                    route_key: routeKey,
+                    attempt_index: attemptIndex,
+                    is_fallback: attemptIndex > 0,
+                    latency_ms: Math.max(1, Date.now() - startedAt),
+                    error_type: classified.errorType,
+                    error_code: classified.errorCode
                 });
 
                 const failureKind = this.mapRouteFailureKind(error);
@@ -1413,6 +1479,16 @@ ${schemaHint}`;
                 const estimatedAudioSeconds = Math.max(1, Math.ceil(audioBlob.size / 16_000));
                 let routeAcquired = false;
                 try {
+                    this.emitModelInvocation({
+                        status: 'start',
+                        task: 'transcription',
+                        phase: 'transcription',
+                        provider: 'groq',
+                        model: modelName,
+                        route_key: routeKey,
+                        attempt_index: allModels.indexOf(modelName),
+                        is_fallback: allModels.indexOf(modelName) > 0
+                    });
                     const baseRetryPolicy = getRetryPolicy('transcription');
                     const adaptiveTimeoutMs = getAdaptiveTimeout(
                         'transcription',
@@ -1498,6 +1574,17 @@ ${schemaHint}`;
                         estimated_tokens: Math.max(1, estimatedAudioSeconds)
                     });
                     routeController.reportSuccess(routeKey);
+                    this.emitModelInvocation({
+                        status: 'success',
+                        task: 'transcription',
+                        phase: 'transcription',
+                        provider: 'groq',
+                        model: modelName,
+                        route_key: routeKey,
+                        attempt_index: allModels.indexOf(modelName),
+                        is_fallback: allModels.indexOf(modelName) > 0,
+                        latency_ms: Math.max(1, Date.now() - startedAt)
+                    });
                     return { text, model: modelName };
                 } catch (error: any) {
                     console.warn(`[Groq] Whisper ${modelName} failed with current key:`, error);
@@ -1515,6 +1602,19 @@ ${schemaHint}`;
                         error_code: classified.errorCode,
                         latency_ms: Math.max(1, Date.now() - startedAt),
                         estimated_tokens: Math.max(1, estimatedAudioSeconds)
+                    });
+                    this.emitModelInvocation({
+                        status: 'error',
+                        task: 'transcription',
+                        phase: 'transcription',
+                        provider: 'groq',
+                        model: modelName,
+                        route_key: routeKey,
+                        attempt_index: allModels.indexOf(modelName),
+                        is_fallback: allModels.indexOf(modelName) > 0,
+                        latency_ms: Math.max(1, Date.now() - startedAt),
+                        error_type: classified.errorType,
+                        error_code: classified.errorCode
                     });
                     const failureKind = this.mapRouteFailureKind(error);
                     const retryAfterMs = error instanceof BudgetExceededError

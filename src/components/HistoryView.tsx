@@ -5,10 +5,10 @@ import { Copy, Check, FileText, Sparkles, FileOutput, X, Printer, Plus, AlertTri
 import ReactMarkdown from 'react-markdown';
 import { MBSLogo } from './MBSLogo';
 import { AIAuditWidget } from './AIAuditWidget';
-import { processDoctorFeedback } from '../services/doctor-feedback';
+import { processDoctorFeedbackV2 } from '../services/doctor-feedback';
 import type { ExtractionMeta, ConsultationClassification, UncertaintyFlag, FieldEvidence } from '../services/groq';
 import { saveFieldConfirmation, logQualityEvent, saveDoctorSatisfactionEvent } from '../services/supabase';
-import { evaluateAndPersistRuleImpact } from '../services/learning/rule-evaluator';
+import { evaluateAndPersistRuleImpactV2 } from '../services/learning/rule-evaluator';
 import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
 
@@ -490,26 +490,29 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     // TRIGGER LEARNING: If content changed, analyze why
     if (editValue !== historyText) {
       if (transcription && apiKey) {
-        void processDoctorFeedback(
+        const baselineAiText = originalHistoryRef.current || historyText;
+        void processDoctorFeedbackV2({
           transcription,
-          originalHistoryRef.current || historyText, // Original AI baseline
-          editValue,   // Doctor's edited version
+          aiText: baselineAiText,
+          doctorText: editValue,
           apiKey,
           recordId,
-          metadata?.auditId
-        ).then((learningResult) => {
-          if (learningResult) {
+          auditId: metadata?.auditId,
+          source: 'history_save',
+          artifactType: 'medical_history',
+          allowAutosaveLearn: true
+        }).then((learningResult) => {
+          if (learningResult?.candidate_ids?.length) {
             console.log('[HistoryView] Learning event registrado:', learningResult.event_ids.length);
-            const usedRuleIds = (metadata?.ruleIdsUsed && metadata.ruleIdsUsed.length > 0)
-              ? metadata.ruleIdsUsed
-              : learningResult.candidate_ids;
             const hallucinationCount = (metadata?.remainingErrors || []).filter((err) => err.type === 'hallucination').length;
             const inconsistencyCount = (metadata?.remainingErrors || []).filter((err) => err.type === 'inconsistency').length;
 
-            void evaluateAndPersistRuleImpact({
-              ruleIds: usedRuleIds,
-              aiOutput: originalHistoryRef.current || historyText,
+            void evaluateAndPersistRuleImpactV2({
+              candidateIds: learningResult.candidate_ids,
+              aiOutput: baselineAiText,
               doctorOutput: editValue,
+              source: 'history_save',
+              artifactType: 'medical_history',
               hallucinationDelta: hallucinationCount > 0 ? 0.005 : 0,
               inconsistencyDelta: inconsistencyCount > 0 ? 0.005 : 0,
               metadata: {
@@ -519,6 +522,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               }
             });
           }
+        }).catch((error) => {
+          console.warn('[HistoryView] learning V2 failed on manual save:', error);
         });
       }
       logQualityEvent({
@@ -546,7 +551,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       }
     ]);
     setIsEditing(false);
-  }, [apiKey, editValue, historyText, metadata, persistContent, transcription]);
+  }, [apiKey, editValue, historyText, metadata, persistContent, recordId, transcription]);
 
   const handleCancelEdit = () => {
     setIsEditing(false);
@@ -740,6 +745,38 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       setIsAutosaving(true);
       try {
         await persistContent(editValue, { autosave: true });
+        const baselineAiText = originalHistoryRef.current || historyText;
+        void processDoctorFeedbackV2({
+          transcription,
+          aiText: baselineAiText,
+          doctorText: editValue,
+          apiKey,
+          recordId,
+          auditId: metadata?.auditId,
+          source: 'history_autosave',
+          artifactType: 'medical_history',
+          allowAutosaveLearn: true
+        }).then((learningResult) => {
+          if (!learningResult?.candidate_ids?.length) return;
+          const hallucinationCount = (metadata?.remainingErrors || []).filter((err) => err.type === 'hallucination').length;
+          const inconsistencyCount = (metadata?.remainingErrors || []).filter((err) => err.type === 'inconsistency').length;
+          void evaluateAndPersistRuleImpactV2({
+            candidateIds: learningResult.candidate_ids,
+            aiOutput: baselineAiText,
+            doctorOutput: editValue,
+            source: 'history_autosave',
+            artifactType: 'medical_history',
+            hallucinationDelta: hallucinationCount > 0 ? 0.005 : 0,
+            inconsistencyDelta: inconsistencyCount > 0 ? 0.005 : 0,
+            metadata: {
+              record_id: recordId || null,
+              audit_id: metadata?.auditId || null,
+              learning_event_ids: learningResult.event_ids
+            }
+          });
+        }).catch((error) => {
+          console.warn('[HistoryView] learning V2 failed on autosave:', error);
+        });
         lastSavedValueRef.current = editValue;
         setLastSavedAt(new Date());
         setVersions((prev) => [
@@ -757,7 +794,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       }
     }, 1200);
     return () => clearTimeout(timeout);
-  }, [editValue, isEditing]);
+  }, [apiKey, editValue, historyText, isEditing, metadata, persistContent, recordId, transcription]);
 
   const reviewCompleted = (metadata?.uncertaintyFlags?.length || 0) === 0
     || (metadata?.uncertaintyFlags || []).every((flag) => flagDecisions[flag.field_path]);

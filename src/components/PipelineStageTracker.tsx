@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { motionEase, motionTransitions, statusPulseSoft } from '../features/ui/motion-tokens';
 
@@ -21,6 +21,10 @@ interface PipelineStageTrackerProps {
     sttP95Ms?: number;
     sttConcurrency?: number;
     hedgeRate?: number;
+    processingLabel?: string;
+    activeEngine?: 'whisper' | 'gemini' | 'groq' | 'llm' | 'storage' | 'idle';
+    activeModel?: string;
+    modelUpdatedAt?: number;
 }
 
 const STAGES: Array<{ key: StageState; label: string }> = [
@@ -65,14 +69,42 @@ export const PipelineStageTracker: React.FC<PipelineStageTrackerProps> = ({
     state,
     sttP95Ms,
     sttConcurrency,
-    hedgeRate
+    hedgeRate,
+    processingLabel,
+    activeEngine = 'idle',
+    activeModel,
+    modelUpdatedAt
 }) => {
     const currentRank = rank[state] || 0;
+    const [modelChanged, setModelChanged] = useState(false);
+    const engineLabel = activeEngine === 'whisper'
+        ? 'Whisper'
+        : activeEngine === 'gemini'
+            ? 'Gemini'
+            : activeEngine === 'groq'
+                ? 'Groq'
+                : activeEngine === 'storage'
+                    ? 'Storage'
+                    : activeEngine === 'idle'
+                        ? 'Idle'
+                        : 'LLM';
+    const resolvedLabel = processingLabel || `Estado: ${labelByState[state]}`;
+
+    useEffect(() => {
+        if (!modelUpdatedAt) return;
+        setModelChanged(true);
+        const timer = window.setTimeout(() => setModelChanged(false), 600);
+        return () => window.clearTimeout(timer);
+    }, [modelUpdatedAt]);
+
     return (
         <motion.div
             className="pipeline-stage-tracker"
             aria-live="polite"
             data-ui-state={state}
+            data-model-engine={activeEngine}
+            data-model-name={activeModel || ''}
+            data-processing-stage={state}
             layout
             transition={motionTransitions.normal}
         >
@@ -104,6 +136,23 @@ export const PipelineStageTracker: React.FC<PipelineStageTrackerProps> = ({
                         </div>
                     );
                 })}
+            </div>
+            <div className={`stage-live-row ${modelChanged ? 'updated' : ''}`}>
+                <motion.span
+                    key={resolvedLabel}
+                    className="stage-live-label"
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={motionTransitions.fast}
+                >
+                    {resolvedLabel}
+                </motion.span>
+                <div className="stage-live-meta">
+                    <span className={`engine-pill ${activeEngine}`} data-ui-state={activeEngine}>
+                        {engineLabel}
+                    </span>
+                    <span className="model-chip">{activeModel || 'Resolviendo ruta de modelo...'}</span>
+                </div>
             </div>
             <div className="stage-metrics">
                 <span>P95 STT: {sttP95Ms ? `${Math.round(sttP95Ms)}ms` : 'n/a'}</span>

@@ -10,6 +10,7 @@ import {
     ExtractionMeta,
     ConsultationClassification,
     ModelInvocationRecord,
+    ModelInvocationEvent,
     UncertaintyFlag,
     QualityTriageResult
 } from './groq';
@@ -125,6 +126,10 @@ export class AIService {
         by_task: Record<string, number>;
     } {
         return this.groq.getInvocationCounters(sessionId);
+    }
+
+    setModelInvocationListener(listener?: (event: ModelInvocationEvent) => void): void {
+        this.groq.setModelInvocationListener(listener);
     }
 
     private estimateTokens(text: string): number {

@@ -18,6 +18,7 @@ interface RuleCandidateRow {
     confidence_score: number;
     lifecycle_state: LearningLifecycleState;
     last_seen_at: string;
+    rule_json?: Record<string, unknown>;
     metrics_snapshot?: {
         score?: number;
         edit_delta?: number;
@@ -63,7 +64,7 @@ export default function LessonsPanel({ onClose, readOnly = false }: LessonsPanel
         setLoading(true);
         const { data, error } = await supabase
             .from('ai_rule_candidates')
-            .select('id, signature_hash, rule_text, category, evidence_count, contradiction_count, confidence_score, lifecycle_state, last_seen_at, metrics_snapshot')
+            .select('id, signature_hash, rule_text, category, evidence_count, contradiction_count, confidence_score, lifecycle_state, last_seen_at, rule_json, metrics_snapshot')
             .order('confidence_score', { ascending: false })
             .order('last_seen_at', { ascending: false })
             .limit(300);
@@ -159,6 +160,15 @@ export default function LessonsPanel({ onClose, readOnly = false }: LessonsPanel
                                 <div className="rule-top">
                                     <div className="rule-badges">
                                         <span className="badge">{rule.category}</span>
+                                        <span className="badge">
+                                            {String(rule.rule_json?.artifact_type || 'medical_history')}
+                                        </span>
+                                        <span className="badge">
+                                            {String(rule.rule_json?.source_view || 'history_save')}
+                                        </span>
+                                        <span className="badge">
+                                            {String(rule.rule_json?.signal_strength || 'medium')}
+                                        </span>
                                         <span className="badge">conf {rule.confidence_score.toFixed(2)}</span>
                                         <span className="badge">ev {rule.evidence_count}</span>
                                         <span className={`badge ${rule.contradiction_count > 0 ? 'warn' : ''}`}>contr {rule.contradiction_count}</span>

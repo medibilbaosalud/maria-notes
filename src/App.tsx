@@ -3,7 +3,7 @@ import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react'
 import { Layout } from './components/Layout';
 import { Recorder } from './components/Recorder';
 import { AIService } from './services/ai';
-import type { ExtractionResult, ExtractionMeta, ConsultationClassification, UncertaintyFlag } from './services/groq';
+import type { ExtractionResult, ExtractionMeta, ConsultationClassification, UncertaintyFlag, ModelInvocationEvent } from './services/groq';
 import { saveLabTestLog } from './services/storage';
 import {
     saveMedicalRecord,
@@ -102,6 +102,35 @@ const STT_MAX_CONCURRENCY = Math.max(STT_MIN_CONCURRENCY, Number(import.meta.env
 const STT_DOWN_THRESHOLD_MS = Math.max(5_000, Number(import.meta.env.VITE_STT_DOWN_THRESHOLD_MS || TURBO_PROFILE_CONFIG.sttDownThresholdMs));
 const STT_UP_THRESHOLD_MS = Math.max(2_000, Number(import.meta.env.VITE_STT_UP_THRESHOLD_MS || TURBO_PROFILE_CONFIG.sttUpThresholdMs));
 const STT_CHUNK_SLA_MS = Math.max(5_000, Number(import.meta.env.VITE_STT_CHUNK_SLA_MS || TURBO_PROFILE_CONFIG.sttChunkSlaMs));
+type ActiveEngine = 'whisper' | 'gemini' | 'groq' | 'llm' | 'storage' | 'idle';
+
+const normalizeRuntimeModel = (rawModel?: string): string => {
+    const value = (rawModel || '').trim();
+    if (!value) return '';
+    if (value.includes(':')) return value;
+    if (value.toLowerCase().includes('whisper')) return `groq:${value}`;
+    return value;
+};
+
+const resolveEngineFromModel = (rawModel?: string): ActiveEngine => {
+    const model = normalizeRuntimeModel(rawModel).toLowerCase();
+    if (!model) return 'idle';
+    if (model.includes('whisper')) return 'whisper';
+    if (model.startsWith('gemini:')) return 'gemini';
+    if (model.startsWith('groq:')) return 'groq';
+    return 'llm';
+};
+
+const phaseLabelByModelEvent = (phase?: string, engine?: ActiveEngine): string => {
+    const normalizedPhase = (phase || '').toLowerCase();
+    if (normalizedPhase.includes('transcription')) return 'Transcribiendo (Whisper)';
+    if (normalizedPhase.includes('extract')) return 'Extrayendo datos clínicos (LLM)';
+    if (normalizedPhase.includes('single_shot_history') || normalizedPhase.includes('generation')) return 'Generando historia (LLM)';
+    if (normalizedPhase.includes('validation') || normalizedPhase.includes('quality')) return 'Validando calidad clínica (LLM)';
+    if (normalizedPhase.includes('merge')) return 'Consolidando secciones clínicas (LLM)';
+    if (engine === 'whisper') return 'Transcribiendo (Whisper)';
+    return 'Procesando historia clínica (LLM)';
+};
 
 // Helper to get key array
 const getApiKeys = (userKey?: string) => {
@@ -132,7 +161,10 @@ const AppContent = () => {
     const [originalHistory, setOriginalHistory] = useState<string>('');
     const [transcription, setTranscription] = useState<string>('');
     const [currentPatientName, setCurrentPatientName] = useState<string>('');
-    const [_processingStatus, setProcessingStatus] = useState<string>('');
+    const [processingLabel, setProcessingStatus] = useState<string>('Listo para grabar');
+    const [activeEngine, setActiveEngine] = useState<ActiveEngine>('idle');
+    const [activeModel, setActiveModel] = useState<string>('');
+    const [modelUpdatedAt, setModelUpdatedAt] = useState<number>(0);
     const [isLoading, setIsLoading] = useState(false);
     const [currentView, setCurrentView] = useState<'record' | 'history' | 'reports' | 'result' | 'test-lab'>('record');
 
@@ -272,6 +304,59 @@ const AppContent = () => {
     useEffect(() => {
         currentPatientRef.current = currentPatientName;
     }, [currentPatientName]);
+
+    const applyProcessingState = useCallback((params: {
+        label: string;
+        engine?: ActiveEngine;
+        model?: string;
+        markModelUpdate?: boolean;
+    }) => {
+        setProcessingStatus(params.label);
+        if (params.engine) {
+            setActiveEngine(params.engine);
+        }
+        if (typeof params.model === 'string') {
+            setActiveModel(params.model);
+            if (params.model && params.markModelUpdate !== false) {
+                setModelUpdatedAt(Date.now());
+            }
+        }
+    }, []);
+
+    const handleModelInvocationEvent = useCallback((event: ModelInvocationEvent) => {
+        const modelLabel = normalizeRuntimeModel(`${event.provider}:${event.model}`);
+        const engine = resolveEngineFromModel(modelLabel);
+        const phaseLabel = phaseLabelByModelEvent(event.phase, engine);
+        const fallbackLabel = event.is_fallback ? ' (fallback)' : '';
+        if (event.status === 'error') {
+            applyProcessingState({
+                label: `${phaseLabel} · Reintentando ruta de modelo...`,
+                engine,
+                model: modelLabel || '',
+                markModelUpdate: false
+            });
+            return;
+        }
+        applyProcessingState({
+            label: `${phaseLabel} · ${modelLabel || 'Resolviendo ruta de modelo...'}${fallbackLabel}`,
+            engine,
+            model: modelLabel || '',
+            markModelUpdate: event.status === 'success'
+        });
+    }, [applyProcessingState]);
+
+    const ensureAiService = useCallback((keys: string[]) => {
+        const service = aiServiceRef.current || new AIService(keys);
+        aiServiceRef.current = service;
+        service.setModelInvocationListener(handleModelInvocationEvent);
+        return service;
+    }, [handleModelInvocationEvent]);
+
+    useEffect(() => {
+        return () => {
+            aiServiceRef.current?.setModelInvocationListener(undefined);
+        };
+    }, []);
 
     const isLabRun = (patientName: string) => patientName.startsWith('TEST_LAB_') || patientName.startsWith('DIAG_');
     const extractDiagnosticContext = (patientName: string): {
@@ -990,13 +1075,17 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             const finalSegment = sessionData.audio_segments.find((segment) => segment.is_final);
             if (!finalSegment) return;
 
-            const aiService = aiServiceRef.current || new AIService(keys);
-            aiServiceRef.current = aiService;
+            const aiService = ensureAiService(keys);
             const orchestrator = ensureOrchestrator(aiService);
             processingLockRef.current = true;
             activeSessionIdRef.current = latest.session_id;
             setCurrentPatientName(latest.patient_name);
-            setProcessingStatus('Recuperando sesión pendiente...');
+            applyProcessingState({
+                label: 'Recuperando sesión pendiente...',
+                engine: 'idle',
+                model: '',
+                markModelUpdate: false
+            });
             console.log('[App] Attempting to recover session:', latest.session_id);
 
             MemoryService.setPipelineBusy(true);
@@ -1048,6 +1137,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
     const handleSaveSettings = (key: string) => {
         setApiKey(key);
         safeSetLocalStorage('groq_api_key', key);
+        aiServiceRef.current?.setModelInvocationListener(undefined);
         aiServiceRef.current = null;
         setShowSettings(false);
     };
@@ -1361,7 +1451,12 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         if (runId) {
             recordDiagnosticEvent(runId, { type: 'stage_start', stage: 'finalize' });
         }
-        setProcessingStatus('Transcribiendo segmento final...');
+        applyProcessingState({
+            label: 'Transcribiendo segmento final...',
+            engine: 'whisper',
+            model: activeModel || '',
+            markModelUpdate: false
+        });
         await markSegmentStatus({ session_id: sessionId, batch_index: batchIndex, type: 'audio', status: 'processing', session_version: sessionVersion });
         const safeFinalBlobs = await splitBlobForSafeProcessing(blob, {
             sessionId,
@@ -1422,9 +1517,19 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         const isLongConsultation = sortedIndexes.length > 3 || estimatedTokens > 20000;
 
         if (isLongConsultation) {
-            setProcessingStatus(`Consultación larga detectada (${sortedIndexes.length} segmentos). Optimizando extracción...`);
+            applyProcessingState({
+                label: `Consulta larga detectada (${sortedIndexes.length} segmentos). Optimizando extracción...`,
+                engine: 'llm',
+                model: '',
+                markModelUpdate: false
+            });
         } else {
-            setProcessingStatus('Extrayendo datos clinicos de toda la consulta (Gemini)...');
+            applyProcessingState({
+                label: 'Extrayendo datos clínicos de toda la consulta...',
+                engine: 'llm',
+                model: '',
+                markModelUpdate: false
+            });
         }
 
         aiService.resetInvocationCounters(sessionId || undefined);
@@ -1623,7 +1728,11 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             });
         }
 
-        setProcessingStatus('Guardando en base de datos...');
+        applyProcessingState({
+            label: 'Guardando en base de datos...',
+            engine: 'storage',
+            model: 'storage:medical_records'
+        });
         try {
             const savedRecord = await persistPipelineRecord({
                 patientName,
@@ -1945,7 +2054,11 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                         });
                     }
                     if (status.state === 'processing_partials') {
-                        setProcessingStatus(`Procesando parciales... (${status.processedBatches.length} completados)`);
+                        applyProcessingState({
+                            label: `Procesando parciales... (${status.processedBatches.length} completados)`,
+                            engine: 'whisper',
+                            markModelUpdate: false
+                        });
                     }
                 },
                 processPartial: async ({ blob: partialBlob, batchIndex: partialIndex }) => {
@@ -1965,8 +2078,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         startConsultation: (sessionId: string, patientName: string) => {
             const keys = getApiKeys(apiKey);
             if (keys.length === 0) return;
-            const aiService = aiServiceRef.current || new AIService(keys);
-            aiServiceRef.current = aiService;
+            const aiService = ensureAiService(keys);
             const orchestrator = ensureOrchestrator(aiService);
             orchestrator.startConsultation(sessionId, patientName);
         },
@@ -1977,8 +2089,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         if (!PIPELINE_V4_ENABLED) return;
         const keys = getApiKeys(apiKey);
         if (keys.length === 0) return;
-        const aiService = aiServiceRef.current || new AIService(keys);
-        aiServiceRef.current = aiService;
+        ensureAiService(keys);
         activeSessionIdRef.current = sessionId;
         sessionVersionRef.current += 1;
         sttMetricsRef.current = {
@@ -1992,6 +2103,12 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         };
         initializeSessionRuntime(sessionId, patientName);
         setPipelineRuntimeReason('');
+        applyProcessingState({
+            label: 'Grabando consulta...',
+            engine: 'idle',
+            model: '',
+            markModelUpdate: false
+        });
         void upsertConsultationSession({
             session_id: sessionId,
             patient_name: patientName,
@@ -2023,8 +2140,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             return;
         }
 
-        const aiService = aiServiceRef.current || new AIService(keys);
-        aiServiceRef.current = aiService;
+        const aiService = ensureAiService(keys);
 
         try {
             if (isPartialBatch) {
@@ -2033,14 +2149,24 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             }
 
             setIsLoading(true);
-            setProcessingStatus('Iniciando procesamiento final...');
+            applyProcessingState({
+                label: 'Iniciando procesamiento final...',
+                engine: 'llm',
+                model: '',
+                markModelUpdate: false
+            });
             setCurrentView('result');
             setCurrentPatientName(patientName);
             await finalizePipeline(aiService, blob, patientName, batchIndex, []);
 
         } catch (error: any) {
             console.error(error);
-            setProcessingStatus('Error en el procesamiento.');
+            applyProcessingState({
+                label: 'Error en el procesamiento.',
+                engine: 'idle',
+                model: activeModel || '',
+                markModelUpdate: false
+            });
 
             logError({
                 message: error?.message || 'Unknown error processing recording',
@@ -2079,8 +2205,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             return;
         }
 
-        const aiService = aiServiceRef.current || new AIService(keys);
-        aiServiceRef.current = aiService;
+        const aiService = ensureAiService(keys);
         const orchestrator = ensureOrchestrator(aiService);
 
         const status = orchestrator.getStatus();
@@ -2143,7 +2268,12 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             setIsLoading(true);
             setCurrentView('result');
             setCurrentPatientName(patientName);
-            setProcessingStatus('Iniciando procesamiento final...');
+            applyProcessingState({
+                label: 'Iniciando procesamiento final...',
+                engine: 'llm',
+                model: '',
+                markModelUpdate: false
+            });
             const activeSessionId = orchestrator.getStatus().sessionId;
             if (activeSessionId) {
                 await saveSegment({
@@ -2171,7 +2301,12 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             clearPipelineBuffers();
         } catch (error: any) {
             console.error('[App] V4 pipeline failed:', error);
-            setProcessingStatus('Error en el procesamiento.');
+            applyProcessingState({
+                label: 'Error en el procesamiento.',
+                engine: 'idle',
+                model: activeModel || '',
+                markModelUpdate: false
+            });
             const sessionId = orchestrator.getStatus().sessionId || '';
             if (sessionId) {
                 const runId = diagnosticRunBySessionRef.current.get(sessionId);
@@ -2300,12 +2435,16 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         }
         const textSessionId = buildTextPipelineIdempotencyKey(patientName, text);
         const startedAt = Date.now();
-        const aiService = aiServiceRef.current || new AIService(keys);
-        aiServiceRef.current = aiService;
+        const aiService = ensureAiService(keys);
         setIsLoading(true);
         setCurrentView('result');
         setCurrentPatientName(patientName);
-        setProcessingStatus('Procesando transcripcion con pipeline clinico...');
+        applyProcessingState({
+            label: 'Procesando transcripcion con pipeline clinico...',
+            engine: 'llm',
+            model: '',
+            markModelUpdate: false
+        });
         MemoryService.setPipelineBusy(true);
         void enqueueAuditEvent('pipeline_run_update', {
             session_id: textSessionId,
@@ -2398,7 +2537,11 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 }
             });
 
-            setProcessingStatus('Guardando consulta de prueba en Historial...');
+            applyProcessingState({
+                label: 'Guardando consulta de prueba en Historial...',
+                engine: 'storage',
+                model: 'storage:medical_records'
+            });
             const savedRecord = await persistPipelineRecord({
                 patientName,
                 consultationType: 'test_text',
@@ -2518,10 +2661,20 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                     diagnostics: toLogDiagnostics(diagnostics)
                 }
             });
-            setProcessingStatus('Consulta de prueba guardada en Historial');
+            applyProcessingState({
+                label: 'Consulta de prueba guardada en Historial',
+                engine: 'storage',
+                model: 'storage:medical_records',
+                markModelUpdate: false
+            });
         } catch (e: any) {
             console.error(e);
-            setProcessingStatus('Error procesando texto');
+            applyProcessingState({
+                label: 'Error procesando texto',
+                engine: 'idle',
+                model: activeModel || '',
+                markModelUpdate: false
+            });
             const textErrorDetail = buildDiagnosticErrorDetail(e, {
                 stage: 'text_pipeline',
                 provider: 'pipeline',
@@ -2613,8 +2766,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         const keys = getApiKeys(apiKey);
         if (!SECTION_REGEN_ENABLED || keys.length === 0 || !transcription.trim()) return currentContent;
         try {
-            const aiService = aiServiceRef.current || new AIService(keys);
-            aiServiceRef.current = aiService;
+            const aiService = ensureAiService(keys);
             const regenerated = await aiService.regenerateHistorySection(
                 transcription,
                 currentContent,
@@ -2638,18 +2790,26 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
     const renderCurrentView = () => {
         if (currentView === 'record') {
             return (
-                <div className="view-content">
+                <div className="view-content record-view">
                     <PipelineStageTracker
                         state={pipelineStatusVm.state}
                         sttP95Ms={pipelineStatusVm.sttP95Ms}
                         sttConcurrency={pipelineStatusVm.sttConcurrency}
                         hedgeRate={pipelineStatusVm.hedgeRate}
+                        processingLabel={processingLabel}
+                        activeEngine={activeEngine}
+                        activeModel={activeModel}
+                        modelUpdatedAt={modelUpdatedAt}
                     />
                     <Recorder
                         onRecordingComplete={handleRecordingComplete}
                         onConsultationStart={handleConsultationStart}
                         canStart={canStartConsultation}
                         startBlockReason={startBlockReason}
+                        processingLabel={processingLabel}
+                        activeEngine={activeEngine}
+                        activeModel={activeModel}
+                        modelUpdatedAt={modelUpdatedAt}
                     />
                     <PipelineHealthPanel />
                 </div>
@@ -2677,7 +2837,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         if (currentView === 'reports') {
             return (
                 <Suspense fallback={<div className="view-loading">Cargando informes...</div>}>
-                    <ReportsView />
+                    <ReportsView apiKey={apiKey} />
                 </Suspense>
             );
         }
@@ -2712,6 +2872,13 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                                 orchestratorRef.current = null;
                             }
                             resetSessionRuntime();
+                            applyProcessingState({
+                                label: 'Listo para grabar',
+                                engine: 'idle',
+                                model: '',
+                                markModelUpdate: false
+                            });
+                            aiServiceRef.current?.setModelInvocationListener(undefined);
                             aiServiceRef.current = null;
                             activeSessionIdRef.current = null;
                             setCurrentRecordId(null);
@@ -2723,7 +2890,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                         onPersistMedicalHistory={persistMedicalHistory}
                         onRegenerateSection={SECTION_REGEN_ENABLED ? handleRegenerateSection : undefined}
                         onGenerateReport={async () => {
-                            const aiService = new AIService(getApiKeys(apiKey));
+                            const aiService = ensureAiService(getApiKeys(apiKey));
                             const res = await aiService.generateMedicalReport(transcription, currentPatientName);
                             return res.data;
                         }}

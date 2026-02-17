@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Search, FileText, ChevronRight, Copy, Check, Sparkles, Trash2, FileOutput, Printer, X, Calendar, User, Pencil, Save, RefreshCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { searchMedicalRecords, type MedicalRecord, deleteMedicalRecord, updateMedicalRecord, syncFromCloud } from '../services/storage';
 import { isCloudSyncEnabled } from '../hooks/useCloudSync';
 import { AIService } from '../services/ai';
+import { processDoctorFeedbackV2 } from '../services/doctor-feedback';
+import { evaluateAndPersistRuleImpactV2 } from '../services/learning/rule-evaluator';
 import ReactMarkdown from 'react-markdown';
 import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
@@ -273,6 +275,42 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
+  const queueLearningCapture = useCallback((params: {
+    source: 'search_history_save' | 'search_history_autosave' | 'report_save';
+    artifactType: 'medical_history' | 'medical_report';
+    aiText: string;
+    doctorText: string;
+    record: MedicalRecord;
+  }) => {
+    void processDoctorFeedbackV2({
+      transcription: params.record.transcription || '',
+      aiText: params.aiText || '',
+      doctorText: params.doctorText || '',
+      apiKey,
+      recordId: params.record.record_uuid,
+      auditId: params.record.audit_id,
+      source: params.source,
+      artifactType: params.artifactType,
+      allowAutosaveLearn: true
+    }).then((learningResult) => {
+      if (!learningResult?.candidate_ids?.length) return;
+      void evaluateAndPersistRuleImpactV2({
+        candidateIds: learningResult.candidate_ids,
+        aiOutput: params.aiText || '',
+        doctorOutput: params.doctorText || '',
+        source: params.source,
+        artifactType: params.artifactType,
+        metadata: {
+          record_id: params.record.record_uuid,
+          audit_id: params.record.audit_id || null,
+          learning_event_ids: learningResult.event_ids
+        }
+      });
+    }).catch((error) => {
+      console.warn('[SearchHistory] learning V2 failed:', error);
+    });
+  }, [apiKey]);
+
   // Autosave Effect
   useEffect(() => {
     if (!isEditingHistory || !selectedRecord) return;
@@ -285,6 +323,13 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           const updatedRecord = { ...selectedRecord, medical_history: editedHistory };
           setSelectedRecord(updatedRecord);
           setResults(prev => prev.map(r => r.record_uuid === selectedRecord.record_uuid ? updatedRecord : r));
+          queueLearningCapture({
+            source: 'search_history_autosave',
+            artifactType: 'medical_history',
+            aiText: selectedRecord.original_medical_history || selectedRecord.medical_history || '',
+            doctorText: editedHistory,
+            record: selectedRecord
+          });
           setLastSaved(new Date());
         } catch (error) {
           console.error("Autosave failed:", error);
@@ -295,7 +340,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
     }, 2000); // 2 second debounce
 
     return () => clearTimeout(timeoutId);
-  }, [editedHistory, isEditingHistory, selectedRecord]);
+  }, [editedHistory, isEditingHistory, queueLearningCapture, selectedRecord]);
 
   const handleSaveHistory = async () => {
     // Manual save just triggers the update immediately if needed, 
@@ -309,6 +354,13 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
         const updatedRecord = { ...selectedRecord, medical_history: editedHistory };
         setSelectedRecord(updatedRecord);
         setResults(results.map(r => r.record_uuid === selectedRecord.record_uuid ? updatedRecord : r));
+        queueLearningCapture({
+          source: 'search_history_save',
+          artifactType: 'medical_history',
+          aiText: selectedRecord.original_medical_history || selectedRecord.medical_history || '',
+          doctorText: editedHistory,
+          record: selectedRecord
+        });
         setIsEditingHistory(false);
         setLastSaved(new Date());
       } else {
@@ -331,6 +383,13 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
       if (updated && updated.length > 0) {
         setSelectedRecord({ ...selectedRecord, medical_report: reportContent });
         setResults(results.map(r => r.record_uuid === selectedRecord.record_uuid ? { ...r, medical_report: reportContent } : r));
+        queueLearningCapture({
+          source: 'report_save',
+          artifactType: 'medical_report',
+          aiText: selectedRecord.medical_report || '',
+          doctorText: reportContent,
+          record: selectedRecord
+        });
         setIsEditingReport(false);
       } else {
         alert("No se pudo guardar el informe.");

@@ -3,15 +3,20 @@ import { getTaskModels } from './model-registry';
 import { GroqService } from './groq';
 import { computeConfidenceScore, deriveDecisionType, resolveNextLifecycleState } from './learning/rule-lifecycle';
 import {
+    DoctorEditSource,
+    LearningArtifactType,
     LearningEventResult,
     LearningLifecycleState,
     LearningRuleCategory,
+    LearningSignalStrength,
     RuleCandidateRecord,
     StructuredLearningEvent
 } from './learning/types';
 import { recordLearningMetric } from './audit-worker';
 
 const ANALYZER_MODEL = getTaskModels('feedback')[0] || 'qwen/qwen3-32b';
+const LEARNING_CAPTURE_V2_ENABLED = String(import.meta.env.VITE_LEARNING_CAPTURE_V2 ?? 'true').toLowerCase() === 'true';
+const TEMPORAL_DEDUPE_WINDOW_MS = 30_000;
 
 export interface ChangeDetected {
     section: string;
@@ -38,6 +43,25 @@ export interface ImprovementLesson {
     doctor_id?: string;
     record_id?: string;
 }
+
+export interface ProcessDoctorFeedbackV2Params {
+    transcription?: string;
+    aiText: string;
+    doctorText: string;
+    apiKey?: string | string[];
+    recordId?: string;
+    auditId?: string;
+    sessionId?: string;
+    source: DoctorEditSource;
+    artifactType: LearningArtifactType;
+    allowAutosaveLearn: boolean;
+}
+
+const AUTOSAVE_SOURCES: DoctorEditSource[] = ['history_autosave', 'search_history_autosave'];
+
+const isAutosaveSource = (source: DoctorEditSource): boolean => AUTOSAVE_SOURCES.includes(source);
+
+const hashText = (value: string): string => deterministicHash(normalizeText(value || ''));
 
 export async function getLessonsFromDB(): Promise<ImprovementLesson[]> {
     if (!supabase) return [];
@@ -125,6 +149,99 @@ const similarityScore = (a: string, b: string): number => {
         if (tokensB.has(token)) intersection += 1;
     }
     return intersection / Math.max(tokensA.size, tokensB.size);
+};
+
+const levenshtein = (a: string, b: string): number => {
+    if (a === b) return 0;
+    if (!a) return b.length;
+    if (!b) return a.length;
+
+    const matrix: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+    for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
+
+    for (let i = 1; i <= a.length; i++) {
+        for (let j = 1; j <= b.length; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            matrix[i][j] = Math.min(
+                matrix[i - 1][j] + 1,
+                matrix[i][j - 1] + 1,
+                matrix[i - 1][j - 1] + cost
+            );
+        }
+    }
+    return matrix[a.length][b.length];
+};
+
+const calcEditDistanceRatio = (beforeText: string, afterText: string): number => {
+    const base = Math.max(1, beforeText.length, afterText.length);
+    return Number((levenshtein(beforeText, afterText) / base).toFixed(4));
+};
+
+const normalizeTextForTriviality = (value: string): string => value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const sortedTokenSignature = (value: string): string => normalizeTextForTriviality(value)
+    .split(' ')
+    .filter(Boolean)
+    .sort()
+    .join(' ');
+
+const isLikelyTrivialEdit = (beforeText: string, afterText: string): boolean => {
+    if (!beforeText && !afterText) return true;
+    if (beforeText === afterText) return true;
+
+    const normalizedBefore = normalizeTextForTriviality(beforeText);
+    const normalizedAfter = normalizeTextForTriviality(afterText);
+    if (normalizedBefore === normalizedAfter) return true;
+
+    if (sortedTokenSignature(beforeText) === sortedTokenSignature(afterText)) {
+        return true;
+    }
+
+    return false;
+};
+
+const inferSignalStrength = (
+    source: DoctorEditSource,
+    editDistanceRatio: number,
+    sectionsChanged: number
+): LearningSignalStrength => {
+    if (!isAutosaveSource(source)) {
+        if (editDistanceRatio >= 0.08 || sectionsChanged >= 3) return 'high';
+        if (editDistanceRatio >= 0.02 || sectionsChanged >= 1) return 'medium';
+        return 'low';
+    }
+    if (editDistanceRatio >= 0.08 || sectionsChanged >= 3) return 'medium';
+    if (editDistanceRatio >= 0.03 || sectionsChanged >= 2) return 'low';
+    return 'low';
+};
+
+const canIngestBySignalGate = (
+    source: DoctorEditSource,
+    editDistanceRatio: number,
+    sectionsChanged: number,
+    allowAutosaveLearn: boolean
+): boolean => {
+    if (isAutosaveSource(source)) {
+        if (!allowAutosaveLearn) return false;
+        return editDistanceRatio >= 0.03 || sectionsChanged >= 2;
+    }
+    return editDistanceRatio >= 0.01 || sectionsChanged >= 1;
+};
+
+const enforceArtifactCategoryPolicy = (
+    category: LearningRuleCategory,
+    artifactType: LearningArtifactType
+): LearningRuleCategory => {
+    if (artifactType === 'medical_report' && !['style', 'formatting', 'terminology'].includes(category)) {
+        return 'style';
+    }
+    return category;
 };
 
 export function detectChanges(aiHistory: string, doctorHistory: string): ChangeDetected[] {
@@ -247,7 +364,16 @@ Salida JSON:
 
 export const extractStructuredEdits = (
     aiHistory: string,
-    doctorHistory: string
+    doctorHistory: string,
+    options?: {
+        source?: string;
+        artifactType?: LearningArtifactType;
+        sourceView?: DoctorEditSource;
+        signalStrength?: LearningSignalStrength;
+        editDistanceRatio?: number;
+        sectionsChanged?: number;
+        recordUuid?: string;
+    }
 ): StructuredLearningEvent[] => {
     const changes = detectChanges(aiHistory, doctorHistory);
     return changes.map((change) => {
@@ -268,13 +394,19 @@ export const extractStructuredEdits = (
             after_value: change.edited,
             change_type: change.type,
             severity: severityByCategory[category],
-            source: 'doctor_edit',
+            source: options?.source || 'doctor_edit',
             category,
             normalized_before: normalizedBefore,
             normalized_after: normalizedAfter,
             signature_hash: signatureHash,
             metadata: {
-                section: change.section
+                section: change.section,
+                artifact_type: options?.artifactType,
+                source_view: options?.sourceView,
+                signal_strength: options?.signalStrength,
+                edit_distance_ratio: options?.editDistanceRatio,
+                sections_changed: options?.sectionsChanged,
+                record_uuid: options?.recordUuid
             }
         };
     });
@@ -355,6 +487,12 @@ export const upsertRuleCandidateFromEvent = async (
                 evidence_count: reverseEvidence,
                 contradiction_count: reverseContradiction,
                 confidence_score: reverseScore,
+                rule_json: {
+                    ...(reverse.rule_json || {}),
+                    artifact_type: event.metadata?.artifact_type || (reverse.rule_json as Record<string, unknown> | undefined)?.artifact_type || 'medical_history',
+                    source_view: event.metadata?.source_view || (reverse.rule_json as Record<string, unknown> | undefined)?.source_view || 'history_save',
+                    signal_strength: event.metadata?.signal_strength || (reverse.rule_json as Record<string, unknown> | undefined)?.signal_strength || 'medium'
+                },
                 updated_at: new Date().toISOString(),
                 last_seen_at: new Date().toISOString()
             })
@@ -388,6 +526,12 @@ export const upsertRuleCandidateFromEvent = async (
                 evidence_count: nextEvidence,
                 confidence_score: nextConfidence,
                 lifecycle_state: nextState,
+                rule_json: {
+                    ...(existing.rule_json || {}),
+                    artifact_type: event.metadata?.artifact_type || (existing.rule_json as Record<string, unknown> | undefined)?.artifact_type || 'medical_history',
+                    source_view: event.metadata?.source_view || (existing.rule_json as Record<string, unknown> | undefined)?.source_view || 'history_save',
+                    signal_strength: event.metadata?.signal_strength || (existing.rule_json as Record<string, unknown> | undefined)?.signal_strength || 'medium'
+                },
                 last_seen_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
                 metrics_snapshot: {
@@ -430,7 +574,10 @@ export const upsertRuleCandidateFromEvent = async (
             before: event.before_value,
             after: event.after_value,
             source: event.source,
-            category: event.category
+            category: event.category,
+            artifact_type: event.metadata?.artifact_type || 'medical_history',
+            source_view: event.metadata?.source_view || 'history_save',
+            signal_strength: event.metadata?.signal_strength || 'medium'
         },
         category: event.category,
         evidence_count: 1,
@@ -456,7 +603,52 @@ export const upsertRuleCandidateFromEvent = async (
     };
 };
 
-export async function processDoctorFeedback(
+const wasRecentlyPersisted = async (
+    event: StructuredLearningEvent,
+    source: DoctorEditSource,
+    afterHash: string
+): Promise<boolean> => {
+    if (!supabase) return false;
+    const { data } = await supabase
+        .from('ai_learning_events')
+        .select('created_at, metadata')
+        .eq('signature_hash', event.signature_hash)
+        .eq('source', source)
+        .order('created_at', { ascending: false })
+        .limit(6);
+
+    const nowMs = Date.now();
+    return Boolean(data?.some((row) => {
+        const rowCreatedAt = Date.parse(String(row.created_at || ''));
+        if (!Number.isFinite(rowCreatedAt) || nowMs - rowCreatedAt > TEMPORAL_DEDUPE_WINDOW_MS) {
+            return false;
+        }
+        const metadata = (row.metadata || {}) as Record<string, unknown>;
+        return String(metadata.after_hash || '') === afterHash;
+    }));
+};
+
+const isDuplicateLearnedState = async (
+    recordId: string | undefined,
+    artifactType: LearningArtifactType,
+    finalTextHash: string
+): Promise<boolean> => {
+    if (!supabase || !recordId) return false;
+    const { data } = await supabase
+        .from('ai_learning_events')
+        .select('metadata')
+        .eq('record_id', recordId)
+        .order('created_at', { ascending: false })
+        .limit(25);
+
+    return Boolean(data?.find((row) => {
+        const metadata = (row.metadata || {}) as Record<string, unknown>;
+        return String(metadata.artifact_type || '') === artifactType
+            && String(metadata.final_text_hash || '') === finalTextHash;
+    }));
+};
+
+const processDoctorFeedbackLegacy = async (
     transcription: string,
     aiHistory: string,
     doctorHistory: string,
@@ -464,7 +656,7 @@ export async function processDoctorFeedback(
     recordId?: string,
     auditId?: string,
     sessionId?: string
-): Promise<LearningEventResult | null> {
+): Promise<LearningEventResult | null> => {
     if (!supabase) return null;
 
     const changes = detectChanges(aiHistory, doctorHistory);
@@ -571,6 +763,247 @@ export async function processDoctorFeedback(
         candidate_ids: candidateIds,
         structured_events: structuredEdits
     };
+};
+
+export const processDoctorFeedbackV2 = async (
+    params: ProcessDoctorFeedbackV2Params
+): Promise<LearningEventResult | null> => {
+    if (!LEARNING_CAPTURE_V2_ENABLED) {
+        return processDoctorFeedbackLegacy(
+            params.transcription || '',
+            params.aiText,
+            params.doctorText,
+            params.apiKey || '',
+            params.recordId,
+            params.auditId,
+            params.sessionId
+        );
+    }
+    if (!supabase) return null;
+
+    const aiText = params.aiText || '';
+    const doctorText = params.doctorText || '';
+    const changes = detectChanges(aiText, doctorText);
+    if (changes.length === 0) return null;
+
+    const editDistanceRatio = calcEditDistanceRatio(aiText, doctorText);
+    const sectionsChanged = changes.length;
+    if (!canIngestBySignalGate(params.source, editDistanceRatio, sectionsChanged, params.allowAutosaveLearn)) {
+        recordLearningMetric('learning_events_dropped_noise');
+        return null;
+    }
+
+    if (isLikelyTrivialEdit(aiText, doctorText)) {
+        recordLearningMetric('learning_events_dropped_noise');
+        return null;
+    }
+
+    const finalTextHash = hashText(doctorText);
+    if (await isDuplicateLearnedState(params.recordId, params.artifactType, finalTextHash)) {
+        recordLearningMetric('learning_events_deduped');
+        return null;
+    }
+
+    const signalStrength = inferSignalStrength(params.source, editDistanceRatio, sectionsChanged);
+    const changeCategoryHints = changes.map((change) => categorizeDeterministically(change));
+    const unresolvedCount = changeCategoryHints.filter((value) => !value).length;
+    const uniqueDeterministic = new Set(changeCategoryHints.filter((value): value is LearningRuleCategory => Boolean(value)));
+    const shouldUseAIClassifier = Boolean(params.apiKey) && (unresolvedCount > 0 || uniqueDeterministic.size > 1);
+
+    let aiSummary = '';
+    let aiCategory: LearningRuleCategory | undefined;
+    if (shouldUseAIClassifier) {
+        try {
+            const analysis = await analyzeChangesWithAI(changes, params.apiKey as string | string[]);
+            aiSummary = analysis.summary;
+            aiCategory = analysis.category;
+        } catch (error) {
+            console.warn('[doctor-feedback] AI analysis unavailable for V2, using deterministic categories:', error);
+        }
+    }
+
+    const structuredEdits = extractStructuredEdits(aiText, doctorText, {
+        source: params.source,
+        artifactType: params.artifactType,
+        sourceView: params.source,
+        signalStrength,
+        editDistanceRatio,
+        sectionsChanged,
+        recordUuid: params.recordId
+    }).map((event) => normalizeLearningEvent(event, {
+        recordId: params.recordId,
+        auditId: params.auditId,
+        sessionId: params.sessionId
+    }));
+
+    const eventIds: string[] = [];
+    const candidateIds: string[] = [];
+    const acceptedStructuredEvents: StructuredLearningEvent[] = [];
+    let firstLifecycleState: LearningLifecycleState | undefined;
+    let dedupedCount = 0;
+
+    for (let index = 0; index < structuredEdits.length; index++) {
+        const event = structuredEdits[index];
+        const deterministicCategory = changeCategoryHints[index] || null;
+        const effectiveCategory = enforceArtifactCategoryPolicy(
+            deterministicCategory || aiCategory || event.category,
+            params.artifactType
+        );
+        const change = changes[index] || changes[0];
+        const ruleSummary = deterministicCategory
+            ? summarizeRuleText(change, effectiveCategory)
+            : (aiSummary || summarizeRuleText(change, effectiveCategory));
+        const normalizedEvent: StructuredLearningEvent = {
+            ...event,
+            category: effectiveCategory,
+            severity: severityByCategory[effectiveCategory],
+            signature_hash: deterministicHash([
+                normalizeHeader(event.section),
+                event.normalized_before,
+                event.normalized_after,
+                effectiveCategory
+            ].join('|'))
+        };
+
+        const afterHash = hashText(normalizedEvent.after_value);
+        const isTemporalDuplicate = await wasRecentlyPersisted(normalizedEvent, params.source, afterHash);
+        if (isTemporalDuplicate) {
+            dedupedCount += 1;
+            continue;
+        }
+
+        const metadata = {
+            ...(normalizedEvent.metadata || {}),
+            artifact_type: params.artifactType,
+            source_view: params.source,
+            signal_strength: signalStrength,
+            edit_distance_ratio: editDistanceRatio,
+            sections_changed: sectionsChanged,
+            record_uuid: params.recordId,
+            after_hash: afterHash,
+            final_text_hash: finalTextHash
+        };
+
+        const { data: createdEvent } = await supabase
+            .from('ai_learning_events')
+            .insert([{
+                record_id: normalizedEvent.record_id,
+                audit_id: normalizedEvent.audit_id,
+                session_id: normalizedEvent.session_id,
+                section: normalizedEvent.section,
+                field_path: normalizedEvent.field_path,
+                before_value: normalizedEvent.before_value,
+                after_value: normalizedEvent.after_value,
+                change_type: normalizedEvent.change_type,
+                severity: normalizedEvent.severity,
+                source: params.source,
+                category: normalizedEvent.category,
+                normalized_before: normalizedEvent.normalized_before,
+                normalized_after: normalizedEvent.normalized_after,
+                signature_hash: normalizedEvent.signature_hash,
+                metadata
+            }])
+            .select('id')
+            .maybeSingle();
+
+        if (createdEvent?.id) {
+            eventIds.push(createdEvent.id);
+            acceptedStructuredEvents.push({
+                ...normalizedEvent,
+                metadata
+            });
+        }
+
+        const candidate = await upsertRuleCandidateFromEvent(
+            {
+                ...normalizedEvent,
+                metadata
+            },
+            ruleSummary
+        );
+        if (candidate.candidate_id) candidateIds.push(candidate.candidate_id);
+        if (!firstLifecycleState && candidate.lifecycle_state) firstLifecycleState = candidate.lifecycle_state;
+
+        const isFormat = effectiveCategory === 'formatting' || effectiveCategory === 'style';
+        const similarLessons = await supabase
+            .from('ai_improvement_lessons')
+            .select('lesson_summary, recurrence_count')
+            .neq('status', 'rejected')
+            .order('created_at', { ascending: false })
+            .limit(20);
+        const similar = similarLessons.data?.find((lesson) => similarityScore(String(lesson.lesson_summary || ''), ruleSummary) >= 0.6);
+        const recurrenceCount = similar ? Number(similar.recurrence_count || 1) + 1 : 1;
+
+        await supabase.from('ai_improvement_lessons').insert([{
+            original_transcription: params.transcription || '',
+            ai_generated_history: aiText,
+            doctor_edited_history: doctorText,
+            changes_detected: changes,
+            lesson_summary: ruleSummary,
+            improvement_category: effectiveCategory === 'clinical' ? 'missing_data' : effectiveCategory,
+            is_format: isFormat,
+            status: candidate.lifecycle_state ? stateToLessonStatus(candidate.lifecycle_state) : 'learning',
+            recurrence_count: recurrenceCount,
+            record_id: params.recordId,
+            last_seen_at: new Date().toISOString()
+        }]);
+    }
+
+    if (dedupedCount > 0) {
+        recordLearningMetric('learning_events_deduped', dedupedCount);
+    }
+    if (eventIds.length === 0) return null;
+
+    recordLearningMetric('learning_events_ingested', eventIds.length);
+    if (isAutosaveSource(params.source)) {
+        recordLearningMetric('learning_events_from_autosave', eventIds.length);
+    } else {
+        recordLearningMetric('learning_events_from_manual', eventIds.length);
+    }
+
+    return {
+        event_id: eventIds[0],
+        candidate_id: candidateIds[0],
+        lifecycle_state: firstLifecycleState,
+        event_ids: eventIds,
+        candidate_ids: candidateIds,
+        structured_events: acceptedStructuredEvents
+    };
+};
+
+export async function processDoctorFeedback(
+    transcription: string,
+    aiHistory: string,
+    doctorHistory: string,
+    groqApiKey: string | string[],
+    recordId?: string,
+    auditId?: string,
+    sessionId?: string
+): Promise<LearningEventResult | null> {
+    if (LEARNING_CAPTURE_V2_ENABLED) {
+        return processDoctorFeedbackV2({
+            transcription,
+            aiText: aiHistory,
+            doctorText: doctorHistory,
+            apiKey: groqApiKey,
+            recordId,
+            auditId,
+            sessionId,
+            source: 'history_save',
+            artifactType: 'medical_history',
+            allowAutosaveLearn: false
+        });
+    }
+
+    return processDoctorFeedbackLegacy(
+        transcription,
+        aiHistory,
+        doctorHistory,
+        groqApiKey,
+        recordId,
+        auditId,
+        sessionId
+    );
 }
 
 export async function getRelevantLessonsForPrompt(): Promise<string> {

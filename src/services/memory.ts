@@ -2,7 +2,7 @@
 import { getTaskModels } from './model-registry';
 import { recordLearningMetric } from './audit-worker';
 import type { ConsultationClassification } from './groq';
-import type { RulePack, RulePackContext, RulePackRule } from './learning/types';
+import type { LearningArtifactType, RulePack, RulePackContext, RulePackRule } from './learning/types';
 
 const MEMORY_MODEL = getTaskModels('memory')[0] || 'llama-3.3-70b-versatile';
 const RULEPACK_APPLY_ENABLED = String(import.meta.env.VITE_RULEPACK_APPLY_ENABLED ?? 'true').toLowerCase() === 'true';
@@ -74,6 +74,19 @@ export class MemoryService {
         return 'style';
     }
 
+    private static resolveRuleArtifactType(ruleJson: Record<string, unknown> | null | undefined): LearningArtifactType {
+        const raw = String(
+            ruleJson?.artifact_type
+            || (ruleJson?.metadata as Record<string, unknown> | undefined)?.artifact_type
+            || ''
+        ).toLowerCase();
+        return raw === 'medical_report' ? 'medical_report' : 'medical_history';
+    }
+
+    private static isPreferredClinicalCategory(category: string): boolean {
+        return ['clinical', 'missing_data', 'hallucination', 'terminology'].includes(String(category || '').toLowerCase());
+    }
+
     private static buildRulePriority(rule: {
         confidence_score?: number;
         category?: string;
@@ -131,7 +144,7 @@ export class MemoryService {
             .limit(limit);
 
         if (error || !data) return [];
-        return data as Array<{
+        const rows = data as Array<{
             id: string;
             rule_text: string;
             rule_json: Record<string, unknown>;
@@ -141,6 +154,8 @@ export class MemoryService {
             last_seen_at: string;
             updated_at: string;
         }>;
+
+        return rows.filter((rule) => MemoryService.resolveRuleArtifactType(rule.rule_json) === 'medical_history');
     }
 
     private static async ensureActiveRulePack(rules: RulePackRule[]): Promise<{ id: string; version: number }> {
@@ -225,10 +240,25 @@ export class MemoryService {
                 updated_at: rule.updated_at
             }));
 
-            await MemoryService.ensureActiveRulePack(mappedRules);
+            const prioritizedRules = mappedRules
+                .filter((rule) => {
+                    if (MemoryService.isPreferredClinicalCategory(rule.category)) return true;
+                    if (rule.category === 'style' || rule.category === 'formatting') {
+                        return Number(rule.confidence || 0) >= 0.72;
+                    }
+                    return false;
+                })
+                .sort((a, b) => {
+                    const aPreferred = MemoryService.isPreferredClinicalCategory(a.category) ? 1 : 0;
+                    const bPreferred = MemoryService.isPreferredClinicalCategory(b.category) ? 1 : 0;
+                    if (aPreferred !== bPreferred) return bPreferred - aPreferred;
+                    return b.priority - a.priority;
+                });
+
+            await MemoryService.ensureActiveRulePack(prioritizedRules);
 
             // Keep legacy long-term memory synchronized as plain text fallback.
-            const legacySummary = mappedRules
+            const legacySummary = prioritizedRules
                 .sort((a, b) => b.priority - a.priority)
                 .slice(0, 80)
                 .map((rule) => `- [${rule.category}] ${rule.text}`)
@@ -246,10 +276,10 @@ export class MemoryService {
                     .update({
                         global_rules: legacySummary,
                         global_rules_json: {
-                            terminology: mappedRules.filter((r) => r.category === 'terminology').map((r) => r.text),
-                            formatting: mappedRules.filter((r) => r.category === 'formatting').map((r) => r.text),
-                            style: mappedRules.filter((r) => r.category === 'style').map((r) => r.text),
-                            clinical: mappedRules.filter((r) => r.category === 'clinical' || r.category === 'missing_data' || r.category === 'hallucination').map((r) => r.text)
+                            terminology: prioritizedRules.filter((r) => r.category === 'terminology').map((r) => r.text),
+                            formatting: prioritizedRules.filter((r) => r.category === 'formatting').map((r) => r.text),
+                            style: prioritizedRules.filter((r) => r.category === 'style').map((r) => r.text),
+                            clinical: prioritizedRules.filter((r) => r.category === 'clinical' || r.category === 'missing_data' || r.category === 'hallucination').map((r) => r.text)
                         },
                         last_consolidated_at: new Date().toISOString()
                     })
@@ -258,10 +288,10 @@ export class MemoryService {
                 await supabase.from('ai_long_term_memory').insert([{
                     global_rules: legacySummary,
                     global_rules_json: {
-                        terminology: mappedRules.filter((r) => r.category === 'terminology').map((r) => r.text),
-                        formatting: mappedRules.filter((r) => r.category === 'formatting').map((r) => r.text),
-                        style: mappedRules.filter((r) => r.category === 'style').map((r) => r.text),
-                        clinical: mappedRules.filter((r) => r.category === 'clinical' || r.category === 'missing_data' || r.category === 'hallucination').map((r) => r.text)
+                        terminology: prioritizedRules.filter((r) => r.category === 'terminology').map((r) => r.text),
+                        formatting: prioritizedRules.filter((r) => r.category === 'formatting').map((r) => r.text),
+                        style: prioritizedRules.filter((r) => r.category === 'style').map((r) => r.text),
+                        clinical: prioritizedRules.filter((r) => r.category === 'clinical' || r.category === 'missing_data' || r.category === 'hallucination').map((r) => r.text)
                     },
                     last_consolidated_at: new Date().toISOString()
                 }]);
@@ -313,8 +343,20 @@ export class MemoryService {
                     ...rule,
                     priority: MemoryService.buildRulePriority(rule, { section, classification })
                 }))
-                .filter((rule) => rule.priority > 0)
-                .sort((a, b) => b.priority - a.priority);
+                .filter((rule) => {
+                    if (rule.priority <= 0) return false;
+                    if (MemoryService.isPreferredClinicalCategory(rule.category)) return true;
+                    if (rule.category === 'style' || rule.category === 'formatting') {
+                        return Number(rule.confidence_score || 0) >= 0.72;
+                    }
+                    return false;
+                })
+                .sort((a, b) => {
+                    const aPreferred = MemoryService.isPreferredClinicalCategory(a.category) ? 1 : 0;
+                    const bPreferred = MemoryService.isPreferredClinicalCategory(b.category) ? 1 : 0;
+                    if (aPreferred !== bPreferred) return bPreferred - aPreferred;
+                    return b.priority - a.priority;
+                });
 
             const applied: RulePackRule[] = [];
             const lines: string[] = [];

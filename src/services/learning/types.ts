@@ -6,6 +6,26 @@ export type LearningChangeType = 'added' | 'removed' | 'modified';
 
 export type LearningSeverity = 'low' | 'medium' | 'high' | 'critical';
 
+export type DoctorEditSource =
+    | 'history_save'
+    | 'history_autosave'
+    | 'search_history_save'
+    | 'search_history_autosave'
+    | 'report_save';
+
+export type LearningArtifactType = 'medical_history' | 'medical_report';
+
+export type LearningSignalStrength = 'low' | 'medium' | 'high';
+
+export interface LearningEventMetadata extends Record<string, unknown> {
+    artifact_type?: LearningArtifactType;
+    source_view?: DoctorEditSource;
+    signal_strength?: LearningSignalStrength;
+    edit_distance_ratio?: number;
+    sections_changed?: number;
+    record_uuid?: string;
+}
+
 export interface StructuredLearningEvent {
     id?: string;
     record_id?: string;
@@ -22,7 +42,7 @@ export interface StructuredLearningEvent {
     normalized_before: string;
     normalized_after: string;
     signature_hash: string;
-    metadata?: Record<string, unknown>;
+    metadata?: LearningEventMetadata;
     created_at?: string;
 }
 

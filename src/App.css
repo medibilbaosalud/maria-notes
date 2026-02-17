@@ -41,6 +41,14 @@
     padding-right: var(--space-2);
 }
 
+.view-content.record-view {
+    max-width: 1220px;
+    margin: 0 auto;
+    width: 100%;
+    gap: var(--space-5);
+    padding-right: 0;
+}
+
 .view-content > * {
     animation: viewFadeSlide var(--motion-duration-normal) var(--motion-ease-base) both;
 }
@@ -117,6 +125,88 @@
     align-items: center;
     color: var(--text-secondary);
     font-size: 0.74rem;
+}
+
+.stage-live-row {
+    margin-top: 0.6rem;
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-md);
+    background: rgba(248, 250, 252, 0.9);
+    padding: 0.42rem 0.58rem;
+    transition: border-color var(--motion-duration-fast) var(--motion-ease-base),
+        box-shadow var(--motion-duration-fast) var(--motion-ease-base);
+}
+
+.stage-live-row.updated {
+    border-color: rgba(2, 132, 199, 0.34);
+    box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.12);
+}
+
+.stage-live-label {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.28rem;
+}
+
+.stage-live-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.engine-pill {
+    padding: 0.15rem 0.52rem;
+    border-radius: var(--radius-full);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    background: rgba(15, 23, 42, 0.08);
+    color: var(--text-primary);
+}
+
+.engine-pill.whisper {
+    background: rgba(14, 116, 144, 0.14);
+    color: #075985;
+}
+
+.engine-pill.gemini {
+    background: rgba(37, 99, 235, 0.14);
+    color: #1d4ed8;
+}
+
+.engine-pill.groq,
+.engine-pill.llm {
+    background: rgba(2, 132, 199, 0.14);
+    color: #0c4a6e;
+}
+
+.engine-pill.storage {
+    background: rgba(20, 83, 45, 0.12);
+    color: #14532d;
+}
+
+.engine-pill.idle {
+    background: rgba(15, 23, 42, 0.08);
+    color: #334155;
+}
+
+.model-chip {
+    display: block;
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border-radius: var(--radius-full);
+    border: 1px solid rgba(2, 132, 199, 0.2);
+    padding: 0.15rem 0.52rem;
+    font-size: 0.67rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.92);
 }
 
 .state-pill {
@@ -222,9 +312,17 @@
     .view-content {
         gap: var(--space-4);
     }
+
+    .view-content.record-view {
+        max-width: 100%;
+    }
 }
 
 @media (max-width: 1024px) {
+    .view-content.record-view {
+        gap: var(--space-4);
+    }
+
     .whats-new-trigger {
         top: 0.4rem;
         padding: 0.4rem 0.68rem;

@@ -29,6 +29,10 @@ export interface AuditWorkerMetricsSnapshot {
     retries_scheduled: number;
     dead_letters: number;
     learning_events_ingested: number;
+    learning_events_dropped_noise: number;
+    learning_events_deduped: number;
+    learning_events_from_autosave: number;
+    learning_events_from_manual: number;
     rule_promotions: number;
     rule_rollbacks: number;
     rule_conflict_incidents: number;
@@ -45,6 +49,10 @@ const defaultMetricsSnapshot = (): AuditWorkerMetricsSnapshot => ({
     retries_scheduled: 0,
     dead_letters: 0,
     learning_events_ingested: 0,
+    learning_events_dropped_noise: 0,
+    learning_events_deduped: 0,
+    learning_events_from_autosave: 0,
+    learning_events_from_manual: 0,
     rule_promotions: 0,
     rule_rollbacks: 0,
     rule_conflict_incidents: 0,
@@ -116,6 +124,10 @@ export const getAuditWorkerMetricsSnapshot = (): AuditWorkerMetricsSnapshot => (
 export const recordLearningMetric = (
     metric:
         | 'learning_events_ingested'
+        | 'learning_events_dropped_noise'
+        | 'learning_events_deduped'
+        | 'learning_events_from_autosave'
+        | 'learning_events_from_manual'
         | 'rule_promotions'
         | 'rule_rollbacks'
         | 'rule_conflict_incidents'

@@ -14,10 +14,29 @@ import { isCloudSyncEnabled } from '../hooks/useCloudSync';
 import type { ConsultationClassification, ExtractionMeta, ExtractionResult } from './groq';
 
 export type { MedicalRecord };
+export interface PatientNameSuggestion {
+    name: string;
+    normalized: string;
+    uses: number;
+    lastUsedAt: string;
+    score: number;
+}
+
 const PIPELINE_ARTIFACT_RETENTION_MS = 24 * 60 * 60 * 1000;
 const nowIso = () => new Date().toISOString();
 
 const getCloudClient = () => (supabase && isCloudSyncEnabled() ? supabase : null);
+
+const normalizePatientName = (value: string): string =>
+    value
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toLowerCase();
+
+const isTechnicalPatientName = (value: string): boolean => {
+    const normalized = normalizePatientName(value).toUpperCase();
+    return normalized.startsWith('TEST_LAB_') || normalized.startsWith('DIAG_');
+};
 
 const generateUuid = (): string => {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -144,6 +163,69 @@ export const searchMedicalRecords = async (query: string): Promise<MedicalRecord
         );
     } catch (error) {
         console.error('Error searching records:', error);
+        return [];
+    }
+};
+
+export const getPatientNameSuggestions = async (
+    query: string,
+    limit: number = 8
+): Promise<PatientNameSuggestion[]> => {
+    try {
+        const normalizedQuery = normalizePatientName(query);
+        const rows = await db.medical_records.orderBy('updated_at').reverse().toArray();
+        const buckets = new Map<string, PatientNameSuggestion>();
+
+        rows.forEach((record, index) => {
+            const rawName = (record.patient_name || '').trim();
+            if (!rawName || isTechnicalPatientName(rawName)) return;
+
+            const normalizedName = normalizePatientName(rawName);
+            if (!normalizedName) return;
+
+            const lastUsedAt = record.updated_at || record.created_at || nowIso();
+            const recencyBonus = Math.max(0, 80 - index);
+            const baseScore = normalizedQuery
+                ? normalizedName === normalizedQuery
+                    ? 1000
+                    : normalizedName.startsWith(normalizedQuery)
+                        ? 350
+                        : normalizedName.includes(normalizedQuery)
+                            ? 120
+                            : 0
+                : 40;
+
+            if (normalizedQuery && baseScore === 0) return;
+
+            const current = buckets.get(normalizedName);
+            if (!current) {
+                buckets.set(normalizedName, {
+                    name: rawName,
+                    normalized: normalizedName,
+                    uses: 1,
+                    lastUsedAt,
+                    score: baseScore + recencyBonus + 10
+                });
+                return;
+            }
+
+            current.uses += 1;
+            if (lastUsedAt > current.lastUsedAt) {
+                current.lastUsedAt = lastUsedAt;
+                current.name = rawName;
+            }
+            current.score = Math.max(current.score, baseScore + recencyBonus) + 10;
+        });
+
+        return Array.from(buckets.values())
+            .sort((a, b) => {
+                if (b.score !== a.score) return b.score - a.score;
+                if (b.lastUsedAt !== a.lastUsedAt) return b.lastUsedAt.localeCompare(a.lastUsedAt);
+                return a.name.localeCompare(b.name);
+            })
+            .slice(0, Math.max(1, limit));
+    } catch (error) {
+        console.error('Error getting patient suggestions:', error);
         return [];
     }
 };
