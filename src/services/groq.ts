@@ -59,6 +59,21 @@ const DEFAULT_HISTORY_TEMPLATE = `Usa EXACTAMENTE este formato (Markdown). No aÃ
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+const buildAudioUploadFileName = (blob: Blob): string => {
+    const mime = (blob.type || '').toLowerCase();
+    if (mime.includes('wav') || mime.includes('wave') || mime.includes('x-wav')) return 'audio.wav';
+    if (mime.includes('flac')) return 'audio.flac';
+    if (mime.includes('ogg')) return 'audio.ogg';
+    if (mime.includes('mpga')) return 'audio.mpga';
+    if (mime.includes('mpeg') || mime.includes('mp3')) return 'audio.mp3';
+    if (mime.includes('m4a')) return 'audio.m4a';
+    if (mime.includes('mp4') || mime.includes('aac')) return 'audio.mp4';
+    if (mime.includes('webm')) return 'audio.webm';
+    // Keep webm as default for unknown recorder blobs; this matches our
+    // capture pipeline behavior and avoids ambiguous "audio.bin" uploads.
+    return 'audio.webm';
+};
+
 class ModelRateLimiter {
     private windows: Map<string, { windowStart: number; tokens: number; requests: number }> = new Map();
 
@@ -1460,8 +1475,7 @@ ${schemaHint}`;
     }
 
     private async _transcribeWithBlob(audioBlob: Blob, options: TranscriptionOptions = {}): Promise<{ text: string; model: string }> {
-        const isWav = audioBlob.type?.includes('wav');
-        const fileName = isWav ? 'audio.wav' : 'audio.webm';
+        const fileName = buildAudioUploadFileName(audioBlob);
         return this.executeWithFallback(async (apiKey) => {
             const allModels = options.whisperStrict
                 ? ['whisper-large-v3-turbo', 'whisper-large-v3']

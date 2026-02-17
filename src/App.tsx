@@ -34,7 +34,7 @@ import { WhatsNewModal } from './components/WhatsNewModal';
 import { OnboardingModal } from './components/OnboardingModal';
 import { SimulationProvider, useSimulation } from './components/Simulation/SimulationContext';
 import { SimulationOverlay } from './components/Simulation/SimulationOverlay';
-import { normalizeAndChunkAudio } from './utils/audioProcessing';
+import { convertBlobToWav } from './utils/audioProcessing';
 import { PipelineStageTracker } from './components/PipelineStageTracker';
 import { usePipelineStatusViewModel } from './features/ui/usePipelineStatusViewModel';
 import { usePipelineController } from './features/pipeline/usePipelineController';
@@ -56,7 +56,7 @@ const LessonsPanel = lazy(() => import('./components/LessonsPanel'));
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '';
 const PIPELINE_V4_ENABLED = String(import.meta.env.VITE_PIPELINE_V4_ENABLED || 'true').toLowerCase() === 'true';
 const MAX_SAFE_AUDIO_BLOB_BYTES = 20 * 1024 * 1024;
-const SAFE_BINARY_SPLIT_MIME_HINTS = ['wav', 'wave', 'pcm', 'x-wav', 'l16'];
+
 const LEARNING_V2_ENABLED = String(import.meta.env.VITE_LEARNING_V2_ENABLED || 'true').toLowerCase() === 'true';
 const RULEPACK_APPLY_ENABLED = String(import.meta.env.VITE_RULEPACK_APPLY_ENABLED || 'true').toLowerCase() === 'true';
 const RULE_AUTO_PROMOTE_ENABLED = String(import.meta.env.VITE_RULE_AUTO_PROMOTE_ENABLED || 'true').toLowerCase() === 'true';
@@ -143,10 +143,35 @@ const getInitialApiKey = () => {
     return safeGetLocalStorage('groq_api_key', GROQ_API_KEY);
 };
 
-const canSafelyBinarySplitAudio = (blob: Blob): boolean => {
+// canSafelyBinarySplitAudio removed — all audio is pre-converted to WAV now
+
+const hasHeaderSignature = (header: Uint8Array, signature: number[], offset = 0): boolean => {
+    if (header.length < offset + signature.length) return false;
+    for (let i = 0; i < signature.length; i += 1) {
+        if (header[offset + i] !== signature[i]) return false;
+    }
+    return true;
+};
+
+const isLikelyContainerValid = async (blob: Blob): Promise<boolean> => {
+    if (!blob || blob.size <= 0) return false;
+    const header = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
     const mime = (blob.type || '').toLowerCase();
-    if (!mime) return false;
-    return SAFE_BINARY_SPLIT_MIME_HINTS.some((hint) => mime.includes(hint));
+
+    if (mime.includes('webm')) {
+        // EBML header
+        return hasHeaderSignature(header, [0x1A, 0x45, 0xDF, 0xA3]);
+    }
+    if (mime.includes('wav') || mime.includes('wave') || mime.includes('x-wav')) {
+        // "RIFF" ... "WAVE"
+        return hasHeaderSignature(header, [0x52, 0x49, 0x46, 0x46], 0)
+            && hasHeaderSignature(header, [0x57, 0x41, 0x56, 0x45], 8);
+    }
+    if (mime.includes('ogg')) {
+        return hasHeaderSignature(header, [0x4F, 0x67, 0x67, 0x53]);
+    }
+    // For other supported formats we do a minimum sanity check on payload size.
+    return blob.size >= 1024;
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -671,7 +696,14 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         if (runId) {
             recordDiagnosticEvent(runId, { type: 'stage_start', stage: splitStage });
         }
-        if (blob.size <= MAX_SAFE_AUDIO_BLOB_BYTES) {
+
+        // Always convert to WAV before Whisper to avoid HTTP 400 on webm/opus.
+        // convertBlobToWav handles chunking for oversized blobs and yields to
+        // the main thread during encoding to prevent UI freezes.
+        const isAlreadyWav = (blob.type || '').toLowerCase().includes('wav');
+
+        if (isAlreadyWav && blob.size <= MAX_SAFE_AUDIO_BLOB_BYTES) {
+            // Already WAV and small enough - pass through
             if (runId) {
                 recordDiagnosticEvent(runId, {
                     type: 'stage_end',
@@ -681,10 +713,11 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             }
             return [blob];
         }
-        let normalizeFallbackError: unknown = null;
+
         try {
-            const chunks = await normalizeAndChunkAudio(blob);
-            if (chunks.length > 0) {
+            const wavChunks = await convertBlobToWav(blob);
+            if (wavChunks.length > 0) {
+                console.log(`[App] Pre-converted ${(blob.size / 1024).toFixed(0)}KB ${blob.type || 'unknown'} → ${wavChunks.length} WAV chunk(s)`);
                 if (runId) {
                     recordDiagnosticEvent(runId, {
                         type: 'stage_end',
@@ -692,70 +725,49 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                         status: 'passed'
                     });
                 }
-                return chunks;
+                return wavChunks;
             }
-            normalizeFallbackError = new Error('normalize_and_chunk_returned_empty');
-        } catch (error) {
-            normalizeFallbackError = error;
-        }
-
-        if (!canSafelyBinarySplitAudio(blob)) {
-            const blockedError = new Error('unsafe_binary_split_blocked');
-            const errorDetail = buildDiagnosticErrorDetail(normalizeFallbackError || blockedError, {
-                stage: splitStage,
-                provider: 'client',
-                operation: 'split_blob',
-                mimeType: blob.type,
-                chunkBytes: blob.size,
-                inputType: 'audio',
-                codeOverride: 'unsafe_binary_split_blocked',
-                phase: 'stt',
-                origin: 'pipeline_policy',
-                blocking: true
-            });
+            throw new Error('audio_preconversion_empty');
+        } catch (convError) {
+            console.warn('[App] WAV pre-conversion failed, trying validated raw fallback:', convError);
             if (runId) {
+                const errorDetail = buildDiagnosticErrorDetail(convError, {
+                    stage: splitStage,
+                    provider: 'client',
+                    operation: 'convertBlobToWav',
+                    mimeType: blob.type,
+                    chunkBytes: blob.size,
+                    inputType: 'audio',
+                    phase: 'stt',
+                    origin: 'sanitizer',
+                    blocking: true
+                });
                 recordDiagnosticEvent(runId, {
                     type: 'stage_end',
                     stage: splitStage,
-                    status: 'failed',
+                    status: 'degraded',
                     error_code: errorDetail.code,
                     error_message: errorDetail.message,
                     error_detail: errorDetail
                 });
             }
-            throw blockedError;
-        }
 
-        console.warn('[App] normalizeAndChunkAudio failed, falling back to binary split:', normalizeFallbackError);
-        const chunks: Blob[] = [];
-        let start = 0;
-        while (start < blob.size) {
-            const end = Math.min(blob.size, start + MAX_SAFE_AUDIO_BLOB_BYTES);
-            chunks.push(blob.slice(start, end, blob.type));
-            start = end;
+            // Resilience fallback: if conversion fails, try raw upload only when
+            // payload looks like a valid container and remains below safe limits.
+            if (blob.size <= MAX_SAFE_AUDIO_BLOB_BYTES) {
+                try {
+                    const likelyValid = await isLikelyContainerValid(blob);
+                    if (likelyValid) {
+                        console.warn('[App] Falling back to raw audio upload after pre-conversion failure');
+                        return [blob];
+                    }
+                } catch (signatureError) {
+                    console.warn('[App] Raw container signature validation failed:', signatureError);
+                }
+            }
+
+            throw new Error(`audio_preconversion_failed:${(convError as Error)?.message || 'unknown'}`);
         }
-        const fallbackErrorDetail = buildDiagnosticErrorDetail(normalizeFallbackError, {
-            stage: splitStage,
-            provider: 'client',
-            operation: 'split_blob_fallback',
-            mimeType: blob.type,
-            chunkBytes: blob.size,
-            inputType: 'audio',
-            phase: 'stt',
-            origin: 'sanitizer',
-            blocking: false
-        });
-        if (runId) {
-            recordDiagnosticEvent(runId, {
-                type: 'stage_end',
-                stage: splitStage,
-                status: 'degraded',
-                error_code: fallbackErrorDetail.code,
-                error_message: fallbackErrorDetail.message,
-                error_detail: fallbackErrorDetail
-            });
-        }
-        return chunks;
     };
 
     const getSortedBatchIndexes = () => {
@@ -1384,7 +1396,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 await logError({
                     message: error?.message || `Partial batch ${batchIndex} failed`,
                     stack: error?.stack,
-                    context: { batchIndex, blobSize: blob.size },
+                    context: { batchIndex, blobSize: blob.size, mimeType: blob.type },
                     source: 'App.processPartialBatch',
                     severity: 'warning'
                 });

@@ -3,14 +3,16 @@ export class NetworkRequestError extends Error {
     retryable: boolean;
     attempt: number;
     cause?: unknown;
+    responseBodyExcerpt?: string;
 
-    constructor(message: string, options: { status?: number; retryable: boolean; attempt: number; cause?: unknown }) {
+    constructor(message: string, options: { status?: number; retryable: boolean; attempt: number; cause?: unknown; responseBodyExcerpt?: string }) {
         super(message);
         this.name = 'NetworkRequestError';
         this.status = options.status;
         this.retryable = options.retryable;
         this.attempt = options.attempt;
         this.cause = options.cause;
+        this.responseBodyExcerpt = options.responseBodyExcerpt;
     }
 }
 
@@ -103,12 +105,17 @@ export async function fetchWithRetry(
             if (response.ok) return response;
 
             const classification = classify(undefined, response);
+            const responseBodyExcerpt = await response.clone().text()
+                .then((text) => text.slice(0, 300))
+                .catch(() => '');
+            const bodySuffix = responseBodyExcerpt ? ` body_excerpt=${responseBodyExcerpt}` : '';
             const error = new NetworkRequestError(
-                `HTTP ${response.status} (${classification.reason})`,
+                `HTTP ${response.status} (${classification.reason})${bodySuffix}`,
                 {
                     status: response.status,
                     retryable: classification.retryable,
-                    attempt
+                    attempt,
+                    responseBodyExcerpt
                 }
             );
             lastError = error;

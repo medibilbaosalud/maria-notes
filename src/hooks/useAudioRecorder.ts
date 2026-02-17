@@ -264,7 +264,10 @@ export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
                 });
             };
 
-            mediaRecorder.start(1_000);
+            // Use manual requestData() boundaries so each emitted blob is a valid
+            // recorder segment; concatenating 1s slices can produce malformed
+            // containers for downstream STT parsers.
+            mediaRecorder.start();
             setIsRecording(true);
 
             timerRef.current = window.setInterval(() => {
