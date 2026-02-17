@@ -254,7 +254,10 @@ const buildTaskPreferences = (): Record<TaskType, ModelCandidate[]> => {
         output[task] = withAllowlist(base);
     });
     if (GEMINI_ONE_CALL_STRICT) {
-        const strictSingleShot = withAllowlist([candidate('gemini', 'gemini-3-flash', { thinking: 'low' })]);
+        const strictSingleShot = withAllowlist([
+            candidate('gemini', 'gemini-3-flash', { thinking: 'low' }),
+            ...GROQ_CORE_FALLBACK
+        ]);
         if (strictSingleShot.length > 0) {
             output.single_shot_history = strictSingleShot;
         }
@@ -314,25 +317,28 @@ export const MODEL_LIMITS: Record<string, ModelLimits> = {
         contextWindowTokens: 1
     },
 
-    // Gemini / Gemma (strict allowlist from user console)
-    'gemini:gemini-3-flash': { requestsPerMinute: 5, requestsPerDay: 20, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
-    'gemini:gemini-2.5-flash': { requestsPerMinute: 5, requestsPerDay: 20, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
-    'gemini:gemini-2.5-flash-lite': { requestsPerMinute: 10, requestsPerDay: 20, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
+    // Gemini / Gemma (per-model free-tier limits from Google AI Studio, Feb 2026)
+    // Flash models: higher RPM/RPD, designed for throughput
+    'gemini:gemini-3-flash': { requestsPerMinute: 10, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
+    'gemini:gemini-2.5-flash': { requestsPerMinute: 10, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
+    'gemini:gemini-2.5-flash-lite': { requestsPerMinute: 15, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
+    'gemini:gemini-2.0-flash': { requestsPerMinute: 10, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
+    'gemini:gemini-2.0-flash-exp': { requestsPerMinute: 10, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
+    // Pro models: lower RPM/RPD, higher quality reasoning
+    'gemini:gemini-3-pro': { requestsPerMinute: 5, requestsPerDay: 25, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
+    'gemini:gemini-2.5-pro': { requestsPerMinute: 5, requestsPerDay: 25, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
+    'gemini:gemini-2.0-pro-exp': { requestsPerMinute: 5, requestsPerDay: 25, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
+    // Gemma models: generous limits (open-weight, hosted on Google)
     'gemini:gemma-3-27b-it': { requestsPerMinute: 30, requestsPerDay: 14400, tokensPerMinute: 15000, tokensPerDay: 1000000, contextWindowTokens: 32768 },
     'gemini:gemma-3-12b-it': { requestsPerMinute: 30, requestsPerDay: 14400, tokensPerMinute: 15000, tokensPerDay: 1000000, contextWindowTokens: 32768 },
     'gemini:gemma-3-4b-it': { requestsPerMinute: 30, requestsPerDay: 14400, tokensPerMinute: 15000, tokensPerDay: 1000000, contextWindowTokens: 32768 },
     'gemini:gemma-3-2b-it': { requestsPerMinute: 30, requestsPerDay: 14400, tokensPerMinute: 15000, tokensPerDay: 1000000, contextWindowTokens: 32768 },
     'gemini:gemma-3-1b-it': { requestsPerMinute: 30, requestsPerDay: 14400, tokensPerMinute: 15000, tokensPerDay: 1000000, contextWindowTokens: 32768 },
+    // Utility / specialty models
     'gemini:gemini-robotics-er-1.5-preview': { requestsPerMinute: 10, requestsPerDay: 20, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
     'gemini:gemini-embedding-1': { requestsPerMinute: 100, requestsPerDay: 1000, tokensPerMinute: 30000, tokensPerDay: 5000000, contextWindowTokens: 8192 },
     'gemini:gemini-2.5-flash-preview-tts': { requestsPerMinute: 3, requestsPerDay: 10, tokensPerMinute: 10000, tokensPerDay: 300000, contextWindowTokens: 32000 },
-    'gemini:gemini-2.5-flash-native-audio-dialog': { requestsPerMinute: 200, requestsPerDay: 0, tokensPerMinute: 1000000, tokensPerDay: 0, contextWindowTokens: 128000 },
-    // New Models (Reasoning / Pro) - 15 RPM typical for Pay-as-you-go or High tier
-    'gemini:gemini-3-pro': { requestsPerMinute: 15, requestsPerDay: 50, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
-    'gemini:gemini-2.5-pro': { requestsPerMinute: 15, requestsPerDay: 50, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
-    'gemini:gemini-2.0-pro-exp': { requestsPerMinute: 15, requestsPerDay: 50, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
-    'gemini:gemini-2.0-flash': { requestsPerMinute: 15, requestsPerDay: 50, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
-    'gemini:gemini-2.0-flash-exp': { requestsPerMinute: 15, requestsPerDay: 50, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 }
+    'gemini:gemini-2.5-flash-native-audio-dialog': { requestsPerMinute: 200, requestsPerDay: 0, tokensPerMinute: 1000000, tokensPerDay: 0, contextWindowTokens: 128000 }
 };
 
 const mergeLimitOverrides = (): void => {

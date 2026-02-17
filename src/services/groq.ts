@@ -15,7 +15,7 @@ import {
     TaskType
 } from './model-registry';
 import { fetchWithRetry, NetworkRequestError, isRetryableStatus } from './net';
-import { BudgetExceededError, getBudgetManager } from './reliability/budget-manager';
+
 import { getAdaptiveRetryPolicyForTask, getAdaptiveTimeout, getRetryPolicy } from './reliability/retry-policy';
 import { normalizeAndChunkAudio } from '../utils/audioProcessing';
 
@@ -164,8 +164,7 @@ class AdaptiveRouteController {
         const state = this.ensure(routeKey);
         while (true) {
             if (this.isCircuitOpen(routeKey)) {
-                const waitMs = this.getCircuitRetryAfterMs(routeKey);
-                throw new BudgetExceededError(`route_circuit_open:${routeKey}`, Math.max(250, waitMs), 'minute');
+                throw new Error(`route_circuit_open:${routeKey}`);
             }
             const routeLimit = this.effectiveRouteLimit(routeKey);
             if (state.inFlight < routeLimit && this.globalInFlight < this.globalLimit) {
@@ -219,7 +218,7 @@ class AdaptiveRouteController {
 
 const rateLimiter = new ModelRateLimiter();
 const routeController = new AdaptiveRouteController();
-const budgetManager = getBudgetManager();
+
 
 const THINKING_BUDGET: Record<'low' | 'medium', number> = {
     low: 256,
@@ -449,10 +448,10 @@ export class GroqService {
 
     private classifyErrorType(error: unknown): { errorType: string; errorCode?: string } {
         if (!error) return { errorType: 'unknown' };
-        if (error instanceof BudgetExceededError) {
-            return { errorType: 'budget', errorCode: error.message || 'budget_limit' };
-        }
         const status = this.getErrorStatus(error);
+        if (status === 429) {
+            return { errorType: 'throttle', errorCode: '429' };
+        }
         if (typeof status === 'number') {
             return { errorType: 'http', errorCode: String(status) };
         }
@@ -470,7 +469,6 @@ export class GroqService {
     }
 
     private mapRouteFailureKind(error: unknown): RouteFailureKind {
-        if (error instanceof BudgetExceededError) return 'budget';
         const status = this.getErrorStatus(error);
         if (status === 429) return 'throttle';
         if (status === 408) return 'timeout';
@@ -573,6 +571,8 @@ export class GroqService {
     private splitTextIntoChunks(text: string, maxTokens: number): string[] {
         const safeMaxTokens = Math.max(MIN_CHUNK_TOKENS, maxTokens);
         const maxChars = safeMaxTokens * CHARS_PER_TOKEN;
+        const overlapChars = 250 * CHARS_PER_TOKEN; // Overlap for clinical context continuity
+
         if (text.length <= maxChars) return [text];
 
         const chunks: string[] = [];
@@ -581,15 +581,26 @@ export class GroqService {
         while (start < text.length) {
             let end = Math.min(start + maxChars, text.length);
             if (end < text.length) {
-                const window = text.slice(start, end);
-                const lastBreak = Math.max(window.lastIndexOf('\n'), window.lastIndexOf('.'), window.lastIndexOf(' '));
-                if (lastBreak > Math.max(0, window.length - 200)) {
-                    end = start + lastBreak + 1;
+                // Look for a break point within the last 500 characters
+                const searchWindow = text.slice(Math.max(start, end - 500), end);
+                const lastBreak = Math.max(
+                    searchWindow.lastIndexOf('\n'),
+                    searchWindow.lastIndexOf('. '),
+                    searchWindow.lastIndexOf('? '),
+                    searchWindow.lastIndexOf('! ')
+                );
+
+                if (lastBreak !== -1) {
+                    end = (end - 500) + lastBreak + 1;
                 }
             }
+
             const chunk = text.slice(start, end).trim();
             if (chunk) chunks.push(chunk);
-            start = end;
+
+            // Prevent infinite loop if overlap is larger than chunk
+            start = Math.max(end - overlapChars, start + (maxChars / 2));
+            if (start >= text.length || start >= end && end === text.length) break;
         }
         return chunks;
     }
@@ -1171,10 +1182,10 @@ ${schemaHint}`;
             } catch (error) {
                 lastError = error;
                 const status = this.getErrorStatus(error);
+
                 const transientStatus = status === 401 || status === 429 || status === 408 || (typeof status === 'number' && status >= 500);
                 const networkLike = typeof status !== 'number';
                 if (transientStatus || networkLike) continue;
-                if (error instanceof BudgetExceededError) throw error;
                 throw error;
             }
         }
@@ -1203,8 +1214,6 @@ ${schemaHint}`;
         const llmHedgingEnabled = String(import.meta.env.VITE_TURBO_LLM_HEDGING || 'true').toLowerCase() === 'true';
         const llmHedgeTriggerMs = Math.max(500, Number(import.meta.env.VITE_TURBO_LLM_HEDGE_TRIGGER_MS || 2_200));
         let lastError: unknown = null;
-        let highestBudgetWaitMs = 0;
-        let highestBudgetScope: 'minute' | 'hour' | 'day' = 'minute';
 
         const executeCandidate = async (
             candidate: ModelCandidate,
@@ -1229,12 +1238,10 @@ ${schemaHint}`;
                     is_fallback: attemptIndex > 0
                 });
                 if (routeController.isCircuitOpen(routeKey)) {
-                    const retryAfterMs = routeController.getCircuitRetryAfterMs(routeKey);
-                    throw new BudgetExceededError(`route_circuit_open:${routeKey}`, Math.max(250, retryAfterMs), 'minute');
+                    throw new Error(`route_circuit_open:${routeKey}`);
                 }
                 await routeController.acquire(routeKey);
                 routeAcquired = true;
-                budgetManager.consume(routeKey, { requests: 1, tokens: estimatedTokens });
                 await rateLimiter.consume(routeKey, estimatedTokens, 1);
 
                 const text = await this.callCandidateWithKeys(candidate, prompt, {
@@ -1302,15 +1309,8 @@ ${schemaHint}`;
                 });
 
                 const failureKind = this.mapRouteFailureKind(error);
-                const retryAfterMs = error instanceof BudgetExceededError
-                    ? Math.max(0, Number(error.retryAfterMs || 0))
-                    : undefined;
-                routeController.reportFailure(routeKey, failureKind, retryAfterMs);
+                routeController.reportFailure(routeKey, failureKind);
                 lastError = error;
-                if (error instanceof BudgetExceededError) {
-                    highestBudgetWaitMs = Math.max(highestBudgetWaitMs, error.retryAfterMs || 0);
-                    highestBudgetScope = error.scope || highestBudgetScope;
-                }
                 await this.delay(120);
                 throw error;
             } finally {
@@ -1370,9 +1370,6 @@ ${schemaHint}`;
             }
         }
 
-        if (highestBudgetWaitMs > 0) {
-            throw new BudgetExceededError('awaiting_budget_all_models', highestBudgetWaitMs, highestBudgetScope);
-        }
         throw (lastError as Error) || new Error('All models failed');
     }
 
@@ -1498,12 +1495,10 @@ ${schemaHint}`;
                     };
                     this.assertAllowedModel(routeKey);
                     if (routeController.isCircuitOpen(routeKey)) {
-                        const retryAfterMs = routeController.getCircuitRetryAfterMs(routeKey);
-                        throw new BudgetExceededError(`route_circuit_open:${routeKey}`, Math.max(250, retryAfterMs), 'minute');
+                        throw new Error(`route_circuit_open:${routeKey}`);
                     }
                     await routeController.acquire(routeKey);
                     routeAcquired = true;
-                    budgetManager.consume(routeKey, { requests: 1, audioSeconds: estimatedAudioSeconds });
                     const formData = new FormData();
                     formData.append('file', audioBlob, fileName);
                     formData.append('model', modelName);
@@ -1615,14 +1610,8 @@ ${schemaHint}`;
                         error_code: classified.errorCode
                     });
                     const failureKind = this.mapRouteFailureKind(error);
-                    const retryAfterMs = error instanceof BudgetExceededError
-                        ? Math.max(0, Number(error.retryAfterMs || 0))
-                        : undefined;
-                    routeController.reportFailure(routeKey, failureKind, retryAfterMs);
+                    routeController.reportFailure(routeKey, failureKind);
                     innerError = error;
-                    if (error instanceof BudgetExceededError) {
-                        throw error;
-                    }
                     const errorStatus = this.getErrorStatus(error);
                     if (errorStatus === 401 || errorStatus === 429) {
                         throw error;

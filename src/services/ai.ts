@@ -15,7 +15,7 @@ import {
     QualityTriageResult
 } from './groq';
 import { enqueueAuditEvent } from './audit-worker';
-import { BudgetExceededError } from './reliability/budget-manager';
+
 
 export interface AIResult<T> {
     data: T;
@@ -144,10 +144,9 @@ export class AIService {
         return `audit_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     }
 
-    private isBudgetError(error: unknown): error is BudgetExceededError {
-        if (error instanceof BudgetExceededError) return true;
+    private isRetryableError(error: unknown): boolean {
         const message = ((error as Error)?.message || '').toLowerCase();
-        return message.includes('budget_limit') || message.includes('awaiting_budget');
+        return message.includes('all models failed') || message.includes('route_circuit_open') || message.includes('429');
     }
 
     private sanitizeClinicalHistory(rawHistory: string): string {
@@ -839,16 +838,15 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
             };
         } catch (error) {
             this.groq.drainModelInvocations();
-            if (!this.isBudgetError(error)) throw error;
-            const retryAfterMs = Math.max(1_000, Number((error as BudgetExceededError).retryAfterMs || 60_000));
-            const reason = (error as Error)?.message || 'awaiting_budget';
+            if (!this.isRetryableError(error)) throw error;
+            const reason = (error as Error)?.message || 'all_models_failed';
             return {
                 data: this.buildProvisionalHistory(reason),
                 model: 'pipeline_provisional',
                 remaining_errors: [{ type: 'budget', field: 'pipeline', reason }],
                 pipeline_status: 'degraded',
                 result_status: 'provisional',
-                retry_after_ms: retryAfterMs,
+                retry_after_ms: 30_000,
                 session_id: sessionId,
                 quality_score: 25,
                 critical_gaps: [{ field: 'pipeline', reason, severity: 'critical' }],

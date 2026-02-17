@@ -57,6 +57,7 @@ const RETRY_POLICY: Record<RetryStage, StageRetryPolicy> = {
 const TASK_STAGE_MAP: Record<string, RetryStage> = {
     extraction: 'extraction',
     generation: 'generation',
+    single_shot_history: 'generation',
     validation_a: 'validation',
     validation_b: 'validation',
     report: 'generation',
@@ -88,7 +89,7 @@ export const getAdaptiveTimeout = (
 ): number => {
     const basePolicy = getRetryPolicy(stage);
     const estimatedTokens = Math.ceil(transcriptionLength / 4);
-    
+
     // Aumentar timeout para transcripciones largas
     if (estimatedTokens > 20000) {
         // Consultas muy largas (>20k tokens): doblar timeout
@@ -100,7 +101,7 @@ export const getAdaptiveTimeout = (
         // Consultas medianas (>5k tokens): 25% más de timeout
         return Math.floor(basePolicy.timeoutMs * 1.25);
     }
-    
+
     return basePolicy.timeoutMs;
 };
 
@@ -112,16 +113,16 @@ export const getAdaptiveRetryPolicyForTask = (
     transcriptionLength?: number
 ): StageRetryPolicy => {
     const basePolicy = getRetryPolicyForTask(task);
-    
+
     if (!transcriptionLength) {
         return basePolicy;
     }
-    
+
     const adaptiveTimeout = getAdaptiveTimeout(
         TASK_STAGE_MAP[task] || 'default',
         transcriptionLength
     );
-    
+
     return {
         ...basePolicy,
         timeoutMs: adaptiveTimeout

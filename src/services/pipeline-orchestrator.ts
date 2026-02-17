@@ -58,8 +58,10 @@ interface FinalizeRequest<TFinalizeResult> {
 }
 
 const DEFAULT_FINALIZE_WAIT_MS = 180_000;
-const DEFAULT_DRAIN_RETRY_MS = 5_000;
+
 const MAX_CONCURRENT_PARTIALS = 4; // Allow parallel STT/Extraction
+const MAX_FINALIZE_RETRIES = 2;
+const MAX_FINALIZE_TOTAL_MS = 120_000;
 
 export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
     private readonly handlers: OrchestratorHandlers<TFinalizeResult>;
@@ -80,6 +82,7 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
     private runningPartials = new Set<number>();
     private finalizeRequest: FinalizeRequest<TFinalizeResult> | null = null;
     private drainPromise: Promise<void> | null = null;
+    private finalizeRetries = 0;
 
     constructor(handlers: OrchestratorHandlers<TFinalizeResult>) {
         this.handlers = handlers;
@@ -207,17 +210,10 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
                                 this.updateNextExpected();
                                 this.state = 'processing_partials';
                             } catch (error) {
-                                const budgetRetryMs = this.readBudgetRetryMs(error);
-                                if (budgetRetryMs > 0) {
-                                    this.pending.set(batchIndex, blob);
-                                    this.state = 'awaiting_budget';
-                                    setTimeout(() => void this.scheduleDrain(), budgetRetryMs);
-                                } else {
-                                    console.error(`[Orchestrator] Partial batch ${batchIndex} failed:`, error);
-                                    this.processed.add(batchIndex);
-                                    this.missingBatches.add(batchIndex);
-                                    this.updateNextExpected();
-                                }
+                                console.error(`[Orchestrator] Partial batch ${batchIndex} failed:`, error);
+                                this.processed.add(batchIndex);
+                                this.missingBatches.add(batchIndex);
+                                this.updateNextExpected();
                             } finally {
                                 this.runningPartials.delete(batchIndex);
                                 this.touch();
@@ -259,18 +255,21 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
                         this.resetInternal(false);
                         break;
                     } catch (error) {
-                        const budgetRetryMs = this.readBudgetRetryMs(error);
-                        if (budgetRetryMs > 0) {
-                            this.state = 'awaiting_budget';
-                            this.touch((error as Error)?.message || 'awaiting_budget_finalize');
+                        const totalWaitedMs = Date.now() - finalizeReq.requestedAt;
+
+                        if (this.finalizeRetries < MAX_FINALIZE_RETRIES && totalWaitedMs < MAX_FINALIZE_TOTAL_MS) {
+                            this.finalizeRetries++;
+                            this.state = 'processing_partials';
+                            this.touch(`finalize retry ${this.finalizeRetries}/${MAX_FINALIZE_RETRIES}: ${(error as Error)?.message || 'error'}`);
                             setTimeout(() => {
                                 void this.scheduleDrain();
-                            }, budgetRetryMs);
+                            }, 3_000);
                             break;
                         }
                         this.state = 'failed';
-                        this.touch((error as Error)?.message || 'finalize_failed');
-                        throw error;
+                        const failReason = totalWaitedMs >= MAX_FINALIZE_TOTAL_MS ? 'pipeline_timeout' : ((error as Error)?.message || 'finalize_failed');
+                        this.touch(failReason);
+                        throw new Error(failReason);
                     }
                 }
 
@@ -293,15 +292,6 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
                         this.resetInternal(false);
                         break;
                     } catch (error) {
-                        const budgetRetryMs = this.readBudgetRetryMs(error);
-                        if (budgetRetryMs > 0) {
-                            this.state = 'awaiting_budget';
-                            this.touch((error as Error)?.message || 'awaiting_budget_finalize');
-                            setTimeout(() => {
-                                void this.scheduleDrain();
-                            }, budgetRetryMs);
-                            break;
-                        }
                         this.state = 'failed';
                         this.touch((error as Error)?.message || 'finalize_failed');
                         throw error;
@@ -339,13 +329,7 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
         };
     }
 
-    private readBudgetRetryMs(error: unknown): number {
-        const direct = Number((error as { retryAfterMs?: number })?.retryAfterMs || 0);
-        if (Number.isFinite(direct) && direct > 0) return direct;
-        const message = ((error as Error)?.message || '').toLowerCase();
-        if (!message.includes('budget_limit') && !message.includes('awaiting_budget')) return 0;
-        return DEFAULT_DRAIN_RETRY_MS;
-    }
+
 
     private updateNextExpected(): void {
         let next = 0;
@@ -363,6 +347,7 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
         this.running = false;
         this.drainPromise = null;
         this.finalizeRequest = null;
+        this.finalizeRetries = 0;
         if (resetContext) {
             this.sessionId = null;
             this.patientName = null;
