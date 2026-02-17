@@ -4,6 +4,7 @@ import { TestLogDetailModal } from './TestLogDetailModal';
 import { AnimatePresence } from 'framer-motion';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { normalizeAndChunkAudio } from '../utils/audioProcessing';
+import { PipelineHealthPanel } from './PipelineHealthPanel';
 import type { LabTestLog } from '../services/db';
 import { clearLabTestLogs, getLabTestLogs } from '../services/storage';
 
@@ -13,7 +14,7 @@ interface AudioTestLabProps {
   onRunTextPipeline: (text: string, patientName: string) => Promise<void>;
 }
 
-type TestMode = 'mic' | 'upload' | 'text' | 'diagnostic' | 'history';
+type TestMode = 'mic' | 'upload' | 'text' | 'diagnostic' | 'history' | 'pipeline-health';
 type DiagnosticExecutionMode = 'deterministic' | 'real';
 
 type DiagnosticScenario = {
@@ -294,10 +295,17 @@ export const AudioTestLab: React.FC<AudioTestLabProps> = ({ onClose, onRunFullPi
         <button className={`audio-lab-tab ${mode === 'history' ? 'active' : ''}`} onClick={() => setMode('history')}>
           <Activity size={18} /> Historial Auditoria
         </button>
+        <button className={`audio-lab-tab ${mode === 'pipeline-health' ? 'active' : ''}`} onClick={() => setMode('pipeline-health')}>
+          <Activity size={18} /> Salud Pipeline
+        </button>
       </div>
 
       <div className="audio-lab-content">
-        {mode === 'mic' ? (
+        {mode === 'pipeline-health' ? (
+          <div className="audio-lab-mode-block">
+            <PipelineHealthPanel />
+          </div>
+        ) : mode === 'mic' ? (
           <div className="audio-lab-mode-block">
             <div className="audio-lab-config-card">
               <p><strong>Configuracion Actual:</strong></p>

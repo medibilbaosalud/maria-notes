@@ -35,7 +35,6 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { SimulationProvider, useSimulation } from './components/Simulation/SimulationContext';
 import { SimulationOverlay } from './components/Simulation/SimulationOverlay';
 import { normalizeAndChunkAudio } from './utils/audioProcessing';
-import { PipelineHealthPanel } from './components/PipelineHealthPanel';
 import { PipelineStageTracker } from './components/PipelineStageTracker';
 import { usePipelineStatusViewModel } from './features/ui/usePipelineStatusViewModel';
 import { usePipelineController } from './features/pipeline/usePipelineController';
@@ -2811,7 +2810,6 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                         activeModel={activeModel}
                         modelUpdatedAt={modelUpdatedAt}
                     />
-                    <PipelineHealthPanel />
                 </div>
             );
         }
