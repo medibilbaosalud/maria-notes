@@ -31,6 +31,20 @@ export interface MedicalRecord {
     created_at?: string;
 }
 
+export interface ConsultationTranscriptChunk {
+    session_id: string;
+    session_version: number;
+    batch_index: number;
+    part_index: number;
+    text: string;
+    status: 'completed' | 'failed';
+    error_reason?: string | null;
+    latency_ms?: number | null;
+    model_used?: string | null;
+    created_at?: string;
+    updated_at?: string;
+}
+
 export const saveMedicalRecord = async (record: MedicalRecord) => {
     if (!supabase) {
         console.warn('Supabase not configured');
@@ -177,6 +191,45 @@ export const logFieldLineage = async (recordId: string, meta: LineageMeta[]): Pr
 
     await chunkedInsert('ai_chunks', chunkRows, 100);
     await chunkedInsert('ai_field_lineage', evidenceRows, 200);
+};
+
+export const upsertTranscriptChunk = async (chunk: ConsultationTranscriptChunk): Promise<void> => {
+    if (!supabase) return;
+    const now = new Date().toISOString();
+    const row = {
+        session_id: chunk.session_id,
+        session_version: Math.max(1, Number(chunk.session_version || 1)),
+        batch_index: Number(chunk.batch_index),
+        part_index: Math.max(0, Number(chunk.part_index || 0)),
+        text: chunk.text || '',
+        status: chunk.status,
+        error_reason: chunk.error_reason || null,
+        latency_ms: typeof chunk.latency_ms === 'number' ? chunk.latency_ms : null,
+        model_used: chunk.model_used || null,
+        created_at: chunk.created_at || now,
+        updated_at: now
+    };
+
+    const { error } = await supabase
+        .from('consultation_transcript_chunks')
+        .upsert([row], { onConflict: 'session_id,session_version,batch_index,part_index' });
+    if (error) throw error;
+};
+
+export const getTranscriptChunksBySession = async (
+    sessionId: string,
+    sessionVersion: number
+): Promise<ConsultationTranscriptChunk[]> => {
+    if (!supabase || !sessionId) return [];
+    const { data, error } = await supabase
+        .from('consultation_transcript_chunks')
+        .select('*')
+        .eq('session_id', sessionId)
+        .eq('session_version', Math.max(1, Number(sessionVersion || 1)))
+        .order('batch_index', { ascending: true })
+        .order('part_index', { ascending: true });
+    if (error) throw error;
+    return (data || []) as ConsultationTranscriptChunk[];
 };
 
 export interface SemanticCheckLog {

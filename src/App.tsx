@@ -17,7 +17,12 @@ import {
     finalizeSession,
     purgeExpiredPipelineArtifacts
 } from './services/storage';
-import { logError, upsertConsultationQualitySummary } from './services/supabase';
+import {
+    getTranscriptChunksBySession,
+    logError,
+    upsertConsultationQualitySummary,
+    upsertTranscriptChunk
+} from './services/supabase';
 import { MemoryService } from './services/memory';
 import { ConsultationPipelineOrchestrator } from './services/pipeline-orchestrator';
 import { enqueueAuditEvent, startAuditWorker, stopAuditWorker } from './services/audit-worker';
@@ -104,6 +109,7 @@ const STT_UP_THRESHOLD_MS = Math.max(2_000, Number(import.meta.env.VITE_STT_UP_T
 const STT_CHUNK_SLA_MS = Math.max(5_000, Number(import.meta.env.VITE_STT_CHUNK_SLA_MS || TURBO_PROFILE_CONFIG.sttChunkSlaMs));
 const AUDIO_PRECONVERSION_TIMEOUT_MS = Math.max(3_000, Number(import.meta.env.VITE_AUDIO_PRECONVERSION_TIMEOUT_MS || 12_000));
 const PIPELINE_FINALIZE_WATCHDOG_MS = Math.max(30_000, Number(import.meta.env.VITE_PIPELINE_FINALIZE_WATCHDOG_MS || 240_000));
+const PIPELINE_CLOUD_MERGE_TIMEOUT_MS = Math.max(3_000, Number(import.meta.env.VITE_PIPELINE_CLOUD_MERGE_TIMEOUT_MS || 15_000));
 type ActiveEngine = 'whisper' | 'gemini' | 'groq' | 'llm' | 'storage' | 'idle';
 
 const normalizeRuntimeModel = (rawModel?: string): string => {
@@ -662,6 +668,13 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 retryable: true
             };
         }
+        if (normalized.includes('cloud_merge_fallback') || normalized.includes('cloud_merge_unavailable')) {
+            return {
+                code: normalized.includes('cloud_merge_fallback') ? 'cloud_merge_fallback' : 'cloud_merge_unavailable',
+                message: 'No se pudo reconstruir la transcripcion desde nube; se aplico fallback local en modo provisional.',
+                retryable: true
+            };
+        }
 
         return {
             code,
@@ -884,6 +897,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
 
     const enqueueTranscriptPersistence = (payload: {
         session_id: string;
+        session_version?: number;
         batch_index: number;
         text: string;
         status: 'completed' | 'failed';
@@ -899,9 +913,28 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                     await saveSegment({
                         ...payload,
                         type: 'transcript',
-                        session_version: sessionVersionRef.current,
+                        session_version: typeof payload.session_version === 'number'
+                            ? payload.session_version
+                            : sessionVersionRef.current,
                         attempt_id: `${payload.session_id}:${payload.batch_index}:${attempt}`
                     });
+                    await withTimeout(
+                        upsertTranscriptChunk({
+                            session_id: payload.session_id,
+                            session_version: typeof payload.session_version === 'number'
+                                ? payload.session_version
+                                : sessionVersionRef.current,
+                            batch_index: payload.batch_index,
+                            part_index: payload.part_index || 0,
+                            text: payload.text || '',
+                            status: payload.status,
+                            error_reason: payload.error_reason || null,
+                            latency_ms: payload.latency_ms ?? null,
+                            model_used: payload.model_used || null
+                        }),
+                        PIPELINE_CLOUD_MERGE_TIMEOUT_MS,
+                        () => new Error(`cloud_chunk_persist_timeout:${PIPELINE_CLOUD_MERGE_TIMEOUT_MS}`)
+                    );
                     return;
                 } catch (error) {
                     if (attempt === maxAttempts) {
@@ -987,9 +1020,10 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         runId?: string;
         stage: string;
         sessionId: string;
+        sessionVersion: number;
         whisperStrict: boolean;
     }): Promise<Array<{ partBatchIndex: number; text: string; latencyMs: number; blob: Blob; model: string }>> => {
-        const { aiService, blobs, batchIndex, runId, stage, sessionId, whisperStrict } = params;
+        const { aiService, blobs, batchIndex, runId, stage, sessionId, sessionVersion, whisperStrict } = params;
         const concurrency = Math.min(getAdaptiveSttConcurrency(), Math.max(1, blobs.length));
         const outputs: Array<{ partBatchIndex: number; text: string; latencyMs: number; blob: Blob; model: string }> = [];
         let next = 0;
@@ -1034,6 +1068,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                     }
                     void enqueueTranscriptPersistence({
                         session_id: sessionId,
+                        session_version: sessionVersion,
                         batch_index: partBatchIndex,
                         text: transcriptResult.data,
                         status: 'completed',
@@ -1071,6 +1106,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                     }
                     void enqueueTranscriptPersistence({
                         session_id: sessionId,
+                        session_version: sessionVersion,
                         batch_index: partBatchIndex,
                         text: '',
                         status: 'failed',
@@ -1351,6 +1387,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 runId,
                 stage: `partial_${batchIndex}`,
                 sessionId,
+                sessionVersion: sessionVersion,
                 whisperStrict
             });
             const mergedTranscript = transcriptParts.map((item) => item.text).join(' ').trim();
@@ -1537,6 +1574,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             runId,
             stage: 'finalize',
             sessionId,
+            sessionVersion: sessionVersion,
             whisperStrict
         });
         const mergedFinalTranscript = finalTranscriptParts.map((item) => item.text).join(' ').trim();
@@ -1565,6 +1603,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 }
                 void enqueueTranscriptPersistence({
                     session_id: sessionId,
+                    session_version: sessionVersion,
                     batch_index: missing,
                     text: `[MISSING_BATCH_${missing}]`,
                     status: 'failed',
@@ -1574,7 +1613,66 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         }
 
         const sortedIndexes = getSortedBatchIndexes();
-        const fullTranscription = sortedIndexes.map((index) => transcriptionPartsRef.current.get(index) || '').join(' ').trim();
+        const localFullTranscription = sortedIndexes
+            .map((index) => transcriptionPartsRef.current.get(index) || '')
+            .join(' ')
+            .trim();
+        let fullTranscription = localFullTranscription;
+        let mergeSource: 'cloud' | 'local_fallback' = 'cloud';
+        let cloudMergeFallbackReason: string | undefined;
+        if (sessionId) {
+            try {
+                await withTimeout(
+                    transcriptPersistQueueRef.current,
+                    PIPELINE_CLOUD_MERGE_TIMEOUT_MS,
+                    () => new Error(`cloud_merge_queue_timeout:${PIPELINE_CLOUD_MERGE_TIMEOUT_MS}`)
+                );
+                const cloudChunks = await withTimeout(
+                    getTranscriptChunksBySession(sessionId, sessionVersion),
+                    PIPELINE_CLOUD_MERGE_TIMEOUT_MS,
+                    () => new Error(`cloud_merge_fetch_timeout:${PIPELINE_CLOUD_MERGE_TIMEOUT_MS}`)
+                );
+                const mergedFromCloud = cloudChunks
+                    .sort((a, b) => {
+                        if (a.batch_index !== b.batch_index) return a.batch_index - b.batch_index;
+                        return (a.part_index || 0) - (b.part_index || 0);
+                    })
+                    .map((chunk) => chunk.text || '')
+                    .join(' ')
+                    .trim();
+                if (!mergedFromCloud) {
+                    throw new Error('cloud_merge_empty');
+                }
+                fullTranscription = mergedFromCloud;
+            } catch (cloudMergeError) {
+                mergeSource = 'local_fallback';
+                cloudMergeFallbackReason = `cloud_merge_fallback:${(cloudMergeError as Error)?.message || 'unknown'}`;
+                console.warn('[App] cloud merge unavailable, using local transcript fallback:', cloudMergeError);
+                if (runId) {
+                    const errorDetail = buildDiagnosticErrorDetail(cloudMergeError, {
+                        stage: 'finalize',
+                        provider: 'storage',
+                        operation: 'cloud_transcript_merge',
+                        inputType: 'audio',
+                        codeOverride: 'cloud_merge_unavailable',
+                        messageOverride: cloudMergeFallbackReason,
+                        phase: 'quality_gate',
+                        origin: 'pipeline_policy',
+                        blocking: false
+                    });
+                    recordDiagnosticEvent(runId, {
+                        type: 'stage_end',
+                        stage: 'finalize_cloud_merge',
+                        status: 'degraded',
+                        error_code: errorDetail.code,
+                        error_message: errorDetail.message,
+                        error_detail: errorDetail
+                    });
+                }
+            }
+        } else {
+            mergeSource = 'local_fallback';
+        }
         setTranscription(fullTranscription);
 
         // SINGLE EXTRACTION CALL on the full transcript
@@ -1649,6 +1747,18 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         ];
         let runStatus = result.pipeline_status || (missingBatches.length > 0 ? 'degraded' : 'completed');
         let resultStatus = result.result_status || (runStatus === 'completed' ? 'completed' : 'provisional');
+        if (cloudMergeFallbackReason) {
+            runStatus = 'degraded';
+            resultStatus = 'provisional';
+            remainingErrors = [
+                ...remainingErrors,
+                {
+                    type: 'storage',
+                    field: 'transcription_merge',
+                    reason: cloudMergeFallbackReason
+                }
+            ];
+        }
         const qualityGate = buildQualityGateFromHistory({
             medical_history: result.data,
             result_status: resultStatus,
@@ -1669,6 +1779,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             ];
         }
         const effectiveProvisionalReason = result.provisional_reason
+            || cloudMergeFallbackReason
             || (resultStatus === 'provisional' ? (qualityGate.blocking_reason || 'quality_gate_blocked') : undefined);
 
         setHistory(result.data);
@@ -1745,6 +1856,8 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                     gemini_call_block_reason: GEMINI_ONE_CALL_STRICT ? 'one_call_policy_enforced' : null,
                     one_call_policy: GEMINI_ONE_CALL_STRICT ? 'strict_single_call' : 'default',
                     strict_policy_violation: GEMINI_ONE_CALL_STRICT ? (result.gemini_calls_used || 0) > 1 : false,
+                    transcription_merge_source: mergeSource,
+                    cloud_merge_fallback_reason: cloudMergeFallbackReason || null,
                     draft_ready_at: new Date().toISOString()
                 },
                 error_reason: resultStatus === 'provisional'
@@ -1763,7 +1876,9 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                     result_status: resultStatus,
                     output_tier: outputTier,
                     gemini_calls_used: result.gemini_calls_used || 0,
-                    one_call_policy: GEMINI_ONE_CALL_STRICT ? 'strict_single_call' : 'default'
+                    one_call_policy: GEMINI_ONE_CALL_STRICT ? 'strict_single_call' : 'default',
+                    transcription_merge_source: mergeSource,
+                    cloud_merge_fallback_reason: cloudMergeFallbackReason || null
                 }
             });
             if (requiresHardening) {
@@ -1790,7 +1905,8 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                     blob_size: blob.size,
                     missing_batches: missingBatches,
                     transcript_length: extractionInput.length,
-                    retry_after_ms: result.retry_after_ms || 0
+                    retry_after_ms: result.retry_after_ms || 0,
+                    transcription_merge_source: mergeSource
                 }
             });
         }

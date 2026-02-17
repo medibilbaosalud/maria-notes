@@ -24,12 +24,15 @@ export interface FinalReadyPayload {
 interface UseAudioRecorderOptions {
     onBatchReady?: (payload: BatchReadyPayload) => Promise<void> | void;
     onFinalReady?: (payload: FinalReadyPayload) => Promise<void> | void;
-    batchIntervalMs?: number; // Default: 5 minutes
+    batchIntervalMs?: number;
 }
 
 const MIN_BATCH_BYTES = 1024;
 const MAX_BATCH_BYTES = 20 * 1024 * 1024;
 const MIN_SPLIT_CHUNK_BYTES = 512 * 1024;
+const RECORDER_TIMESLICE_MS = 1000;
+const RECORDER_ROTATE_STOP_START = String(import.meta.env.VITE_RECORDER_ROTATE_STOP_START || 'true').toLowerCase() === 'true';
+
 const SAFE_BINARY_SPLIT_MIME_HINTS = ['wav', 'wave', 'pcm', 'x-wav', 'l16'];
 
 const canSafelyBinarySplit = (blob: Blob): boolean => {
@@ -65,8 +68,10 @@ export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
     const batchTimerRef = useRef<number | null>(null);
     const batchIndexRef = useRef(0);
     const segmentStartedAtRef = useRef<number>(0);
+    const recordingStartedAtRef = useRef<number>(0);
     const mimeTypeRef = useRef<string>('audio/webm');
     const stopRequestedRef = useRef(false);
+    const stopReasonRef = useRef<'rotate' | 'final' | null>(null);
     const flushResolverRef = useRef<(() => void) | null>(null);
     const operationQueueRef = useRef<Promise<void>>(Promise.resolve());
     const bufferedBytesRef = useRef(0);
@@ -105,25 +110,120 @@ export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
         }
     }, [onBatchReady]);
 
-    const flushRecorderData = useCallback(async (timeoutMs = 1_200) => {
-        const recorder = mediaRecorderRef.current;
-        if (!recorder || recorder.state !== 'recording') return;
-
-        const waitForFlush = new Promise<void>((resolve) => {
-            const timeoutId = setTimeout(() => {
-                if (flushResolverRef.current) flushResolverRef.current = null;
-                resolve();
-            }, timeoutMs);
-            flushResolverRef.current = () => {
-                clearTimeout(timeoutId);
-                flushResolverRef.current = null;
-                resolve();
-            };
-        });
-
-        recorder.requestData();
-        await waitForFlush;
+    const cleanupStream = useCallback(() => {
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach((track) => track.stop());
+            streamRef.current = null;
+        }
     }, []);
+
+    const finalizeStoppedRecorder = useCallback(async (finalBlob: Blob, startedAt: number, endedAt: number) => {
+        setAudioBlob(finalBlob);
+        const parts = splitBlobBySize(finalBlob, MAX_BATCH_BYTES).filter((part) => part.size >= MIN_BATCH_BYTES);
+        if (parts.length > 1) {
+            for (let i = 0; i < parts.length - 1; i++) {
+                const extraBatchIndex = batchIndexRef.current;
+                batchIndexRef.current += 1;
+                setBatchCount(batchIndexRef.current);
+                await onBatchReady?.({
+                    batchIndex: extraBatchIndex,
+                    blob: parts[i],
+                    startedAt,
+                    endedAt
+                });
+            }
+            const finalPart = parts[parts.length - 1];
+            await onFinalReady?.({
+                lastBatchIndex: batchIndexRef.current,
+                blob: finalPart,
+                startedAt,
+                endedAt
+            });
+        } else {
+            await onFinalReady?.({
+                lastBatchIndex: batchIndexRef.current,
+                blob: finalBlob,
+                startedAt,
+                endedAt
+            });
+        }
+        cleanupStream();
+    }, [cleanupStream, onBatchReady, onFinalReady]);
+
+    const buildRecorder = useCallback((stream: MediaStream) => {
+        const optionsMedia = { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 128000 };
+        const recorder = new MediaRecorder(
+            stream,
+            MediaRecorder.isTypeSupported(optionsMedia.mimeType) ? optionsMedia : undefined
+        );
+        mediaRecorderRef.current = recorder;
+        mimeTypeRef.current = recorder.mimeType || optionsMedia.mimeType;
+        recorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+                if (e.data.type) {
+                    mimeTypeRef.current = e.data.type;
+                }
+                chunksRef.current.push(e.data);
+                bufferedBytesRef.current += e.data.size;
+            }
+            if (flushResolverRef.current) {
+                flushResolverRef.current();
+            }
+            if (!stopRequestedRef.current && bufferedBytesRef.current >= MAX_BATCH_BYTES) {
+                void enqueueOperation(async () => {
+                    if (rotateInProgressRef.current) return;
+                    rotateInProgressRef.current = true;
+                    stopReasonRef.current = RECORDER_ROTATE_STOP_START ? 'rotate' : null;
+                    if (RECORDER_ROTATE_STOP_START && mediaRecorderRef.current?.state === 'recording') {
+                        mediaRecorderRef.current.stop();
+                        return;
+                    }
+                    const endedAt = Date.now();
+                    const startedAt = segmentStartedAtRef.current || endedAt;
+                    const batchBlob = harvestCurrentBatch();
+                    segmentStartedAtRef.current = endedAt;
+                    rotateInProgressRef.current = false;
+                    await dispatchBatchBlob(batchBlob, startedAt, endedAt);
+                });
+            }
+        };
+        recorder.onstop = () => {
+            const endedAt = Date.now();
+            const startedAt = segmentStartedAtRef.current || recordingStartedAtRef.current || endedAt;
+            const reason = stopReasonRef.current || (stopRequestedRef.current ? 'final' : 'rotate');
+            stopReasonRef.current = null;
+            const stoppedBlob = harvestCurrentBatch();
+
+            // Restart first so we do not drop microphone capture while persisting.
+            if (reason === 'rotate' && !stopRequestedRef.current && RECORDER_ROTATE_STOP_START && streamRef.current) {
+                try {
+                    const nextRecorder = buildRecorder(streamRef.current);
+                    segmentStartedAtRef.current = endedAt;
+                    nextRecorder.start(RECORDER_TIMESLICE_MS);
+                } catch (restartError) {
+                    console.error('[Recorder] failed to restart recorder after rotation:', restartError);
+                    stopRequestedRef.current = true;
+                    setIsRecording(false);
+                    void enqueueOperation(async () => {
+                        rotateInProgressRef.current = false;
+                        await finalizeStoppedRecorder(stoppedBlob, startedAt, endedAt);
+                    });
+                    return;
+                }
+                void enqueueOperation(async () => {
+                    rotateInProgressRef.current = false;
+                    await dispatchBatchBlob(stoppedBlob, startedAt, endedAt);
+                });
+                return;
+            }
+
+            void enqueueOperation(async () => {
+                rotateInProgressRef.current = false;
+                await finalizeStoppedRecorder(stoppedBlob, startedAt, endedAt);
+            });
+        };
+        return recorder;
+    }, [dispatchBatchBlob, enqueueOperation, finalizeStoppedRecorder, harvestCurrentBatch]);
 
     const rotateBatch = useCallback(async () => {
         const recorder = mediaRecorderRef.current;
@@ -131,24 +231,32 @@ export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
         if (rotateInProgressRef.current) return;
         rotateInProgressRef.current = true;
 
-        try {
-            await flushRecorderData();
-
-            const endedAt = Date.now();
-            const startedAt = segmentStartedAtRef.current || endedAt;
-            const batchBlob = harvestCurrentBatch();
-
-            if (batchBlob.size < MIN_BATCH_BYTES) {
-                segmentStartedAtRef.current = endedAt;
-                return;
-            }
-
-            await dispatchBatchBlob(batchBlob, startedAt, endedAt);
-            segmentStartedAtRef.current = endedAt;
-        } finally {
-            rotateInProgressRef.current = false;
+        if (RECORDER_ROTATE_STOP_START) {
+            stopReasonRef.current = 'rotate';
+            recorder.stop();
+            return;
         }
-    }, [dispatchBatchBlob, flushRecorderData, harvestCurrentBatch]);
+
+        const waitForFlush = new Promise<void>((resolve) => {
+            const timeoutId = setTimeout(() => {
+                if (flushResolverRef.current) flushResolverRef.current = null;
+                resolve();
+            }, 1200);
+            flushResolverRef.current = () => {
+                clearTimeout(timeoutId);
+                flushResolverRef.current = null;
+                resolve();
+            };
+        });
+        recorder.requestData();
+        await waitForFlush;
+        const endedAt = Date.now();
+        const startedAt = segmentStartedAtRef.current || endedAt;
+        const batchBlob = harvestCurrentBatch();
+        segmentStartedAtRef.current = endedAt;
+        rotateInProgressRef.current = false;
+        await dispatchBatchBlob(batchBlob, startedAt, endedAt);
+    }, [dispatchBatchBlob, harvestCurrentBatch]);
 
     const stopRecording = useCallback(() => {
         if (!isRecording) return;
@@ -156,6 +264,7 @@ export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
         if (!recorder) return;
 
         stopRequestedRef.current = true;
+        stopReasonRef.current = 'final';
         setIsRecording(false);
 
         if (timerRef.current) {
@@ -167,12 +276,10 @@ export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
             batchTimerRef.current = null;
         }
 
-        void enqueueOperation(async () => {
-            if (recorder.state !== 'inactive') {
-                recorder.stop();
-            }
-        });
-    }, [enqueueOperation, isRecording]);
+        if (recorder.state !== 'inactive') {
+            recorder.stop();
+        }
+    }, [isRecording]);
 
     const startRecording = useCallback(async () => {
         try {
@@ -186,92 +293,24 @@ export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
             });
             streamRef.current = stream;
 
-            const optionsMedia = { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 128000 };
-            const mediaRecorder = new MediaRecorder(
-                stream,
-                MediaRecorder.isTypeSupported(optionsMedia.mimeType) ? optionsMedia : undefined
-            );
-            mediaRecorderRef.current = mediaRecorder;
-            mimeTypeRef.current = mediaRecorder.mimeType || optionsMedia.mimeType;
-
             chunksRef.current = [];
             bufferedBytesRef.current = 0;
             batchIndexRef.current = 0;
             stopRequestedRef.current = false;
+            stopReasonRef.current = null;
+            rotateInProgressRef.current = false;
             setBatchCount(0);
             setDuration(0);
             setAudioBlob(null);
 
             segmentStartedAtRef.current = Date.now();
-            const recordingStartedAt = segmentStartedAtRef.current;
-
-            mediaRecorder.ondataavailable = (e) => {
-                if (e.data.size > 0) {
-                    if (e.data.type) {
-                        mimeTypeRef.current = e.data.type;
-                    }
-                    chunksRef.current.push(e.data);
-                    bufferedBytesRef.current += e.data.size;
-                }
-                if (flushResolverRef.current) {
-                    flushResolverRef.current();
-                }
-                if (!stopRequestedRef.current && bufferedBytesRef.current >= MAX_BATCH_BYTES) {
-                    void enqueueOperation(rotateBatch);
-                }
-            };
-
-            mediaRecorder.onstop = () => {
-                void enqueueOperation(async () => {
-                    const endedAt = Date.now();
-                    const startedAt = segmentStartedAtRef.current || recordingStartedAt;
-                    const finalBlob = harvestCurrentBatch();
-                    setAudioBlob(finalBlob);
-
-                    const parts = splitBlobBySize(finalBlob, MAX_BATCH_BYTES).filter((part) => part.size >= MIN_BATCH_BYTES);
-                    if (parts.length > 1) {
-                        for (let i = 0; i < parts.length - 1; i++) {
-                            const extraBatchIndex = batchIndexRef.current;
-                            batchIndexRef.current += 1;
-                            setBatchCount(batchIndexRef.current);
-                            await onBatchReady?.({
-                                batchIndex: extraBatchIndex,
-                                blob: parts[i],
-                                startedAt,
-                                endedAt
-                            });
-                        }
-                        const finalPart = parts[parts.length - 1];
-                        await onFinalReady?.({
-                            lastBatchIndex: batchIndexRef.current,
-                            blob: finalPart,
-                            startedAt,
-                            endedAt
-                        });
-                    } else {
-                        await onFinalReady?.({
-                            lastBatchIndex: batchIndexRef.current,
-                            blob: finalBlob,
-                            startedAt,
-                            endedAt
-                        });
-                    }
-
-                    if (streamRef.current) {
-                        streamRef.current.getTracks().forEach((track) => track.stop());
-                        streamRef.current = null;
-                    }
-                });
-            };
-
-            // Use manual requestData() boundaries so each emitted blob is a valid
-            // recorder segment; concatenating 1s slices can produce malformed
-            // containers for downstream STT parsers.
-            mediaRecorder.start();
+            recordingStartedAtRef.current = segmentStartedAtRef.current;
+            const mediaRecorder = buildRecorder(stream);
+            mediaRecorder.start(RECORDER_TIMESLICE_MS);
             setIsRecording(true);
 
             timerRef.current = window.setInterval(() => {
-                const elapsedMs = Date.now() - recordingStartedAt;
+                const elapsedMs = Date.now() - recordingStartedAtRef.current;
                 setDuration(Math.floor(elapsedMs / 1_000));
 
                 if (batchIntervalMs > 0 && !stopRequestedRef.current) {
@@ -291,7 +330,7 @@ export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
             console.error('Error accessing microphone:', error);
             throw error;
         }
-    }, [batchIntervalMs, enqueueOperation, harvestCurrentBatch, onFinalReady, rotateBatch]);
+    }, [batchIntervalMs, buildRecorder, enqueueOperation, rotateBatch]);
 
     const resetRecording = useCallback(() => {
         setAudioBlob(null);
@@ -305,11 +344,9 @@ export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
         return () => {
             if (timerRef.current) clearInterval(timerRef.current);
             if (batchTimerRef.current) clearInterval(batchTimerRef.current);
-            if (streamRef.current) {
-                streamRef.current.getTracks().forEach((track) => track.stop());
-            }
+            cleanupStream();
         };
-    }, []);
+    }, [cleanupStream]);
 
     return {
         isRecording,
