@@ -39,11 +39,10 @@ import { PipelineStageTracker } from './components/PipelineStageTracker';
 import { usePipelineStatusViewModel } from './features/ui/usePipelineStatusViewModel';
 import { usePipelineController } from './features/pipeline/usePipelineController';
 import { useSessionRecovery } from './features/pipeline/useSessionRecovery';
-import { fadeSlideInSmall, softScaleTap } from './features/ui/motion-tokens';
+import { fadeSlideInSmall } from './features/ui/motion-tokens';
 import { safeGetLocalStorage, safeSetLocalStorage } from './utils/safeBrowser';
 
 import './App.css';
-import { Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const SearchHistory = lazy(() => import('./components/SearchHistory').then((mod) => ({ default: mod.SearchHistory })));
@@ -2790,6 +2789,15 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         if (currentView === 'record') {
             return (
                 <div className="view-content record-view">
+                    <Recorder
+                        onRecordingComplete={handleRecordingComplete}
+                        onConsultationStart={handleConsultationStart}
+                        canStart={canStartConsultation}
+                        startBlockReason={startBlockReason}
+                        processingLabel={processingLabel}
+                        activeEngine={activeEngine}
+                        activeModel={activeModel}
+                    />
                     <PipelineStageTracker
                         state={pipelineStatusVm.state}
                         sttP95Ms={pipelineStatusVm.sttP95Ms}
@@ -2799,15 +2807,6 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                         activeEngine={activeEngine}
                         activeModel={activeModel}
                         modelUpdatedAt={modelUpdatedAt}
-                    />
-                    <Recorder
-                        onRecordingComplete={handleRecordingComplete}
-                        onConsultationStart={handleConsultationStart}
-                        canStart={canStartConsultation}
-                        startBlockReason={startBlockReason}
-                        processingLabel={processingLabel}
-                        activeEngine={activeEngine}
-                        activeModel={activeModel}
                     />
                 </div>
             );
@@ -2932,18 +2931,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 onOpenSettings={() => setShowSettings(true)}
                 onOpenLessons={() => setShowLessons(true)}
             >
-                {/* Floating "Novedades" Pill */}
-                <motion.button
-                    initial={{ opacity: 0, y: -20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="whats-new-trigger"
-                    onClick={() => setShowWhatsNew(true)}
-                    {...softScaleTap}
-                    data-ui-state="idle"
-                >
-                    <Sparkles size={14} />
-                    <span>Novedades: AI v3.0</span>
-                </motion.button>
+
                 <AnimatePresence mode="wait" initial={false}>
                     <motion.div
                         key={currentView}

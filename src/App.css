@@ -47,6 +47,8 @@
     width: 100%;
     gap: var(--space-5);
     padding-right: 0;
+    padding-top: 1rem;
+    /* Add some top padding since Recorder is now top */
 }
 
 .view-content>* {
