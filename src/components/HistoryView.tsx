@@ -11,6 +11,7 @@ import { saveFieldConfirmation, logQualityEvent, saveDoctorSatisfactionEvent } f
 import { evaluateAndPersistRuleImpactV2 } from '../services/learning/rule-evaluator';
 import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
+import type { PipelineUiError } from '../types/pipeline';
 
 interface HistoryViewProps {
   content: string;
@@ -21,7 +22,9 @@ interface HistoryViewProps {
   apiKey?: string; // Needed for Qwen3 analysis call
   onGenerateReport?: () => Promise<string>;
   onNewConsultation?: () => void;
+  onRetryProcessing?: () => void;
   onContentChange?: (newContent: string) => void;
+  processingError?: PipelineUiError;
   metadata?: {
     corrections: number;
     models: { generation: string; validation: string };
@@ -128,7 +131,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   apiKey,
   onGenerateReport,
   onNewConsultation,
+  onRetryProcessing,
   onContentChange,
+  processingError,
   metadata,
   recordId,
   onPersistMedicalHistory,
@@ -834,7 +839,22 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     return (
       <div className="empty-state">
         <FileText size={48} className="empty-icon" />
-        <p>No hay historia clínica generada aún.</p>
+        {processingError && (
+          <p>{`No se pudo completar el procesamiento (${processingError.code}). ${processingError.message}`}</p>
+        )}
+        <div className="doc-actions">
+          {processingError?.retryable && onRetryProcessing && (
+            <button className="action-button secondary" onClick={onRetryProcessing}>
+              Reintentar
+            </button>
+          )}
+          {onNewConsultation && (
+            <button className="action-button new-consultation" onClick={onNewConsultation}>
+              Nueva Consulta
+            </button>
+          )}
+        </div>
+        {!processingError && <p>No hay historia clínica generada aún.</p>}
       </div>
     );
   }
@@ -1063,6 +1083,19 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   Revision obligatoria antes de finalizar.
                   {metadata.provisionalReason ? ` Motivo: ${metadata.provisionalReason.replace(/_/g, ' ')}` : ''}
                 </span>
+              </div>
+            )}
+            {processingError && (
+              <div className="provisional-review-banner" role="alert" aria-live="assertive">
+                <AlertTriangle size={16} />
+                <span>
+                  Error de procesamiento ({processingError.code}): {processingError.message}
+                </span>
+                {processingError.retryable && onRetryProcessing && (
+                  <button className="action-button secondary" onClick={onRetryProcessing}>
+                    Reintentar
+                  </button>
+                )}
               </div>
             )}
 

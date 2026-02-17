@@ -41,6 +41,8 @@ import { usePipelineController } from './features/pipeline/usePipelineController
 import { useSessionRecovery } from './features/pipeline/useSessionRecovery';
 import { fadeSlideInSmall } from './features/ui/motion-tokens';
 import { safeGetLocalStorage, safeSetLocalStorage } from './utils/safeBrowser';
+import { withTimeout } from './utils/asyncTimeout';
+import type { PipelineUiError } from './types/pipeline';
 
 import './App.css';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -100,6 +102,8 @@ const STT_MAX_CONCURRENCY = Math.max(STT_MIN_CONCURRENCY, Number(import.meta.env
 const STT_DOWN_THRESHOLD_MS = Math.max(5_000, Number(import.meta.env.VITE_STT_DOWN_THRESHOLD_MS || TURBO_PROFILE_CONFIG.sttDownThresholdMs));
 const STT_UP_THRESHOLD_MS = Math.max(2_000, Number(import.meta.env.VITE_STT_UP_THRESHOLD_MS || TURBO_PROFILE_CONFIG.sttUpThresholdMs));
 const STT_CHUNK_SLA_MS = Math.max(5_000, Number(import.meta.env.VITE_STT_CHUNK_SLA_MS || TURBO_PROFILE_CONFIG.sttChunkSlaMs));
+const AUDIO_PRECONVERSION_TIMEOUT_MS = Math.max(3_000, Number(import.meta.env.VITE_AUDIO_PRECONVERSION_TIMEOUT_MS || 12_000));
+const PIPELINE_FINALIZE_WATCHDOG_MS = Math.max(30_000, Number(import.meta.env.VITE_PIPELINE_FINALIZE_WATCHDOG_MS || 240_000));
 type ActiveEngine = 'whisper' | 'gemini' | 'groq' | 'llm' | 'storage' | 'idle';
 
 const normalizeRuntimeModel = (rawModel?: string): string => {
@@ -189,6 +193,7 @@ const AppContent = () => {
     const [activeModel, setActiveModel] = useState<string>('');
     const [modelUpdatedAt, setModelUpdatedAt] = useState<number>(0);
     const [isLoading, setIsLoading] = useState(false);
+    const [processingError, setProcessingError] = useState<PipelineUiError | null>(null);
     const [currentView, setCurrentView] = useState<'record' | 'history' | 'reports' | 'result' | 'test-lab'>('record');
 
     const [pipelineMetadata, setPipelineMetadata] = useState<{
@@ -259,6 +264,7 @@ const AppContent = () => {
             setOriginalHistory(demoData.history);
             setCurrentPatientName(demoData.patientName);
             setPipelineMetadata(demoData.pipelineMetadata);
+            setProcessingError(null);
         } else if (!isPlaying && currentPatientName === "Paciente Demo (Simulación)") {
             // Reset when stopping demo
             setCurrentView('record');
@@ -266,6 +272,7 @@ const AppContent = () => {
             setOriginalHistory('');
             setCurrentPatientName('');
             setPipelineMetadata(undefined);
+            setProcessingError(null);
         }
     }, [isPlaying, demoData, currentPatientName]);
 
@@ -319,6 +326,11 @@ const AppContent = () => {
         totalChunks: 0
     });
     const transcriptPersistQueueRef = useRef<Promise<void>>(Promise.resolve());
+    const lastFinalizeAttemptRef = useRef<{
+        blob: Blob;
+        patientName: string;
+        batchIndex: number;
+    } | null>(null);
 
     useEffect(() => {
         currentViewRef.current = currentView;
@@ -618,6 +630,46 @@ No consta
 Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error'}`;
     };
 
+    const toFriendlyErrorCode = (message: string) => {
+        const raw = (message || '').trim();
+        const first = raw.split(':')[0] || 'pipeline_error';
+        return first.toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+    };
+
+    const toPipelineUiError = (error: unknown): PipelineUiError => {
+        const rawMessage = (error as Error)?.message || 'pipeline_error';
+        const normalized = rawMessage.toLowerCase();
+        const code = toFriendlyErrorCode(rawMessage);
+
+        if (normalized.includes('pipeline_finalize_timeout')) {
+            return {
+                code: 'pipeline_finalize_timeout',
+                message: 'El procesamiento tardó demasiado y se canceló para evitar bloqueo. Puedes reintentar con el mismo audio.',
+                retryable: true
+            };
+        }
+        if (normalized.includes('audio_preconversion_timeout')) {
+            return {
+                code: 'audio_preconversion_timeout',
+                message: 'La conversión local de audio excedió el tiempo máximo. Se recomienda reintentar.',
+                retryable: true
+            };
+        }
+        if (normalized.includes('audio_preconversion_failed') || normalized.includes('unable to decode audio data')) {
+            return {
+                code: 'audio_preconversion_failed',
+                message: 'No se pudo decodificar el audio del navegador. Puedes reintentar; si persiste, inicia una nueva consulta.',
+                retryable: true
+            };
+        }
+
+        return {
+            code,
+            message: `Error de procesamiento: ${rawMessage}`,
+            retryable: true
+        };
+    };
+
 
 
     const buildValidationLabel = (validations?: { validator: string }[]) => {
@@ -697,7 +749,8 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             recordDiagnosticEvent(runId, { type: 'stage_start', stage: splitStage });
         }
 
-        // Always convert to WAV before Whisper to avoid HTTP 400 on webm/opus.
+        // Prefer WAV before Whisper to avoid HTTP 400 on webm/opus.
+        // If conversion fails or times out, we fallback to validated raw upload.
         // convertBlobToWav handles chunking for oversized blobs and yields to
         // the main thread during encoding to prevent UI freezes.
         const isAlreadyWav = (blob.type || '').toLowerCase().includes('wav');
@@ -715,7 +768,11 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         }
 
         try {
-            const wavChunks = await convertBlobToWav(blob);
+            const wavChunks = await withTimeout(
+                convertBlobToWav(blob),
+                AUDIO_PRECONVERSION_TIMEOUT_MS,
+                () => new Error(`audio_preconversion_timeout:${AUDIO_PRECONVERSION_TIMEOUT_MS}`)
+            );
             if (wavChunks.length > 0) {
                 console.log(`[App] Pre-converted ${(blob.size / 1024).toFixed(0)}KB ${blob.type || 'unknown'} → ${wavChunks.length} WAV chunk(s)`);
                 if (runId) {
@@ -758,7 +815,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 try {
                     const likelyValid = await isLikelyContainerValid(blob);
                     if (likelyValid) {
-                        console.warn('[App] Falling back to raw audio upload after pre-conversion failure');
+                        console.warn('[App] RAW-first fallback after pre-conversion failure');
                         return [blob];
                     }
                 } catch (signatureError) {
@@ -2102,6 +2159,8 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         ensureAiService(keys);
         activeSessionIdRef.current = sessionId;
         sessionVersionRef.current += 1;
+        setProcessingError(null);
+        lastFinalizeAttemptRef.current = null;
         sttMetricsRef.current = {
             latenciesMs: [],
             concurrency: 2,
@@ -2158,6 +2217,12 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 return;
             }
 
+            setProcessingError(null);
+            lastFinalizeAttemptRef.current = {
+                blob,
+                patientName,
+                batchIndex
+            };
             setIsLoading(true);
             applyProcessingState({
                 label: 'Iniciando procesamiento final...',
@@ -2168,9 +2233,11 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             setCurrentView('result');
             setCurrentPatientName(patientName);
             await finalizePipeline(aiService, blob, patientName, batchIndex, []);
+            setProcessingError(null);
 
         } catch (error: any) {
             console.error(error);
+            setProcessingError(toPipelineUiError(error));
             applyProcessingState({
                 label: 'Error en el procesamiento.',
                 engine: 'idle',
@@ -2275,6 +2342,12 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 return;
             }
 
+            setProcessingError(null);
+            lastFinalizeAttemptRef.current = {
+                blob,
+                patientName,
+                batchIndex
+            };
             setIsLoading(true);
             setCurrentView('result');
             setCurrentPatientName(patientName);
@@ -2307,10 +2380,16 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 });
             }
 
-            await orchestrator.finalize(batchIndex, blob);
+            await withTimeout(
+                orchestrator.finalize(batchIndex, blob),
+                PIPELINE_FINALIZE_WATCHDOG_MS,
+                () => new Error(`pipeline_finalize_timeout:${PIPELINE_FINALIZE_WATCHDOG_MS}`)
+            );
+            setProcessingError(null);
             clearPipelineBuffers();
         } catch (error: any) {
             console.error('[App] V4 pipeline failed:', error);
+            setProcessingError(toPipelineUiError(error));
             applyProcessingState({
                 label: 'Error en el procesamiento.',
                 engine: 'idle',
@@ -2318,6 +2397,13 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                 markModelUpdate: false
             });
             const sessionId = orchestrator.getStatus().sessionId || '';
+            if (!isPartialBatch) {
+                try {
+                    orchestrator.abort(error?.message || 'v4_pipeline_failed');
+                } catch (abortError) {
+                    console.warn('[App] failed to abort orchestrator after finalize error:', abortError);
+                }
+            }
             if (sessionId) {
                 const runId = diagnosticRunBySessionRef.current.get(sessionId);
                 if (runId) {
@@ -2446,6 +2532,8 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
         const textSessionId = buildTextPipelineIdempotencyKey(patientName, text);
         const startedAt = Date.now();
         const aiService = ensureAiService(keys);
+        setProcessingError(null);
+        lastFinalizeAttemptRef.current = null;
         setIsLoading(true);
         setCurrentView('result');
         setCurrentPatientName(patientName);
@@ -2546,6 +2634,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                     asyncTriage: FAST_PATH_ASYNC_TRIAGE
                 }
             });
+            setProcessingError(null);
 
             applyProcessingState({
                 label: 'Guardando consulta de prueba en Historial...',
@@ -2679,6 +2768,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
             });
         } catch (e: any) {
             console.error(e);
+            setProcessingError(toPipelineUiError(e));
             applyProcessingState({
                 label: 'Error procesando texto',
                 engine: 'idle',
@@ -2873,6 +2963,8 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                             setTranscription('');
                             setCurrentPatientName('');
                             setPipelineMetadata(undefined);
+                            setProcessingError(null);
+                            lastFinalizeAttemptRef.current = null;
                             clearPipelineBuffers();
                             sessionVersionRef.current += 1;
                             if (orchestratorRef.current) {
@@ -2893,6 +2985,21 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason || 'pipeline_error
                             setCurrentView('record');
                         }}
                         onContentChange={(newContent) => setHistory(newContent)}
+                        processingError={processingError || undefined}
+                        onRetryProcessing={() => {
+                            const lastAttempt = lastFinalizeAttemptRef.current;
+                            if (!lastAttempt) {
+                                setProcessingError(null);
+                                setCurrentView('record');
+                                return;
+                            }
+                            void handleRecordingComplete(
+                                lastAttempt.blob,
+                                lastAttempt.patientName,
+                                false,
+                                lastAttempt.batchIndex
+                            );
+                        }}
                         metadata={pipelineMetadata}
                         recordId={currentRecordId || undefined}
                         onPersistMedicalHistory={persistMedicalHistory}
