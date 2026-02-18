@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Copy, Check, FileText, Sparkles, FileOutput, X, Printer, Plus, AlertTriangle, Edit2, Brain, Wand2, ThumbsDown, MoreHorizontal } from 'lucide-react';
+import { Copy, Check, FileText, Sparkles, FileOutput, X, Printer, Plus, AlertTriangle, Edit2, Brain, Wand2, ThumbsDown, MoreHorizontal, Download } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { MBSLogo } from './MBSLogo';
 import { AIAuditWidget } from './AIAuditWidget';
@@ -11,6 +11,7 @@ import { saveFieldConfirmation, logQualityEvent, saveDoctorSatisfactionEvent } f
 import { evaluateAndPersistRuleImpactV2 } from '../services/learning/rule-evaluator';
 import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
+import { downloadRecordAsJson } from '../utils/export';
 import type { PipelineUiError } from '../types/pipeline';
 
 interface HistoryViewProps {
@@ -992,6 +993,24 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                               </button>
                             </div>
                           )}
+                          <button
+                            className="action-button secondary menu-item"
+                            onClick={() => {
+                              moreActionsRef.current?.removeAttribute('open');
+                              downloadRecordAsJson({
+                                patientName: patientName,
+                                content: historyText,
+                                metadata: metadata,
+                                date: new Date().toISOString()
+                              });
+                              setHasExported(true);
+                            }}
+                            title="Descargar copia JSON (Plan B)"
+                            data-ui-state="idle"
+                          >
+                            <Download size={16} />
+                            <span>Descargar copia local</span>
+                          </button>
                           <button
                             className={`action-button copy-btn menu-item ${copied ? 'success' : ''}`}
                             onClick={() => {

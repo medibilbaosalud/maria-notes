@@ -48,9 +48,11 @@ const generateUuid = (): string => {
 // Map Dexie MedicalRecord fields to Supabase column names.
 // Dexie uses record_uuid / original_medical_history / audit_id / idempotency_key / updated_at.
 // Supabase canonical schema uses record_uuid as deterministic sync key.
+// Supabase canonical schema uses 'id' as primary key (uuid).
+// We map local 'record_uuid' to Supabase 'id'.
 const toCloudRecord = (record: MedicalRecord) => {
     return {
-        record_uuid: record.record_uuid,
+        id: record.record_uuid, // Map local record_uuid to Supabase id
         patient_name: record.patient_name,
         consultation_type: record.consultation_type,
         transcription: record.transcription,
@@ -73,16 +75,16 @@ const syncToCloud = async (record: MedicalRecord, operation: 'insert' | 'update'
             const cloudRecord = toCloudRecord(record);
             const { error } = await client
                 .from('medical_records')
-                .upsert([cloudRecord], { onConflict: 'record_uuid' });
+                .upsert([cloudRecord], { onConflict: 'id' });
             if (error) {
                 console.error(`[Cloud Sync] Upsert error (${operation}):`, error.message, error.details);
                 throw error;
             }
-            console.log(`[Cloud Sync] Record ${operation === 'insert' ? 'inserted' : 'updated'}:`, cloudRecord.record_uuid);
+            console.log(`[Cloud Sync] Record ${operation === 'insert' ? 'inserted' : 'updated'}:`, cloudRecord.id);
         } else if (operation === 'delete') {
             const { error } = await client.from('medical_records')
                 .delete()
-                .eq('record_uuid', record.record_uuid);
+                .eq('id', record.record_uuid);
             if (error) {
                 console.error('[Cloud Sync] Delete error:', error.message);
                 throw error;
