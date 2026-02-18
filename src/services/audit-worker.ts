@@ -210,14 +210,24 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
     if (!auditId || !auditData) {
         throw new Error('invalid_pipeline_audit_bundle_payload');
     }
+    const generationVersions = Array.isArray(auditData.generation_versions) ? auditData.generation_versions as Record<string, unknown>[] : [];
+    const modelInvocations = Array.isArray(payload.model_invocations) ? payload.model_invocations as Record<string, unknown>[] : [];
+    const modelsUsed = (auditData.models_used && typeof auditData.models_used === 'object')
+        ? auditData.models_used as Record<string, unknown>
+        : {};
+    const historyOutput = typeof auditData.history_output === 'string'
+        ? String(auditData.history_output)
+        : (generationVersions.length > 0
+            ? String(generationVersions[generationVersions.length - 1]?.content || '')
+            : '');
 
     const { error: auditError } = await supabase.from('ai_audit_logs').upsert([{
         id: auditId,
         patient_name: auditData.patient_name || null,
         pipeline_version: auditData.pipeline_version || null,
-        models_used: auditData.models_used || {},
+        models_used: modelsUsed,
         extraction_data: auditData.extraction_data || null,
-        generation_versions: auditData.generation_versions || [],
+        generation_versions: generationVersions,
         validation_logs: auditData.validation_logs || [],
         corrections_applied: auditData.corrections_applied || 0,
         successful: auditData.successful !== false,
@@ -226,6 +236,27 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
     }], { onConflict: 'id' });
 
     if (auditError) throw auditError;
+
+    try {
+        const { error: historyError } = await supabase.from('consultation_histories').upsert([{
+            audit_id: auditId,
+            session_id: String(payload.session_id || '') || null,
+            name: auditData.patient_name || null,
+            patient_name: auditData.patient_name || null,
+            medical_history: historyOutput || '',
+            primary_model: typeof modelsUsed.generation === 'string' ? String(modelsUsed.generation) : null,
+            models_used: modelsUsed,
+            model_invocations: modelInvocations,
+            successful: auditData.successful !== false,
+            pipeline_version: auditData.pipeline_version || null,
+            created_at: auditData.created_at || nowIso()
+        }], { onConflict: 'audit_id' });
+        if (historyError) {
+            console.warn('[AuditWorker] consultation_histories upsert failed:', historyError);
+        }
+    } catch (error) {
+        console.warn('[AuditWorker] consultation_histories persistence error:', error);
+    }
 
     const extractionMeta = Array.isArray(payload.extraction_meta) ? payload.extraction_meta as Record<string, unknown>[] : [];
     if (extractionMeta.length > 0) {
@@ -271,7 +302,6 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
         await chunkInsert('ai_semantic_checks', rows, 150);
     }
 
-    const modelInvocations = Array.isArray(payload.model_invocations) ? payload.model_invocations as Record<string, unknown>[] : [];
     if (modelInvocations.length > 0) {
         const rows = modelInvocations.map((entry, index) => ({
             audit_id: auditId,
@@ -291,6 +321,44 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
             created_at: entry.created_at || nowIso()
         }));
         await chunkInsert('ai_model_invocations', rows, 200);
+
+        const apiErrorRows = modelInvocations
+            .filter((entry) => !Boolean(entry.success))
+            .map((entry) => {
+                const provider = String(entry.provider || '');
+                const model = String(entry.model || '');
+                const code = String(entry.error_code || entry.error_type || 'unknown');
+                return {
+                    severity: 'error',
+                    message: `api_error:${provider}:${model}:${code}`,
+                    source: 'model_invocation',
+                    handled: true,
+                    session_id: String(entry.session_id || payload.session_id || ''),
+                    route: String(entry.route_key || ''),
+                    fingerprint: `${provider}:${model}:${code}`,
+                    context: {
+                        audit_id: auditId,
+                        task: String(entry.task || ''),
+                        phase: String(entry.phase || entry.task || ''),
+                        provider,
+                        model,
+                        route_key: String(entry.route_key || ''),
+                        error_type: entry.error_type ? String(entry.error_type) : null,
+                        error_code: entry.error_code ? String(entry.error_code) : null,
+                        is_fallback: Boolean(entry.is_fallback),
+                        latency_ms: Number.isFinite(Number(entry.latency_ms)) ? Number(entry.latency_ms) : null,
+                        estimated_tokens: Number.isFinite(Number(entry.estimated_tokens)) ? Number(entry.estimated_tokens) : null
+                    },
+                    created_at: entry.created_at || nowIso()
+                };
+            });
+        if (apiErrorRows.length > 0) {
+            try {
+                await chunkInsert('app_error_events', apiErrorRows, 200);
+            } catch (error) {
+                console.warn('[AuditWorker] app_error_events insert failed:', error);
+            }
+        }
     }
 
     const qualityEvent = payload.quality_event as Record<string, unknown> | undefined;

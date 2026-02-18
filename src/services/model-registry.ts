@@ -53,10 +53,11 @@ const candidate = (provider: ModelProvider, model: string, options: { thinking?:
 });
 
 const GEMINI_TEXT_CHAIN_LOW: ModelCandidate[] = [
+    candidate('gemini', 'gemini-3-flash-preview', { thinking: 'low' }),
     candidate('gemini', 'gemini-3-flash', { thinking: 'low' }),
     candidate('gemini', 'gemini-2.5-flash', { thinking: 'low' }),
-    candidate('gemini', 'gemini-3-pro', { thinking: 'low' }), // Added
     candidate('gemini', 'gemini-2.5-pro', { thinking: 'low' }), // Added
+    candidate('gemini', 'gemini-3-pro-preview', { thinking: 'low' }), // Added
     candidate('gemini', 'gemini-2.0-pro-exp', { thinking: 'low' }), // Added
     candidate('gemini', 'gemini-2.0-flash', { thinking: 'low' }), // Added
     candidate('gemini', 'gemini-2.0-flash-exp', { thinking: 'low' }), // Added
@@ -69,10 +70,11 @@ const GEMINI_TEXT_CHAIN_LOW: ModelCandidate[] = [
 ];
 
 const GEMINI_TEXT_CHAIN_MEDIUM: ModelCandidate[] = [
-    candidate('gemini', 'gemini-3-flash', { thinking: 'low' }),
+    candidate('gemini', 'gemini-3-flash-preview', { thinking: 'medium' }),
+    candidate('gemini', 'gemini-3-flash', { thinking: 'medium' }),
     candidate('gemini', 'gemini-2.5-flash', { thinking: 'medium' }),
-    candidate('gemini', 'gemini-3-pro', { thinking: 'medium' }), // Added (High reasoning fallback)
     candidate('gemini', 'gemini-2.5-pro', { thinking: 'medium' }), // Added
+    candidate('gemini', 'gemini-3-pro-preview', { thinking: 'medium' }), // Added (High reasoning fallback)
     candidate('gemini', 'gemini-2.0-pro-exp', { thinking: 'medium' }), // Added
     candidate('gemini', 'gemini-2.0-flash', { thinking: 'medium' }), // Added
     candidate('gemini', 'gemini-2.5-flash-lite', { thinking: 'low' }),
@@ -138,7 +140,9 @@ const DEFAULT_ALLOWED_CANDIDATES: ModelCandidate[] = [
     candidate('gemini', 'gemini-2.5-flash-preview-tts'),
     candidate('gemini', 'gemini-embedding-1'),
     candidate('gemini', 'gemini-robotics-er-1.5-preview'),
-    candidate('gemini', 'gemini-3-pro'),
+    candidate('gemini', 'gemini-3-pro-preview'),
+    candidate('gemini', 'gemini-3-flash-preview'),
+    candidate('gemini', 'gemini-3-flash'),
     candidate('gemini', 'gemini-2.5-pro'),
     candidate('gemini', 'gemini-2.0-pro-exp'),
     candidate('gemini', 'gemini-2.0-flash'),
@@ -255,7 +259,7 @@ const buildTaskPreferences = (): Record<TaskType, ModelCandidate[]> => {
     });
     if (GEMINI_ONE_CALL_STRICT) {
         const strictSingleShot = withAllowlist([
-            candidate('gemini', 'gemini-3-flash', { thinking: 'low' }),
+            candidate('gemini', 'gemini-3-flash-preview', { thinking: 'low' }),
             ...GROQ_CORE_FALLBACK
         ]);
         if (strictSingleShot.length > 0) {
@@ -319,13 +323,14 @@ export const MODEL_LIMITS: Record<string, ModelLimits> = {
 
     // Gemini / Gemma (per-model free-tier limits from Google AI Studio, Feb 2026)
     // Flash models: higher RPM/RPD, designed for throughput
-    'gemini:gemini-3-flash': { requestsPerMinute: 10, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
+    'gemini:gemini-3-flash-preview': { requestsPerMinute: 10, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
+    'gemini:gemini-3-flash': { requestsPerMinute: 10, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
     'gemini:gemini-2.5-flash': { requestsPerMinute: 10, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
     'gemini:gemini-2.5-flash-lite': { requestsPerMinute: 15, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
     'gemini:gemini-2.0-flash': { requestsPerMinute: 10, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
     'gemini:gemini-2.0-flash-exp': { requestsPerMinute: 10, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
     // Pro models: lower RPM/RPD, higher quality reasoning
-    'gemini:gemini-3-pro': { requestsPerMinute: 5, requestsPerDay: 25, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 128000 },
+    'gemini:gemini-3-pro-preview': { requestsPerMinute: 5, requestsPerDay: 25, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 65536 },
     'gemini:gemini-2.5-pro': { requestsPerMinute: 5, requestsPerDay: 25, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
     'gemini:gemini-2.0-pro-exp': { requestsPerMinute: 5, requestsPerDay: 25, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
     // Gemma models: generous limits (open-weight, hosted on Google)

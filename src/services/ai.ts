@@ -730,6 +730,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
 
             void enqueueAuditEvent('pipeline_audit_bundle', {
                 audit_id: auditId,
+                session_id: sessionId || auditId,
                 audit_data: {
                     patient_name: patientName,
                     pipeline_version: 'merged-4-phase-v3-strict',
@@ -766,6 +767,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                         risk_level: aggregateRiskLevel
                     },
                     generation_versions: versions,
+                    history_output: historyOutput,
                     validation_logs: allValidations,
                     corrections_applied: correctionsApplied,
                     successful: true,
@@ -1033,6 +1035,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
 
         void enqueueAuditEvent('pipeline_audit_bundle', {
             audit_id: auditId,
+            session_id: auditId,
             audit_data: {
                 patient_name: patientName,
                 pipeline_version: 'single-shot-v1',
@@ -1074,6 +1077,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
                         timestamp: Date.now()
                     }
                 ],
+                history_output: historyOutput,
                 validation_logs: allValidations,
                 corrections_applied: 0,
                 successful: true,
@@ -1202,15 +1206,18 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
             this.groq.drainModelInvocations();
             const failureAuditId = this.buildAuditId();
             const reason = (error as Error)?.message || 'pipeline_error';
+            const provisionalHistory = this.buildProvisionalHistory(reason);
             console.error('[AIService] Pipeline failed:', reason);
             void enqueueAuditEvent('pipeline_audit_bundle', {
                 audit_id: failureAuditId,
+                session_id: failureAuditId,
                 audit_data: {
                     patient_name: patientName,
                     pipeline_version: SINGLE_SHOT_HISTORY_MODE ? 'single-shot-v1' : 'merged-4-phase-v3-strict',
                     models_used: {},
                     extraction_data: null,
                     generation_versions: [],
+                    history_output: provisionalHistory,
                     validation_logs: [],
                     corrections_applied: 0,
                     successful: false,
@@ -1236,7 +1243,7 @@ Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
             // Return provisional history instead of crashing — the doctor
             // always sees a structured template they can fill in manually.
             return {
-                data: this.buildProvisionalHistory(reason),
+                data: provisionalHistory,
                 model: 'pipeline_failed',
                 remaining_errors: [{ type: 'error', field: 'pipeline', reason }],
                 pipeline_status: 'degraded',

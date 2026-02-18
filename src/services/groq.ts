@@ -24,6 +24,14 @@ const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
 const WHISPER_MODELS = ['whisper-large-v3-turbo', 'whisper-large-v3'];
 
+const normalizeGeminiModelId = (modelName: string): string => {
+    const trimmed = String(modelName || '').trim().replace(/^models\//, '');
+    if (!trimmed) return trimmed;
+    if (trimmed === 'gemini-3-flash') return 'gemini-3-flash-preview';
+    if (trimmed === 'gemini-3-pro') return 'gemini-3-pro-preview';
+    return trimmed;
+};
+
 type TranscriptionOptions = {
     whisperStrict?: boolean;
     signal?: AbortSignal;
@@ -1059,11 +1067,12 @@ ${schemaHint}`;
         prompt: string,
         options: { temperature?: number; jsonMode?: boolean; maxTokens: number; task: TaskType; thinking?: 'low' | 'medium'; signal?: AbortSignal }
     ): Promise<string> {
+        const resolvedModelName = normalizeGeminiModelId(modelName);
         const retryPolicy = getAdaptiveRetryPolicyForTask(options.task, prompt.length);
         const effectiveRetries = GEMINI_ONE_CALL_STRICT && options.task === 'single_shot_history'
             ? 0
             : retryPolicy.retries;
-        const isThinking = options.thinking && modelName.startsWith('gemini-');
+        const isThinking = options.thinking && resolvedModelName.startsWith('gemini-');
         const generationConfig: Record<string, unknown> = {};
 
         // Gemini 3+ requires temperature=1.0 (default) when thinking is active;
@@ -1077,7 +1086,7 @@ ${schemaHint}`;
         }
 
         if (isThinking) {
-            if (modelName.startsWith('gemini-3')) {
+            if (resolvedModelName.startsWith('gemini-3')) {
                 // Gemini 3 models use thinkingLevel enum instead of thinkingBudget
                 generationConfig.thinkingConfig = {
                     thinkingLevel: options.thinking === 'medium' ? 'MEDIUM' : 'LOW'
@@ -1091,10 +1100,11 @@ ${schemaHint}`;
         }
 
         const response = await fetchWithRetry(
-            `${GEMINI_API_URL}/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+            `${GEMINI_API_URL}/models/${encodeURIComponent(resolvedModelName)}:generateContent?key=${encodeURIComponent(apiKey)}`,
             {
                 method: 'POST',
                 headers: {
+                    'x-goog-api-key': apiKey,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({

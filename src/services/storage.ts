@@ -280,18 +280,31 @@ export const syncFromCloud = async (): Promise<number> => {
 
     try {
         console.log('[Cloud Sync] Checking for new records...');
-        const { data: cloudRecords, error } = await client
-            .from('medical_records')
-            .select('*')
-            .order('created_at', { ascending: false });
+        const [medicalResult, historyResult] = await Promise.all([
+            client
+                .from('medical_records')
+                .select('*')
+                .order('created_at', { ascending: false }),
+            client
+                .from('consultation_histories')
+                .select('*')
+                .order('created_at', { ascending: false })
+        ]);
 
-        if (error || !cloudRecords) {
-            console.error('[Cloud Sync] Fetch failed:', error);
+        const cloudRecords = medicalResult.data || [];
+        const cloudHistories = historyResult.data || [];
+
+        if (medicalResult.error) {
+            console.error('[Cloud Sync] Fetch failed:', medicalResult.error);
             return 0;
+        }
+        if (historyResult.error) {
+            console.warn('[Cloud Sync] consultation_histories fetch failed:', historyResult.error.message);
         }
 
         const localRecords = await db.medical_records.toArray();
         const localByUuid = new Map(localRecords.map(r => [r.record_uuid, r]));
+        const knownAuditIds = new Set(localRecords.map((record) => String(record.audit_id || '').trim()).filter(Boolean));
 
         const newRecords: any[] = [];
         let addedCount = 0;
@@ -311,6 +324,9 @@ export const syncFromCloud = async (): Promise<number> => {
                     record_uuid: cloudUuid,
                     updated_at: cloudUpdatedAt || new Date().toISOString()
                 });
+                if (cloudRec.audit_id) {
+                    knownAuditIds.add(String(cloudRec.audit_id));
+                }
                 addedCount++;
                 continue;
             }
@@ -322,7 +338,40 @@ export const syncFromCloud = async (): Promise<number> => {
                     record_uuid: cloudUuid,
                     updated_at: cloudUpdatedAt
                 });
+                if (cloudRec.audit_id) {
+                    knownAuditIds.add(String(cloudRec.audit_id));
+                }
             }
+        }
+
+        for (const history of cloudHistories) {
+            const auditId = String(history.audit_id || '').trim();
+            if (!auditId || knownAuditIds.has(auditId)) continue;
+
+            const syntheticUuid = String(history.record_uuid || `hist_${auditId}`);
+            if (!syntheticUuid || localByUuid.has(syntheticUuid)) continue;
+
+            const patientName = String(history.name || history.patient_name || 'Sin nombre').trim() || 'Sin nombre';
+            const historyText = String(history.medical_history || '');
+            const createdAt = String(history.created_at || nowIso());
+
+            newRecords.push({
+                record_uuid: syntheticUuid,
+                idempotency_key: `history_${auditId}`,
+                patient_name: patientName,
+                consultation_type: 'Historia',
+                transcription: '',
+                medical_history: historyText,
+                original_medical_history: historyText,
+                ai_model: String(history.primary_model || ''),
+                audit_id: auditId,
+                output_tier: 'final',
+                created_at: createdAt,
+                updated_at: createdAt
+            });
+            localByUuid.set(syntheticUuid, {} as MedicalRecord);
+            knownAuditIds.add(auditId);
+            addedCount++;
         }
 
         if (newRecords.length > 0) {
