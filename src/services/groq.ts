@@ -65,6 +65,97 @@ const DEFAULT_HISTORY_TEMPLATE = `Usa EXACTAMENTE este formato (Markdown). No a√
 ## PLAN
 {plan}`;
 
+const ORL_STYLE_PROFILE_V1 = `ESTILO ORL TELEGRAFICO (OBLIGATORIO)
+- Tono: clinico, breve y directo. No literario.
+- Anti-literario: evita narrativas largas, adjetivos superfluos y conectores de relleno.
+- Patrones: frases cortas; una idea por linea; verbos clinicos directos.
+- Exploracion/pruebas: prioriza etiquetas en mayusculas seguidas de ":" y hallazgo breve.
+- Plan: acciones cortas y concretas; mantener dosis/pautas literales si constan.
+- Seguimiento: incluir control temporal solo si aparece en datos/evidencia.
+- Abreviaturas ORL: conservar abreviaturas clinicas existentes (ej. OD, OI, Impe, Audio, Videonaso).
+- NO reutilizar hechos clinicos de los ejemplos de estilo; solo imitar forma de redaccion.`;
+
+const ORL_STYLE_EXAMPLES_FULL_V1 = `EJEMPLOS DE ESTILO ORL (SOLO FORMA, NO CONTENIDO):
+1) Refiere que ha estado con odinofagia y disfonia desde octubre a noviembre. Ahora mejor.
+EXPLORACION:
+VIDEONASOLARINGOESTROBOSCOPIA: Muy nauseosa. Edema de reinke bilateral, hiperqueratosis, el dcho eritematoso. Muy mala exploracion.
+PLAN: STP TABACO
+Dacortin 30 en pauta descendente 7 d
+Pautas de higiene vocal.
+Control en 1 mes
+
+2) Refiere mareo con giro de objetos. Le pasa sobre todo al mirar hacia arriba. Le envia Lopez Zalduendo con vertigo. Le ha pautado serc. No mejoria. Lleva asi 1 semana.
+EXPLORACION:
+OTOSCOPIA: OD: gran tapon, extraigo
+OI: igual
+EXPL VESTIBULAR: dix-hallpike + hacia la izq
+Realizo maniobra de Epley
+PLAN: Ejercicios de Brandt Daroff
+Control en 1 mes
+
+3) Refiere episodio de mareo hace unos dias de horas duracion (por la manana mientras estuvo en el trabajo) con sensacion de inestabilidad sin giro de objetos. Habitualmente suele tener sensacion de taponamiento otico bilateral.
+EXPLORACION:
+OTOSCOPIA: OD: normal
+OI: normal
+IMPEDANCIO: normal
+AUDIOMETRIA: OD: leve caida de transmision en graves (30 db) con gap del 20 db
+OI: igual
+EXPL VESTIBULAR: normal
+Puede ser una fijacion de cadena
+PLAN: Control en 1 ano
+
+4) Refiere hipoacusia de OD progresiva. El izq oye mucho mejor.
+EXPLORACION:
+OTOSCOPIA: OD: normal
+OI: igual
+IMPE: normal
+AUDIO: OD: hipoacusia neurosensorial leve-moderada
+OI: caida moderada en agudos. Resto en limites normales.
+PLAN: Peatc, remito a Medibilbao
+Valorar luego audifonos.
+
+5) Paciente en control en Durango desde el verano del 2023. Hemos eliminado la historia por error tras doblarlo en MediBILBAO. Realizo una rehabilitacion en el 2023 con Beatriz de Sergio en Durango. Mejoro levemente pero mantiene disfonias cada vez mas frecuentes y con minimos sobreesfuerzos vocales. Tendencia a elevar la intensidad de la voz.
+EXPLORACION:
+G 2
+R 0
+B 2
+A 1
+S 1
+VIDEOFIBROLARINGOESTROBOSCOPIA: Cuerdas vocales con zonas nodulares en 1/3 medio con defecto de cierre anterior y posterior. Onda mucosa y amplitud normales. Acortamiento transversal. Corditis leve.
+PLAN: Pautas de higiene vocal e hidratacion laringea y nueva rhb aqui.
+
+6) Paciente en control en Durango desde el verano del 2023. Hemos eliminado la historia por error tras doblarlo en MediBILBAO. Realizo una rehabilitacion en el 2023 con Beatriz de Sergio en Durango. Mejoro levemente pero mantiene disfonias cada vez mas frecuentes y con minimos sobreesfuerzos vocales. Tendencia a elevar la intensidad de la voz.
+EXPLORACION:
+G 2
+R 0
+B 2
+A 1
+S 1
+VIDEOFIBROLARINGOESTROBOSCOPIA: Cuerdas vocales con zonas nodulares en 1/3 medio con defecto de cierre anterior y posterior. Onda mucosa y amplitud normales. Acortamiento transversal. Corditis leve.
+PLAN: Pautas de higiene vocal e hidratacion laringea y nueva rhb aqui.
+
+7) Refiere acufeno del OD de 2 sem evolucion. No refiere hipoacusia.
+EXPLORACION:
+OTOSCOPIA: normal
+IMPEDANCIO: normal
+VIDEONASO: Rinitis, rinorrea, mucosa palida. Moco en cavum.
+PLAN: RYALTRIS 2/12H 3 M
+
+8) En el 2017 comenzo con picor en la lengua. Su dentista le envio a la facultad de medicina. Ellos le pusieron el rivotril. Hoy acude a mirarlo.
+EXPLORACION:
+CAV ORAL: normal, lengua saburral.
+VIDEONASO: signos de reflujo faringolaringeo, mucosa retrocricoidea engrosada.
+PLAN: Nexium 20 1/12h 3 m
+Control en Medibilbao
+
+9) Refiere taponamiento de OI y acufeno desde hace 6 meses. Le ha mirado su tio ORL de Logrono. Le pauto corticoide.
+EXPLORACION:
+OTOSCOPIA: normal
+IMPE: normal
+AUDIO: normal, perfecta
+VIDEONASO: Rinitis.
+PLAN: Rylatris 2/12h. Si no mejoria podria ser por el bruxismo.`;
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const buildAudioUploadFileName = (blob: Blob): string => {
@@ -287,6 +378,17 @@ export interface ExtractionResult {
     };
     diagnostico: string[] | null;
     plan: string | null;
+    psychology_context?: {
+        antecedentes_relevantes: string[];
+        sintomas_principales: string[];
+        factores_desencadenantes: string[];
+        impacto_funcional: string | null;
+        observaciones_clinicas: string[];
+        impresion_clinica: string[];
+        plan_terapeutico: string[];
+        factores_riesgo: string[];
+        factores_protectores: string[];
+    };
     notas_calidad?: {
         tipo: 'INAUDIBLE' | 'AMBIGUO';
         seccion: string;
@@ -297,6 +399,7 @@ export interface ExtractionResult {
 export interface ConsultationClassification {
     visit_type: string;
     ent_area: string;
+    clinical_area?: string;
     urgency: string;
     confidence?: number;
 }
@@ -1736,6 +1839,9 @@ Reglas:
 - Respeta temporalidad (pasado vs actual).
 - Para diagnostico: incluir solo diagnosticos explicitamente sostenidos.
 - Para plan: incluir solo recomendaciones/acciones explicitamente mencionadas.
+- Conserva abreviaturas y terminologia ORL tal como aparezcan en el texto.
+- Prioriza literalidad para dosis, pautas, tiempos de evolucion y pruebas realizadas.
+- No expandas el contenido con redaccion literaria ni parafrasis narrativa.
 
 CLASIFICACION:
 - visit_type: ${classification.visit_type}
@@ -1854,7 +1960,14 @@ Reglas obligatorias:
 - Evita agregar datos no mencionados en la transcripcion.
 - Mantiene consistencia clinica interna (sin contradicciones entre secciones).
 - NO incluyas informacion tecnica interna (clasificacion, rulepack, aprendizaje, notas del sistema).
+- Estilo anti-literario: evita parrafos narrativos largos y explicaciones redundantes.
+- En "EXPLORACION / PRUEBAS": usa estilo ORL con lineas breves tipo "ETIQUETA: hallazgo" cuando existan datos de exploracion.
+- En "PLAN": usa acciones cortas (idealmente una por linea), sin prosa explicativa.
 ${errorsBlock}
+
+${ORL_STYLE_PROFILE_V1}
+
+${ORL_STYLE_EXAMPLES_FULL_V1}
 
 FORMATO OBLIGATORIO:
 ${DEFAULT_HISTORY_TEMPLATE}
@@ -2638,6 +2751,9 @@ Reglas:
 - Usa SOLO la transcripcion, no inventes datos.
 - Si falta un dato, usa "No consta" en la historia y null/[]/"" en extraccion segun corresponda.
 - Respeta negaciones y temporalidad.
+- Estilo anti-literario: frases cortas, directas y clinicas; evita prosa narrativa.
+- En "EXPLORACION / PRUEBAS": usa estilo ORL con lineas breves tipo "ETIQUETA: hallazgo".
+- En "PLAN": redacta acciones concretas y breves; sin explicaciones largas.
 - Mantiene exactamente este formato Markdown en history_markdown:
 ## MOTIVO DE CONSULTA
 ...
@@ -2663,6 +2779,10 @@ Reglas:
 - No incluyas bloques internos del sistema (rulepack, clasificacion t√©cnica, notas del sistema).
 - classification debe contener visit_type, ent_area y urgency.
 - uncertainty_flags debe contener solo dudas clinicas reales detectadas.
+
+${ORL_STYLE_PROFILE_V1}
+
+${ORL_STYLE_EXAMPLES_FULL_V1}
 
 Paciente: ${patientName || 'Paciente'}
 Clasificacion sugerida (opcional): ${JSON.stringify(options?.classification || null)}

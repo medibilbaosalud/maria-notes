@@ -1,5 +1,5 @@
 import { db, type AuditOutboxItem } from './db';
-import { logQualityEvent, supabase } from './supabase';
+import { hasSupabaseSession, logQualityEvent, supabase } from './supabase';
 import { safeGetLocalStorage, safeSetLocalStorage } from '../utils/safeBrowser';
 
 const MAX_ATTEMPTS = 6;
@@ -148,21 +148,17 @@ const computeNextAttempt = (attempt: number): string => {
 
 const isNonRetryableOutboxError = (error: unknown): boolean => {
     const status = Number((error as { status?: number })?.status || 0);
-    if ([400, 401, 403, 404, 409, 410, 422].includes(status)) return true;
+    if ([400, 404, 409, 410, 422].includes(status)) return true;
 
     const message = ((error as Error)?.message || '').toLowerCase();
     if (!message) return false;
     if (
         message.includes('http 400')
-        || message.includes('http 401')
-        || message.includes('http 403')
         || message.includes('http 404')
         || message.includes('http 409')
         || message.includes('http 410')
         || message.includes('http 422')
         || message.includes('http_400')
-        || message.includes('http_401')
-        || message.includes('http_403')
         || message.includes('http_404')
         || message.includes('http_409')
         || message.includes('http_410')
@@ -203,7 +199,9 @@ const chunkInsert = async (table: string, rows: Record<string, unknown>[], chunk
 };
 
 const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
-    if (!supabase) return;
+    if (!supabase || !hasSupabaseSession()) {
+        throw new Error('auth_required_for_audit_bundle');
+    }
 
     const auditId = (payload.audit_id as string | undefined) || undefined;
     const auditData = payload.audit_data as Record<string, unknown> | undefined;
@@ -372,7 +370,9 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
 };
 
 const processPipelineRunUpdate = async (payload: Record<string, unknown>) => {
-    if (!supabase) return;
+    if (!supabase || !hasSupabaseSession()) {
+        throw new Error('auth_required_for_pipeline_run');
+    }
     const sessionId = String(payload.session_id || '');
     if (!sessionId) throw new Error('invalid_pipeline_run_payload');
 
@@ -431,7 +431,9 @@ const processPipelineRunUpdate = async (payload: Record<string, unknown>) => {
 };
 
 const processPipelineAttempt = async (payload: Record<string, unknown>) => {
-    if (!supabase) return;
+    if (!supabase || !hasSupabaseSession()) {
+        throw new Error('auth_required_for_pipeline_attempt');
+    }
     const sessionId = String(payload.session_id || '');
     const stage = String(payload.stage || '');
     if (!sessionId || !stage) throw new Error('invalid_pipeline_attempt_payload');
@@ -474,7 +476,9 @@ const processPipelineAttempt = async (payload: Record<string, unknown>) => {
 };
 
 const processPipelineMarker = async (eventType: string, payload: Record<string, unknown>) => {
-    if (!supabase) return;
+    if (!supabase || !hasSupabaseSession()) {
+        throw new Error('auth_required_for_pipeline_marker');
+    }
     const sessionId = String(payload.session_id || '');
     if (!sessionId) return;
     const { data: run } = await supabase
@@ -565,7 +569,8 @@ export const processAuditOutboxOnce = async (): Promise<number> => {
             } catch (error) {
                 metricsSnapshot.worker_failures += 1;
                 const nextAttempts = item.attempts + 1;
-                const nonRetryable = isNonRetryableOutboxError(error);
+                const requiresAuth = ((error as Error)?.message || '').includes('auth_required_');
+                const nonRetryable = !requiresAuth && isNonRetryableOutboxError(error);
                 const deadLetter = !nonRetryable && nextAttempts >= MAX_ATTEMPTS;
                 if (!deadLetter && !nonRetryable) {
                     metricsSnapshot.retries_scheduled += 1;
@@ -579,7 +584,9 @@ export const processAuditOutboxOnce = async (): Promise<number> => {
                     status: nonRetryable ? 'completed' : (deadLetter ? 'dead_letter' : 'pending'),
                     attempts: nextAttempts,
                     next_attempt_at: deadLetter ? item.next_attempt_at : computeNextAttempt(nextAttempts),
-                    last_error: nonRetryable
+                    last_error: requiresAuth
+                        ? `auth_required:${reason}`
+                        : nonRetryable
                         ? `dropped_non_retryable:${reason}`
                         : reason,
                     updated_at: nowIso()

@@ -6,18 +6,20 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MBSLogo } from './MBSLogo';
 import { getPatientNameSuggestions, type PatientNameSuggestion } from '../services/storage';
 import { fadeSlideInSmall, motionEase, motionTransitions, softScaleTap, statusPulseSoft } from '../features/ui/motion-tokens';
+import type { ClinicalSpecialtyId } from '../clinical/specialties';
 import './Recorder.css';
 
 type ActiveEngine = 'whisper' | 'gemini' | 'groq' | 'llm' | 'storage' | 'idle';
 
 interface RecorderProps {
-  onRecordingComplete: (blob: Blob, patientName: string, isPartialBatch?: boolean, batchIndex?: number) => Promise<void> | void;
-  onConsultationStart?: (sessionId: string, patientName: string) => void;
+  onRecordingComplete: (blob: Blob, patientName: string, specialty: ClinicalSpecialtyId, isPartialBatch?: boolean, batchIndex?: number) => Promise<void> | void;
+  onConsultationStart?: (sessionId: string, patientName: string, specialty: ClinicalSpecialtyId) => void;
   canStart?: boolean;
   startBlockReason?: string;
   processingLabel?: string;
   activeEngine?: ActiveEngine;
   activeModel?: string;
+  selectedSpecialty: ClinicalSpecialtyId;
 }
 
 export const Recorder: React.FC<RecorderProps> = ({
@@ -27,7 +29,8 @@ export const Recorder: React.FC<RecorderProps> = ({
   startBlockReason = '',
   processingLabel = 'Listo para grabar',
   activeEngine = 'idle',
-  activeModel = ''
+  activeModel = '',
+  selectedSpecialty
 }) => {
   const turboBatchIntervalMs = Number(import.meta.env.VITE_TURBO_RECORDER_BATCH_INTERVAL_MS || 600_000);
   const listboxId = useId();
@@ -56,7 +59,7 @@ export const Recorder: React.FC<RecorderProps> = ({
 
   const handleBatchReady = async ({ blob, batchIndex }: { blob: Blob; batchIndex: number }) => {
     console.log(`[RecorderUI] Batch ${batchIndex} ready (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
-    await onRecordingComplete(blob, patientNameRef.current, true, batchIndex);
+    await onRecordingComplete(blob, patientNameRef.current, selectedSpecialty, true, batchIndex);
   };
 
   const {
@@ -69,7 +72,7 @@ export const Recorder: React.FC<RecorderProps> = ({
     onFinalReady: async ({ blob, lastBatchIndex }) => {
       console.log(`[RecorderUI] Final segment ready (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
       try {
-        await onRecordingComplete(blob, patientNameRef.current, false, lastBatchIndex);
+        await onRecordingComplete(blob, patientNameRef.current, selectedSpecialty, false, lastBatchIndex);
       } finally {
         setIsFinalizing(false);
       }
@@ -114,7 +117,7 @@ export const Recorder: React.FC<RecorderProps> = ({
       : `session_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     try {
       await startRecording();
-      onConsultationStart?.(sessionId, patientNameRef.current);
+      onConsultationStart?.(sessionId, patientNameRef.current, selectedSpecialty);
     } catch (error) {
       console.error('[RecorderUI] Failed to start recording:', error);
     }

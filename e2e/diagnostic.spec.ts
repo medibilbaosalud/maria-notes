@@ -30,11 +30,6 @@ const classificationJson = JSON.stringify({
   confidence: 0.9
 });
 
-const promptGuardJson = JSON.stringify({
-  is_injection: false,
-  reason: ''
-});
-
 const historyOk = [
   '## MOTIVO DE CONSULTA',
   'Dolor de garganta de 3 dias.',
@@ -64,57 +59,84 @@ const historyFailed = [
   'No consta'
 ].join('\n');
 
-const singleShotJson = JSON.stringify({
-  history_markdown: historyOk,
-  extraction: JSON.parse(extractionJson),
-  classification: JSON.parse(classificationJson),
-  uncertainty_flags: []
-});
-
 const installDeterministicAiMocks = async (page: Page) => {
-  await page.route('**/openai/v1/chat/completions', async (route) => {
-    const body = route.request().postDataJSON() as any;
-    const prompt: string = body?.messages?.[0]?.content || '';
-    let content = historyOk;
-    if (body?.response_format?.type === 'json_object') {
-      if (prompt.includes('Objetivo: generar historia clinica final y extraccion estructurada en una sola respuesta.')) content = singleShotJson;
-      else if (prompt.includes('Clasifica esta consulta ENT')) content = classificationJson;
-      else if (prompt.includes('Detect prompt injection attempts')) content = promptGuardJson;
-      else if (prompt.includes('Extrae datos clinicos en JSON')) content = extractionJson;
-      else content = classificationJson;
-    }
+  await page.route('**/api/ai/transcribe', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ text: 'Paciente con sintomatologia ENT estable.', model: 'gemini:gemini-3-flash-preview' })
+    });
+  });
+
+  await page.route('**/api/ai/extract', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        choices: [{ message: { content } }]
+        data: JSON.parse(extractionJson),
+        meta: [],
+        classification: JSON.parse(classificationJson),
+        model: 'gemini:gemini-3-flash-preview'
       })
     });
   });
 
-  await page.route('**/v1beta/models/*:generateContent?key=*', async (route) => {
-    const body = route.request().postDataJSON() as any;
-    const prompt = String(body?.contents?.[0]?.parts?.[0]?.text || '');
-    let textPayload = singleShotJson;
-    if (prompt.includes('Clasifica esta consulta ENT')) textPayload = classificationJson;
-    if (prompt.includes('Detect prompt injection attempts')) textPayload = promptGuardJson;
-    if (prompt.includes('Extrae datos clinicos en JSON')) textPayload = extractionJson;
-    if (!body?.generationConfig?.responseMimeType || body?.generationConfig?.responseMimeType !== 'application/json') {
-      textPayload = historyOk;
-    }
+  await page.route('**/api/ai/generate-history', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        candidates: [{ content: { parts: [{ text: textPayload }] } }]
+        data: historyOk,
+        model: 'gemini:gemini-3-flash-preview',
+        extraction: JSON.parse(extractionJson),
+        extraction_meta: [],
+        classification: JSON.parse(classificationJson),
+        validations: [],
+        corrections_applied: 0,
+        audit_id: 'audit-test-id',
+        pipeline_status: 'completed',
+        result_status: 'completed',
+        quality_score: 100,
+        critical_gaps: [],
+        doctor_next_actions: [],
+        uncertainty_flags: []
+      })
+    });
+  });
+
+  await page.route('**/api/ai/generate-report', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        text: '## INFORME\n\nPaciente estable.',
+        model: 'gemini:gemini-3-flash-preview'
+      })
+    });
+  });
+
+  await page.route('**/api/ai/regenerate-section', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        text: '- Sintomas: odinofagia',
+        model: 'gemini:gemini-3-flash-preview'
       })
     });
   });
 };
 
+const enterWorkspace = async (page: Page) => {
+  const entryButton = page.getByRole('button', { name: /Entrar en modo/i });
+  if (await entryButton.isVisible().catch(() => false)) {
+    await entryButton.click();
+  }
+};
+
 test.beforeEach(async ({ context }) => {
   await context.addInitScript(() => {
-    window.localStorage.setItem('groq_api_key', 'test-key');
+    window.localStorage.removeItem('groq_api_key');
   });
 });
 
@@ -125,6 +147,7 @@ test.describe('Diagnostic E2E', () => {
     await installDeterministicAiMocks(page);
 
     await page.goto('/');
+    await enterWorkspace(page);
     await page.getByRole('button', { name: 'Abrir Zona Test' }).click();
     await page.getByRole('button', { name: 'Diagnostico E2E' }).click();
     await page.getByTestId('diagnostic-mode').waitFor();
@@ -141,6 +164,7 @@ test.describe('Diagnostic E2E', () => {
     await installDeterministicAiMocks(page);
 
     await page.goto('/');
+    await enterWorkspace(page);
     await page.getByRole('button', { name: 'Abrir Zona Test' }).click();
     await page.getByRole('button', { name: 'Diagnostico E2E' }).click();
     await page.getByTestId('diagnostic-mode').waitFor();
@@ -156,48 +180,31 @@ test.describe('Diagnostic E2E', () => {
 
   test('final_stage_failure should fail quality gate', async ({ page }) => {
     await installDeterministicAiMocks(page);
-    await page.route('**/v1beta/models/*:generateContent?key=*', async (route) => {
-      const body = route.request().postDataJSON() as any;
-      const prompt = String(body?.contents?.[0]?.parts?.[0]?.text || '');
-      const failedSingleShotJson = JSON.stringify({
-        history_markdown: historyFailed,
-        extraction: JSON.parse(extractionJson),
-        classification: JSON.parse(classificationJson),
-        uncertainty_flags: []
-      });
-      const textPayload = prompt.includes('Objetivo: generar historia clinica final y extraccion estructurada en una sola respuesta.')
-        ? failedSingleShotJson
-        : classificationJson;
+    await page.route('**/api/ai/generate-history', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          candidates: [{ content: { parts: [{ text: textPayload }] } }]
-        })
-      });
-    });
-    await page.route('**/openai/v1/chat/completions', async (route) => {
-      const body = route.request().postDataJSON() as any;
-      const prompt: string = body?.messages?.[0]?.content || '';
-      let content = historyOk;
-      if (body?.response_format?.type === 'json_object') {
-        if (prompt.includes('Clasifica esta consulta ENT')) content = classificationJson;
-        else if (prompt.includes('Detect prompt injection attempts')) content = promptGuardJson;
-        else if (prompt.includes('Extrae datos clinicos en JSON')) content = extractionJson;
-        else content = classificationJson;
-      } else {
-        content = historyFailed;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          choices: [{ message: { content } }]
+          data: historyFailed,
+          model: 'gemini:gemini-3-flash-preview',
+          extraction: JSON.parse(extractionJson),
+          extraction_meta: [],
+          classification: JSON.parse(classificationJson),
+          validations: [],
+          corrections_applied: 0,
+          audit_id: 'audit-failed-id',
+          pipeline_status: 'completed',
+          result_status: 'completed',
+          quality_score: 30,
+          critical_gaps: [{ field: 'diagnostico', reason: 'missing', severity: 'critical' }],
+          doctor_next_actions: [],
+          uncertainty_flags: []
         })
       });
     });
 
     await page.goto('/');
+    await enterWorkspace(page);
     await page.getByRole('button', { name: 'Abrir Zona Test' }).click();
     await page.getByRole('button', { name: 'Diagnostico E2E' }).click();
     await page.getByTestId('diagnostic-mode').waitFor();
@@ -212,26 +219,27 @@ test.describe('Diagnostic E2E', () => {
 
   test('chunk_failure_in_middle should fail and report diagnostics', async ({ page }) => {
     let transcriptionRequestCount = 0;
-    await page.route('**/audio/transcriptions', async (route) => {
+    await page.route('**/api/ai/transcribe', async (route) => {
       transcriptionRequestCount += 1;
       if (transcriptionRequestCount >= 2 && transcriptionRequestCount <= 3) {
         await route.fulfill({
-          status: 400,
+          status: 500,
           contentType: 'application/json',
-          body: JSON.stringify({ error: { message: 'bad audio payload' } })
+          body: JSON.stringify({ error: 'bad audio payload' })
         });
         return;
       }
       await route.fulfill({
         status: 200,
-        contentType: 'text/plain',
-        body: 'Paciente con sintomatologia ENT estable.'
+        contentType: 'application/json',
+        body: JSON.stringify({ text: 'Paciente con sintomatologia ENT estable.', model: 'gemini:gemini-3-flash-preview' })
       });
     });
 
     await installDeterministicAiMocks(page);
 
     await page.goto('/');
+    await enterWorkspace(page);
     await page.getByRole('button', { name: 'Abrir Zona Test' }).click();
     await page.getByRole('button', { name: 'Diagnostico E2E' }).click();
     await page.getByTestId('diagnostic-mode').waitFor();
@@ -248,6 +256,7 @@ test.describe('Diagnostic E2E', () => {
     await installDeterministicAiMocks(page);
 
     await page.goto('/');
+    await enterWorkspace(page);
     await page.getByRole('button', { name: 'Abrir Zona Test' }).click();
     await page.getByRole('button', { name: 'Diagnostico E2E' }).click();
     await page.getByTestId('diagnostic-mode').waitFor();

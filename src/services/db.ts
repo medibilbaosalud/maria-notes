@@ -6,6 +6,7 @@ export interface MedicalRecord {
     idempotency_key?: string;
     patient_name: string;
     consultation_type: string;
+    specialty?: string;
     transcription: string;
     medical_history: string;
     original_medical_history?: string; // Preserves the raw AI output before user edits

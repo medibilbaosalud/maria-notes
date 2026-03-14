@@ -16,14 +16,107 @@ export const supabase = (SUPABASE_URL && SUPABASE_KEY && SUPABASE_URL !== 'YOUR_
                 baseDelayMs: 250,
                 maxDelayMs: 2_000
             })
+        },
+        auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+            detectSessionInUrl: true
         }
     })
     : null;
+
+export interface SupabaseAuthSnapshot {
+    isConfigured: boolean;
+    isAuthenticated: boolean;
+    userEmail: string | null;
+}
+
+let authSnapshot: SupabaseAuthSnapshot = {
+    isConfigured: Boolean(supabase),
+    isAuthenticated: false,
+    userEmail: null
+};
+
+const authListeners = new Set<(snapshot: SupabaseAuthSnapshot) => void>();
+
+const emitAuthSnapshot = () => {
+    authListeners.forEach((listener) => listener(authSnapshot));
+};
+
+const setAuthSnapshot = (next: Partial<SupabaseAuthSnapshot>) => {
+    authSnapshot = {
+        ...authSnapshot,
+        ...next,
+        isConfigured: Boolean(supabase)
+    };
+    emitAuthSnapshot();
+};
+
+if (supabase) {
+    void supabase.auth.getSession().then(({ data }) => {
+        const session = data.session;
+        setAuthSnapshot({
+            isAuthenticated: Boolean(session),
+            userEmail: session?.user?.email || null
+        });
+    }).catch(() => {
+        setAuthSnapshot({
+            isAuthenticated: false,
+            userEmail: null
+        });
+    });
+
+    supabase.auth.onAuthStateChange((_event, session) => {
+        setAuthSnapshot({
+            isAuthenticated: Boolean(session),
+            userEmail: session?.user?.email || null
+        });
+    });
+}
+
+export const getSupabaseAuthSnapshot = (): SupabaseAuthSnapshot => authSnapshot;
+
+export const hasSupabaseSession = (): boolean => authSnapshot.isAuthenticated;
+
+export const onSupabaseAuthChange = (listener: (snapshot: SupabaseAuthSnapshot) => void): (() => void) => {
+    authListeners.add(listener);
+    listener(authSnapshot);
+    return () => {
+        authListeners.delete(listener);
+    };
+};
+
+export const signInWithMagicLink = async (email: string): Promise<void> => {
+    if (!supabase) throw new Error('supabase_not_configured');
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) throw new Error('email_required');
+    const redirectTo = typeof window !== 'undefined' ? window.location.origin : undefined;
+    const { error } = await supabase.auth.signInWithOtp({
+        email: normalizedEmail,
+        options: {
+            emailRedirectTo: redirectTo
+        }
+    });
+    if (error) throw error;
+};
+
+export const signOutSupabase = async (): Promise<void> => {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+};
+
+type ProtectedSupabaseClient = NonNullable<typeof supabase>;
+const getProtectedSupabase = (): ProtectedSupabaseClient | null => {
+    if (!supabase || !hasSupabaseSession()) return null;
+    return supabase;
+};
 
 export interface MedicalRecord {
     id?: string;
     patient_name: string;
     consultation_type: string;
+    specialty?: string;
     transcription: string;
     medical_history: string;
     medical_report?: string;
@@ -46,12 +139,13 @@ export interface ConsultationTranscriptChunk {
 }
 
 export const saveMedicalRecord = async (record: MedicalRecord) => {
-    if (!supabase) {
+    const client = getProtectedSupabase();
+    if (!client) {
         console.warn('Supabase not configured');
         return null;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await client
         .from('medical_records')
         .insert([record])
         .select();
@@ -61,12 +155,13 @@ export const saveMedicalRecord = async (record: MedicalRecord) => {
 };
 
 export const searchMedicalRecords = async (query: string) => {
-    if (!supabase) {
+    const client = getProtectedSupabase();
+    if (!client) {
         console.warn('Supabase not configured');
         return [];
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await client
         .from('medical_records')
         .select('*')
         .or(`patient_name.ilike.%${query}%,medical_history.ilike.%${query}%`)
@@ -77,9 +172,10 @@ export const searchMedicalRecords = async (query: string) => {
 };
 
 export const deleteMedicalRecord = async (id: string): Promise<boolean> => {
-    if (!supabase) return false;
+    const client = getProtectedSupabase();
+    if (!client) return false;
 
-    const { error } = await supabase
+    const { error } = await client
         .from('medical_records')
         .delete()
         .eq('id', id);
@@ -92,9 +188,10 @@ export const deleteMedicalRecord = async (id: string): Promise<boolean> => {
 };
 
 export const updateMedicalRecord = async (id: string, updates: Partial<MedicalRecord>) => {
-    if (!supabase) return null;
+    const client = getProtectedSupabase();
+    if (!client) return null;
 
-    const { data, error } = await supabase
+    const { data, error } = await client
         .from('medical_records')
         .update(updates)
         .eq('id', id)
@@ -118,10 +215,11 @@ export const logAIAudit = async (auditData: {
     successful: boolean;
     duration_ms: number;
 }): Promise<string | null> => {
-    if (!supabase) return null;
+    const client = getProtectedSupabase();
+    if (!client) return null;
 
     try {
-        const { data, error } = await supabase
+        const { data, error } = await client
             .from('ai_audit_logs')
             .insert([{
                 ...auditData,
@@ -157,7 +255,8 @@ interface LineageMeta {
 }
 
 export const logFieldLineage = async (recordId: string, meta: LineageMeta[]): Promise<void> => {
-    if (!supabase || !recordId || meta.length === 0) return;
+    const client = getProtectedSupabase();
+    if (!client || !recordId || meta.length === 0) return;
 
     const chunkRows = meta.map((chunk) => ({
         record_id: recordId,
@@ -181,7 +280,7 @@ export const logFieldLineage = async (recordId: string, meta: LineageMeta[]): Pr
     const chunkedInsert = async (table: string, rows: any[], chunkSize: number) => {
         for (let i = 0; i < rows.length; i += chunkSize) {
             const slice = rows.slice(i, i + chunkSize);
-            const { error } = await supabase.from(table).insert(slice);
+            const { error } = await client.from(table).insert(slice);
             if (error) {
                 console.error(`[Supabase] Insert failed for ${table}:`, error);
                 return;
@@ -194,7 +293,8 @@ export const logFieldLineage = async (recordId: string, meta: LineageMeta[]): Pr
 };
 
 export const upsertTranscriptChunk = async (chunk: ConsultationTranscriptChunk): Promise<void> => {
-    if (!supabase) return;
+    const client = getProtectedSupabase();
+    if (!client) return;
     const now = new Date().toISOString();
     const row = {
         session_id: chunk.session_id,
@@ -210,7 +310,7 @@ export const upsertTranscriptChunk = async (chunk: ConsultationTranscriptChunk):
         updated_at: now
     };
 
-    const { error } = await supabase
+    const { error } = await client
         .from('consultation_transcript_chunks')
         .upsert([row], { onConflict: 'session_id,session_version,batch_index,part_index' });
     if (error) throw error;
@@ -220,8 +320,9 @@ export const getTranscriptChunksBySession = async (
     sessionId: string,
     sessionVersion: number
 ): Promise<ConsultationTranscriptChunk[]> => {
-    if (!supabase || !sessionId) return [];
-    const { data, error } = await supabase
+    const client = getProtectedSupabase();
+    if (!client || !sessionId) return [];
+    const { data, error } = await client
         .from('consultation_transcript_chunks')
         .select('*')
         .eq('session_id', sessionId)
@@ -245,7 +346,8 @@ export interface SemanticCheckLog {
 }
 
 export const logSemanticChecks = async (recordId: string, checks: SemanticCheckLog[]): Promise<void> => {
-    if (!supabase || !recordId || checks.length === 0) return;
+    const client = getProtectedSupabase();
+    if (!client || !recordId || checks.length === 0) return;
 
     const rows = checks.map((check) => ({
         record_id: recordId,
@@ -260,7 +362,7 @@ export const logSemanticChecks = async (recordId: string, checks: SemanticCheckL
         model: check.model || ''
     }));
 
-    const { error } = await supabase.from('ai_semantic_checks').insert(rows);
+    const { error } = await client.from('ai_semantic_checks').insert(rows);
     if (error) console.error('Error logging semantic checks:', error);
 };
 
@@ -271,9 +373,10 @@ export const saveFieldConfirmation = async (confirmation: {
     doctor_value?: string;
     confirmed: boolean;
 }): Promise<void> => {
-    if (!supabase) return;
+    const client = getProtectedSupabase();
+    if (!client) return;
 
-    const { error } = await supabase.from('ai_field_confirmations').insert([{
+    const { error } = await client.from('ai_field_confirmations').insert([{
         record_id: confirmation.record_id || null,
         field_path: confirmation.field_path,
         suggested_value: confirmation.suggested_value || null,
@@ -297,9 +400,10 @@ const upsertDailyMetrics = async (metricDate: string, updates: {
     total_duration_ms?: number;
     total_transcript_tokens?: number;
 }) => {
-    if (!supabase) return;
+    const client = getProtectedSupabase();
+    if (!client) return;
 
-    const { data, error } = await supabase
+    const { data, error } = await client
         .from('ai_quality_metrics_daily')
         .select('*')
         .eq('metric_date', metricDate)
@@ -326,7 +430,7 @@ const upsertDailyMetrics = async (metricDate: string, updates: {
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
         };
-        const { error: insertError } = await supabase.from('ai_quality_metrics_daily').insert([insertPayload]);
+        const { error: insertError } = await client.from('ai_quality_metrics_daily').insert([insertPayload]);
         if (insertError) console.error('Error inserting daily metrics:', insertError);
         return;
     }
@@ -345,7 +449,7 @@ const upsertDailyMetrics = async (metricDate: string, updates: {
         updated_at: new Date().toISOString()
     };
 
-    const { error: updateError } = await supabase
+    const { error: updateError } = await client
         .from('ai_quality_metrics_daily')
         .update(updatedPayload)
         .eq('metric_date', metricDate);
@@ -358,9 +462,10 @@ export const logQualityEvent = async (event: {
     event_type: 'pipeline_completed' | 'doctor_edit' | 'field_confirmation' | 'field_rejection';
     payload: any;
 }): Promise<void> => {
-    if (!supabase) return;
+    const client = getProtectedSupabase();
+    if (!client) return;
 
-    const { error } = await supabase.from('ai_quality_events').insert([{
+    const { error } = await client.from('ai_quality_events').insert([{
         record_id: event.record_id || null,
         event_type: event.event_type,
         payload: event.payload || {},
@@ -398,9 +503,10 @@ export const saveDoctorSatisfactionEvent = async (entry: {
     record_id?: string;
     context?: Record<string, unknown>;
 }): Promise<void> => {
-    if (!supabase) return;
+    const client = getProtectedSupabase();
+    if (!client) return;
     const score = Math.max(1, Math.min(10, Math.round(entry.score)));
-    const { error } = await supabase.from('doctor_satisfaction_events').insert([{
+    const { error } = await client.from('doctor_satisfaction_events').insert([{
         score,
         record_id: entry.record_id || null,
         context: entry.context || {},
@@ -415,8 +521,9 @@ export const upsertConsultationQualitySummary = async (summary: {
     critical_gaps_count: number;
     corrected_count: number;
 }): Promise<void> => {
-    if (!supabase || !summary.record_id) return;
-    const { error } = await supabase
+    const client = getProtectedSupabase();
+    if (!client || !summary.record_id) return;
+    const { error } = await client
         .from('consultation_quality_summary')
         .upsert([{
             record_id: summary.record_id,
@@ -479,7 +586,8 @@ const buildErrorFingerprint = (event: AppErrorEvent): string => {
 };
 
 export const logAppErrorEvent = async (event: AppErrorEvent): Promise<void> => {
-    if (!supabase) return;
+    const client = getProtectedSupabase();
+    if (!client) return;
 
     const normalizedEvent = {
         message: event.message,
@@ -499,7 +607,7 @@ export const logAppErrorEvent = async (event: AppErrorEvent): Promise<void> => {
     };
 
     try {
-        const { error } = await supabase.from('app_error_events').insert([normalizedEvent]);
+        const { error } = await client.from('app_error_events').insert([normalizedEvent]);
         if (error) {
             console.error('[logAppErrorEvent] Failed to log app error:', error);
         }
@@ -509,13 +617,14 @@ export const logAppErrorEvent = async (event: AppErrorEvent): Promise<void> => {
 };
 
 export const logError = async (error: ErrorLogEntry): Promise<void> => {
-    if (!supabase) {
+    const client = getProtectedSupabase();
+    if (!client) {
         console.warn('[logError] Supabase not configured, logging to console only:', error);
         return;
     }
 
     try {
-        const { error: insertError } = await supabase.from('error_logs').insert([{
+        const { error: insertError } = await client.from('error_logs').insert([{
             message: error.message,
             stack: error.stack || null,
             context: error.context || {},

@@ -237,15 +237,6 @@ const buildRunId = () => {
     return `diag_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 };
 
-const REQUIRED_SECTION_MARKERS = [
-    '## MOTIVO DE CONSULTA',
-    '## ANTECEDENTES',
-    '## ENFERMEDAD ACTUAL',
-    '## EXPLORACION / PRUEBAS',
-    '## DIAGNOSTICO',
-    '## PLAN'
-];
-
 const hasPlaceholderToken = (text: string): boolean => {
     if (!text) return false;
     return /\[(MISSING_BATCH|PARTIAL_BATCH)_[^\]]+\]/.test(text);
@@ -260,12 +251,13 @@ const percentile = (values: number[], p: number): number => {
     return sorted[idx];
 };
 
-export const evaluateRequiredSections = (medicalHistory: string): {
+export const evaluateRequiredSections = (medicalHistory: string, specialty?: string): {
     required_sections_ok: boolean;
     missing_sections: string[];
 } => {
     const normalized = sanitize(medicalHistory || '');
-    const missing = REQUIRED_SECTION_MARKERS.filter((section) => !normalized.includes(sanitize(section)));
+    const requiredSections = getRequiredSectionsForSpecialty(specialty);
+    const missing = requiredSections.filter((section) => !normalized.includes(sanitize(section)));
     return {
         required_sections_ok: missing.length === 0,
         missing_sections: missing
@@ -798,8 +790,9 @@ export const buildQualityGateFromHistory = (params: {
     result_status?: string;
     pipeline_status?: string;
     critical_gaps_count?: number;
+    specialty?: string;
 }): DiagnosticQualityGate => {
-    const coverage = evaluateRequiredSections(params.medical_history || '');
+    const coverage = evaluateRequiredSections(params.medical_history || '', params.specialty);
     const pipelineStatus = params.pipeline_status;
     const resultStatus = params.result_status;
     const placeholderDetected = hasPlaceholderToken(params.medical_history || '');
@@ -829,3 +822,4 @@ export const buildQualityGateFromHistory = (params: {
         blocking_reason: blockingReason
     };
 };
+import { getRequiredSectionsForSpecialty } from '../clinical/specialties';

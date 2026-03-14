@@ -3,6 +3,8 @@ import { motion } from 'framer-motion';
 import { Settings, Mic, FileText, FileBarChart, FlaskConical, Lightbulb } from 'lucide-react';
 import { MBSLogo } from './MBSLogo';
 import { motionTransitions } from '../features/ui/motion-tokens';
+import type { ClinicalSpecialtyId } from '../clinical/specialties';
+import { getClinicalSpecialtyOptions } from '../clinical/specialties';
 import '../design-system.css';
 import './Layout.css';
 
@@ -12,9 +14,19 @@ interface LayoutProps {
   onOpenLessons?: () => void;
   currentView: 'record' | 'history' | 'reports' | 'test-lab' | 'result';
   onNavigate: (view: 'record' | 'history' | 'reports' | 'test-lab' | 'result') => void;
+  activeSpecialty: ClinicalSpecialtyId;
+  onSpecialtyChange: (specialty: ClinicalSpecialtyId) => void;
 }
 
-export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, onOpenLessons, currentView, onNavigate }) => {
+export const Layout: React.FC<LayoutProps> = ({
+  children,
+  onOpenSettings,
+  onOpenLessons,
+  currentView,
+  onNavigate,
+  activeSpecialty,
+  onSpecialtyChange
+}) => {
   return (
     <div className="app-layout">
       <motion.aside
@@ -78,6 +90,25 @@ export const Layout: React.FC<LayoutProps> = ({ children, onOpenSettings, onOpen
       </motion.aside>
 
       <main className="main-content">
+        <div className="workspace-utility-bar">
+          <div className="workspace-specialty-switcher" role="radiogroup" aria-label="Modo clínico activo">
+            {getClinicalSpecialtyOptions().map((option) => {
+              const active = option.id === activeSpecialty;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`workspace-specialty-pill ${active ? 'active' : ''}`}
+                  onClick={() => onSpecialtyChange(option.id)}
+                  aria-pressed={active}
+                  title={`Cambiar a modo ${option.shortLabel}`}
+                >
+                  {option.shortLabel}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <div className="content-wrapper">{children}</div>
       </main>
     </div>

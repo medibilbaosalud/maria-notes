@@ -9,9 +9,10 @@ import {
     type ExtractionSegment,
     type PipelineFailure
 } from './db';
-import { supabase } from './supabase';
+import { hasSupabaseSession, supabase } from './supabase';
 import { isCloudSyncEnabled } from '../hooks/useCloudSync';
 import type { ConsultationClassification, ExtractionMeta, ExtractionResult } from './groq';
+import { normalizeClinicalSpecialty } from '../clinical/specialties';
 
 export type { MedicalRecord };
 export interface PatientNameSuggestion {
@@ -25,7 +26,7 @@ export interface PatientNameSuggestion {
 const PIPELINE_ARTIFACT_RETENTION_MS = 24 * 60 * 60 * 1000;
 const nowIso = () => new Date().toISOString();
 
-const getCloudClient = () => (supabase && isCloudSyncEnabled() ? supabase : null);
+const getCloudClient = () => (supabase && isCloudSyncEnabled() && hasSupabaseSession() ? supabase : null);
 
 const normalizePatientName = (value: string): string =>
     value
@@ -53,13 +54,22 @@ const generateUuid = (): string => {
 const toCloudRecord = (record: MedicalRecord) => {
     return {
         id: record.record_uuid, // Map local record_uuid to Supabase id
+        record_uuid: record.record_uuid,
+        audit_id: record.audit_id || null,
+        idempotency_key: record.idempotency_key || null,
         patient_name: record.patient_name,
         consultation_type: record.consultation_type,
+        specialty: record.specialty || record.consultation_type,
         transcription: record.transcription,
         medical_history: record.medical_history,
         original_medical_history: record.original_medical_history || null,
         medical_report: record.medical_report || null,
         ai_model: record.ai_model || null,
+        output_tier: record.output_tier || null,
+        supersedes_record_uuid: record.supersedes_record_uuid || null,
+        source_session_id: record.source_session_id || null,
+        critical_path_ms: typeof record.critical_path_ms === 'number' ? record.critical_path_ms : null,
+        hardening_ms: typeof record.hardening_ms === 'number' ? record.hardening_ms : null,
         created_at: record.created_at,
         updated_at: record.updated_at || record.created_at
     };
@@ -75,7 +85,7 @@ const syncToCloud = async (record: MedicalRecord, operation: 'insert' | 'update'
             const cloudRecord = toCloudRecord(record);
             const { error } = await client
                 .from('medical_records')
-                .upsert([cloudRecord], { onConflict: 'id' });
+                .upsert([cloudRecord], { onConflict: 'record_uuid' });
             if (error) {
                 console.error(`[Cloud Sync] Upsert error (${operation}):`, error.message, error.details);
                 throw error;
@@ -321,6 +331,9 @@ export const syncFromCloud = async (): Promise<number> => {
                 const { id, ...recordToInsert } = cloudRec;
                 newRecords.push({
                     ...recordToInsert,
+                    audit_id: cloudRec.audit_id || null,
+                    idempotency_key: cloudRec.idempotency_key || null,
+                    specialty: cloudRec.specialty || cloudRec.consultation_type || 'otorrino',
                     record_uuid: cloudUuid,
                     updated_at: cloudUpdatedAt || new Date().toISOString()
                 });
@@ -335,6 +348,9 @@ export const syncFromCloud = async (): Promise<number> => {
                 const { id, ...cloudRecordWithoutId } = cloudRec;
                 await db.medical_records.update(local.id!, {
                     ...cloudRecordWithoutId,
+                    audit_id: cloudRec.audit_id || null,
+                    idempotency_key: cloudRec.idempotency_key || null,
+                    specialty: cloudRec.specialty || cloudRec.consultation_type || local.specialty || 'otorrino',
                     record_uuid: cloudUuid,
                     updated_at: cloudUpdatedAt
                 });
@@ -359,7 +375,8 @@ export const syncFromCloud = async (): Promise<number> => {
                 record_uuid: syntheticUuid,
                 idempotency_key: `history_${auditId}`,
                 patient_name: patientName,
-                consultation_type: 'Historia',
+                consultation_type: String(history.consultation_type || history.specialty || 'Historia'),
+                specialty: normalizeClinicalSpecialty(history.specialty || history.consultation_type || history.medical_history),
                 transcription: '',
                 medical_history: historyText,
                 original_medical_history: historyText,

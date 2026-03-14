@@ -1,3 +1,6 @@
+import { useEffect, useState } from 'react';
+import { getSupabaseAuthSnapshot, onSupabaseAuthChange } from '../services/supabase';
+
 const hasCloudConfig = (): boolean => {
     const url = String(import.meta.env.VITE_SUPABASE_URL || '').trim();
     const key = String(import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
@@ -8,6 +11,10 @@ const hasCloudConfig = (): boolean => {
 };
 
 export const useCloudSync = () => {
+    const [authSnapshot, setAuthSnapshot] = useState(() => getSupabaseAuthSnapshot());
+
+    useEffect(() => onSupabaseAuthChange(setAuthSnapshot), []);
+
     const isCloudEnabled = hasCloudConfig();
 
     // No-ops for state changes
@@ -17,6 +24,8 @@ export const useCloudSync = () => {
 
     return {
         isCloudEnabled,
+        isCloudAuthenticated: authSnapshot.isAuthenticated,
+        cloudUserEmail: authSnapshot.userEmail,
         toggleCloud,
         enableCloud,
         disableCloud

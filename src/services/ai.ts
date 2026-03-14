@@ -1,21 +1,12 @@
-// AI Service - Multi-Phase Validation Pipeline with Batching Support
-// All AI operations use Groq with optimal model selection
-
-import {
-    GroqService,
-    PipelineResult,
-    ExtractionResult,
-    ValidationResult,
-    ValidationError,
-    ExtractionMeta,
+import type {
     ConsultationClassification,
-    ModelInvocationRecord,
+    ExtractionMeta,
+    ExtractionResult,
     ModelInvocationEvent,
     UncertaintyFlag,
-    QualityTriageResult
+    ValidationResult
 } from './groq';
-import { enqueueAuditEvent } from './audit-worker';
-
+import type { ClinicalSpecialtyId } from '../clinical/specialties';
 
 export interface AIResult<T> {
     data: T;
@@ -40,7 +31,7 @@ export interface AIResultWithMetadata extends AIResult<string> {
     rule_ids_used?: string[];
     learning_applied?: boolean;
     quality_score?: number;
-    critical_gaps?: QualityTriageResult['critical_gaps'];
+    critical_gaps?: Array<{ field: string; reason: string; severity: 'critical' | 'major' | 'minor' }>;
     doctor_next_actions?: string[];
     quality_triage_model?: string;
     correction_rounds_executed?: number;
@@ -102,1209 +93,227 @@ export interface AIResultWithMetadata extends AIResult<string> {
     degraded_reason_code?: string;
 }
 
-const FAST_PATH_ADAPTIVE_VALIDATION = String(import.meta.env.VITE_FAST_PATH_ADAPTIVE_VALIDATION || 'true').toLowerCase() === 'true';
-const FAST_PATH_ASYNC_TRIAGE = String(import.meta.env.VITE_FAST_PATH_ASYNC_TRIAGE || 'true').toLowerCase() === 'true';
-const TWO_CALL_ADAPTIVE_MODE = String(import.meta.env.VITE_TWO_CALL_ADAPTIVE_MODE || 'true').toLowerCase() === 'true';
-const SINGLE_SHOT_HISTORY_MODE = String(import.meta.env.VITE_SINGLE_SHOT_HISTORY_MODE || 'true').toLowerCase() === 'true';
-const GEMINI_ONE_CALL_STRICT = String(import.meta.env.VITE_GEMINI_ONE_CALL_STRICT || 'true').toLowerCase() === 'true';
-const SINGLE_SHOT_ASYNC_FOLLOWUP = String(import.meta.env.VITE_SINGLE_SHOT_ASYNC_FOLLOWUP || 'false').toLowerCase() === 'true';
+type TranscriptionOptions = {
+    whisperStrict?: boolean;
+    signal?: AbortSignal;
+};
+
+type InvocationCounters = {
+    total_invocations: number;
+    fallback_hops: number;
+    by_task: Record<string, number>;
+};
+
+const SERVER_TEXT_MODEL = 'gemini:gemini-3-flash-preview';
+const SERVER_TRANSCRIPTION_MODEL = 'gemini:gemini-3-flash-preview';
+
+const blobToBase64 = async (blob: Blob): Promise<string> => {
+    const buffer = await blob.arrayBuffer();
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, i + chunkSize);
+        binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+};
+
+const parseJsonResponse = async <T>(response: Response): Promise<T> => {
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        const message = typeof body?.error === 'string'
+            ? body.error
+            : (typeof body?.message === 'string' ? body.message : `request_failed_${response.status}`);
+        throw new Error(message);
+    }
+    return body as T;
+};
+
+const postJson = async <T>(path: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<T> => {
+    const response = await fetch(path, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload),
+        signal
+    });
+    return parseJsonResponse<T>(response);
+};
 
 export class AIService {
-    private groq: GroqService;
+    private modelInvocationListener?: (event: ModelInvocationEvent) => void;
 
-    constructor(groqApiKey: string | string[]) {
-        this.groq = new GroqService(groqApiKey);
+    private invocationCounters: InvocationCounters = {
+        total_invocations: 0,
+        fallback_hops: 0,
+        by_task: {}
+    };
+
+    constructor(_providerKey?: string | string[]) {
+        void _providerKey;
     }
 
-    resetInvocationCounters(sessionId?: string): void {
-        this.groq.resetInvocationCounters(sessionId);
+    resetInvocationCounters(_sessionId?: string): void {
+        this.invocationCounters = {
+            total_invocations: 0,
+            fallback_hops: 0,
+            by_task: {}
+        };
     }
 
-    getInvocationCounters(sessionId?: string): {
-        total_invocations: number;
-        fallback_hops: number;
-        by_task: Record<string, number>;
-    } {
-        return this.groq.getInvocationCounters(sessionId);
+    getInvocationCounters(_sessionId?: string): InvocationCounters {
+        return {
+            total_invocations: this.invocationCounters.total_invocations,
+            fallback_hops: this.invocationCounters.fallback_hops,
+            by_task: { ...this.invocationCounters.by_task }
+        };
     }
 
     setModelInvocationListener(listener?: (event: ModelInvocationEvent) => void): void {
-        this.groq.setModelInvocationListener(listener);
+        this.modelInvocationListener = listener;
     }
 
-    private estimateTokens(text: string): number {
-        if (!text) return 0;
-        return Math.ceil(text.length / 4);
-    }
-
-    private buildAuditId(): string {
-        if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-            return crypto.randomUUID();
+    private emitInvocation(task: string, phase: string, status: 'start' | 'success' | 'error', model: string, error?: unknown) {
+        this.invocationCounters.total_invocations += status === 'start' ? 0 : 1;
+        if (status === 'success') {
+            this.invocationCounters.by_task[task] = (this.invocationCounters.by_task[task] || 0) + 1;
         }
-        return `audit_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    }
-
-    private isRetryableError(error: unknown): boolean {
-        const message = ((error as Error)?.message || '').toLowerCase();
-        return message.includes('all models failed') || message.includes('route_circuit_open') || message.includes('429');
-    }
-
-    private sanitizeClinicalHistory(rawHistory: string): string {
-        if (!rawHistory) return rawHistory;
-        const allowedSections = new Set([
-            'MOTIVO DE CONSULTA',
-            'ANTECEDENTES',
-            'ENFERMEDAD ACTUAL',
-            'EXPLORACION / PRUEBAS',
-            'DIAGNOSTICO',
-            'PLAN'
-        ]);
-        const forbiddenLineMatchers = [
-            /^CLASIFICACION\s*\(CONTEXT/i,
-            /^CLASIFICACION\s*\(CONTEXTO/i,
-            /^RULEPACK:/i,
-            /^REGLAS DE APRENDIZAJE:/i,
-            /^\[(GLOBALES|RECIENTES|TERMINOLOGIA|FORMATO|ESTILO|CLINICO)\]/i
-        ];
-        const stripForbiddenTail = (body: string): string => {
-            const lines = body.split(/\r?\n/);
-            const cutoff = lines.findIndex((line) => {
-                const trimmed = line.trim();
-                if (!trimmed) return false;
-                return forbiddenLineMatchers.some((matcher) => matcher.test(trimmed));
-            });
-            const safeLines = cutoff >= 0 ? lines.slice(0, cutoff) : lines;
-            return safeLines.join('\n').trim();
-        };
-        const sectionRegex = /^##\s+(.+)$/gm;
-        const matches = Array.from(rawHistory.matchAll(sectionRegex));
-        if (matches.length === 0) {
-            const cleaned = stripForbiddenTail(rawHistory);
-            return cleaned || rawHistory.trim();
-        }
-
-        const chunks: string[] = [];
-        for (let i = 0; i < matches.length; i++) {
-            const current = matches[i];
-            const title = (current[1] || '').trim();
-            const normalizedTitle = title
-                .normalize('NFD')
-                .replace(/[\u0300-\u036f]/g, '')
-                .toUpperCase();
-            if (!allowedSections.has(normalizedTitle)) continue;
-            const start = (current.index || 0) + current[0].length;
-            const end = i + 1 < matches.length ? (matches[i + 1].index || rawHistory.length) : rawHistory.length;
-            const body = stripForbiddenTail(rawHistory.slice(start, end).trim());
-            chunks.push(`## ${title}\n${body || 'No consta'}`);
-        }
-
-        return chunks.length > 0 ? chunks.join('\n\n').trim() : rawHistory.trim();
-    }
-
-    private summarizeInvocations(records: ModelInvocationRecord[]): Record<string, {
-        winner: string;
-        attempts_count: number;
-        fallback_count: number;
-    }> {
-        const grouped = new Map<string, ModelInvocationRecord[]>();
-        for (const record of records) {
-            const task = record.task || 'unknown';
-            const list = grouped.get(task) || [];
-            list.push(record);
-            grouped.set(task, list);
-        }
-
-        const summary: Record<string, { winner: string; attempts_count: number; fallback_count: number }> = {};
-        for (const [task, attempts] of grouped.entries()) {
-            const winner = attempts.find((item) => item.success);
-            summary[task] = {
-                winner: winner ? `${winner.provider}:${winner.model}` : 'none',
-                attempts_count: attempts.length,
-                fallback_count: attempts.filter((item) => item.is_fallback).length
-            };
-        }
-        return summary;
-    }
-
-    private severityWeight(severity?: string): number {
-        if (severity === 'critical') return 3;
-        if (severity === 'major') return 2;
-        return 1;
-    }
-
-    private computeRiskLevel(errors: Array<{ type?: string; severity?: string }>): 'low' | 'medium' | 'high' {
-        if (!errors || errors.length === 0) return 'low';
-        const hasHighType = errors.some((error) =>
-            (error.type === 'hallucination' || error.type === 'inconsistency') && this.severityWeight(error.severity) >= 2
-        );
-        if (hasHighType) return 'high';
-        const totalWeight = errors.reduce((acc, error) => acc + this.severityWeight(error.severity), 0);
-        return totalWeight >= 4 ? 'medium' : 'low';
-    }
-
-    private issueFingerprint(error: { type?: string; field?: string; reason?: string; severity?: string }): string {
-        const type = error.type || 'unknown';
-        const field = error.field || 'unknown';
-        const reason = (error.reason || 'sin_detalle').toLowerCase().trim();
-        const severity = error.severity || 'minor';
-        return `${type}|${field}|${severity}|${reason}`;
-    }
-
-    private toReconciliationIssue(
-        error: ValidationError,
-        phase: 'raw_guard' | 'final_guard'
-    ): {
-        fingerprint: string;
-        type: string;
-        field: string;
-        reason: string;
-        severity: 'critical' | 'major' | 'minor';
-        phase: 'raw_guard' | 'final_guard';
-        blocking: boolean;
-    } {
-        const severity = (error.severity || ((error.type === 'hallucination' || error.type === 'inconsistency') ? 'critical' : 'major')) as 'critical' | 'major' | 'minor';
-        return {
-            fingerprint: this.issueFingerprint(error),
-            type: error.type || 'unknown',
-            field: error.field || 'unknown',
-            reason: error.reason || 'sin_detalle',
-            severity,
+        this.modelInvocationListener?.({
+            provider: model.startsWith('gemini:') ? 'gemini' : 'groq',
+            model: model.includes(':') ? model.split(':').slice(1).join(':') : model,
+            task,
             phase,
-            blocking: this.severityWeight(severity) >= 2
-        };
-    }
-
-    private runDeterministicClinicalGuard(
-        generatedHistory: string,
-        mergedExtraction: ExtractionResult
-    ): {
-        validations: ValidationResult[];
-        consensus: ValidationError[];
-    } {
-        const issues: ValidationError[] = [];
-        const text = generatedHistory || '';
-        // Strip accents/tildes to avoid false positives (e.g. EXPLORACIÓN vs EXPLORACION)
-        const stripAccents = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        const normalized = stripAccents(text.toUpperCase());
-        const requiredSections = [
-            '## MOTIVO DE CONSULTA',
-            '## ANTECEDENTES',
-            '## ENFERMEDAD ACTUAL',
-            '## EXPLORACION / PRUEBAS',
-            '## DIAGNOSTICO',
-            '## PLAN'
-        ];
-
-        for (const section of requiredSections) {
-            if (!normalized.includes(stripAccents(section))) {
-                issues.push({
-                    type: 'missing',
-                    field: section.replace('## ', '').toLowerCase(),
-                    reason: `Falta seccion obligatoria: ${section}`,
-                    severity: section.includes('DIAGNOSTICO') || section.includes('PLAN') ? 'critical' : 'major'
-                });
-            }
-        }
-
-        if (/\{[^}]+\}/.test(text)) {
-            issues.push({
-                type: 'inconsistency',
-                field: 'template',
-                reason: 'Hay placeholders sin resolver en la historia final',
-                severity: 'critical'
-            });
-        }
-
-        const bannedInternalBlocks = [
-            '## INCERTIDUMBRES / REVISAR',
-            'CLASIFICACION (CONTEXTO',
-            'RULEPACK:',
-            'REGLAS DE APRENDIZAJE:'
-        ];
-        for (const marker of bannedInternalBlocks) {
-            if (normalized.includes(stripAccents(marker))) {
-                issues.push({
-                    type: 'hallucination',
-                    field: 'history_format',
-                    reason: `Bloque interno no permitido en historia final: ${marker}`,
-                    severity: 'critical'
-                });
-            }
-        }
-
-        const qualityNotes = mergedExtraction.notas_calidad || [];
-        for (const note of qualityNotes) {
-            if (note.tipo === 'INAUDIBLE' || note.tipo === 'AMBIGUO') {
-                issues.push({
-                    type: 'missing',
-                    field: note.seccion || 'transcripcion',
-                    reason: `[${note.tipo}] ${note.descripcion}`,
-                    severity: note.tipo === 'INAUDIBLE' ? 'major' : 'minor'
-                });
-            }
-        }
-
-        const risk = this.computeRiskLevel(issues);
-        const validation: ValidationResult = {
-            validator: 'deterministic_guard',
-            is_valid: issues.length === 0,
-            errors: issues,
-            confidence: issues.length === 0 ? 0.94 : Math.max(0.25, 0.86 - issues.length * 0.08),
-            risk_level: risk
-        };
-        return {
-            validations: [validation],
-            consensus: issues
-        };
-    }
-
-    private shouldEscalateCorrections(
-        attempt: number,
-        transcriptTokens: number,
-        currentErrors: Array<{ type?: string; severity?: string }>
-    ): number {
-        if (!FAST_PATH_ADAPTIVE_VALIDATION) return transcriptTokens > 8000 ? 3 : 2;
-        const hardMax = transcriptTokens > 8000 ? 3 : 2;
-        if (attempt === 0) {
-            const hasMajorOrCritical = currentErrors.some((error) => this.severityWeight(error.severity) >= 2);
-            if (!hasMajorOrCritical) return 1;
-            const hasCritical = currentErrors.some((error) => error.severity === 'critical');
-            if (hasCritical && transcriptTokens > 8000) return Math.min(3, hardMax);
-            return Math.min(2, hardMax);
-        }
-        if (attempt === 1) {
-            const hasCritical = currentErrors.some((error) => error.severity === 'critical');
-            if (hasCritical && transcriptTokens > 8000) return Math.min(3, hardMax);
-            return Math.min(2, hardMax);
-        }
-        return hardMax;
-    }
-
-    private buildProvisionalHistory(reason: string): string {
-        return `## MOTIVO DE CONSULTA
-No consta (procesamiento aplazado)
-
-## ANTECEDENTES
-- Alergias: No consta
-- Enfermedades crónicas: No consta
-- Cirugías: No consta
-- Tratamiento habitual: No consta
-
-## ENFERMEDAD ACTUAL
-- Síntomas: No consta
-- Evolución: No consta
-
-## EXPLORACIÓN / PRUEBAS
-No consta
-
-## DIAGNÓSTICO
-No consta
-
-## PLAN
-Reintentar procesamiento automatico. Motivo tecnico: ${reason}`;
+            status,
+            route_key: model,
+            attempt_index: 0,
+            created_at: new Date().toISOString(),
+            is_fallback: false,
+            error_type: status === 'error' ? ((error as Error)?.message || 'request_failed') : undefined
+        });
     }
 
     async transcribeAudio(
         audioInput: Blob | string,
         mimeType?: string,
         legacyAudioBlob?: Blob,
-        options?: { whisperStrict?: boolean; signal?: AbortSignal }
+        options?: TranscriptionOptions
     ): Promise<AIResult<string>> {
-        let audioBlob: Blob | null = null;
+        const blob = audioInput instanceof Blob
+            ? audioInput
+            : (legacyAudioBlob || new Blob([Uint8Array.from(atob(audioInput), (char) => char.charCodeAt(0))], { type: mimeType || 'audio/wav' }));
 
-        if (audioInput instanceof Blob) {
-            audioBlob = audioInput;
-        } else if (legacyAudioBlob) {
-            audioBlob = legacyAudioBlob;
-        } else {
-            if (!mimeType) {
-                throw new Error('mimeType is required when transcribing from base64');
-            }
-            const binaryString = atob(audioInput);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-            audioBlob = new Blob([bytes], { type: mimeType });
+        this.emitInvocation('transcription', 'transcription', 'start', SERVER_TRANSCRIPTION_MODEL);
+        try {
+            const result = await postJson<{ text: string; model: string }>('/api/ai/transcribe', {
+                audioBase64: await blobToBase64(blob),
+                mimeType: blob.type || mimeType || 'audio/wav',
+                whisperStrict: Boolean(options?.whisperStrict)
+            }, options?.signal);
+            this.emitInvocation('transcription', 'transcription', 'success', result.model);
+            return {
+                data: result.text,
+                model: result.model
+            };
+        } catch (error) {
+            this.emitInvocation('transcription', 'transcription', 'error', SERVER_TRANSCRIPTION_MODEL, error);
+            throw error;
         }
-
-        const result = await this.groq.transcribeAudio(audioBlob, options);
-        return { data: result.text, model: result.model };
     }
 
-    async extractOnly(transcription: string): Promise<{ data: ExtractionResult; meta: ExtractionMeta[]; classification: ConsultationClassification }> {
-        const result = await this.groq.extractMedicalData(transcription);
-        return { data: result.data, meta: result.meta, classification: result.classification };
+    async extractOnly(transcription: string, specialty: ClinicalSpecialtyId = 'otorrino'): Promise<{
+        data: ExtractionResult;
+        meta: ExtractionMeta[];
+        classification: ConsultationClassification;
+    }> {
+        this.emitInvocation('extract', 'extract', 'start', SERVER_TEXT_MODEL);
+        try {
+            const result = await postJson<{
+                data: ExtractionResult;
+                meta: ExtractionMeta[];
+                classification: ConsultationClassification;
+                model: string;
+            }>('/api/ai/extract', {
+                transcription,
+                consultationType: specialty
+            });
+            this.emitInvocation('extract', 'extract', 'success', result.model);
+            return {
+                data: result.data,
+                meta: result.meta || [],
+                classification: result.classification
+            };
+        } catch (error) {
+            this.emitInvocation('extract', 'extract', 'error', SERVER_TEXT_MODEL, error);
+            throw error;
+        }
     }
 
-    async generateFromMergedExtractions(
-        extractionParts: ExtractionResult[],
-        fullTranscription: string,
-        patientName: string,
-        extractionMetaParts: ExtractionMeta[] = [],
-        classification?: ConsultationClassification,
-        sessionId?: string
+    async generateMedicalHistory(
+        transcription: string,
+        patientName: string = '',
+        specialty: ClinicalSpecialtyId = 'otorrino'
     ): Promise<AIResultWithMetadata> {
-        const startTime = Date.now();
-        const auditId = this.buildAuditId();
-
+        this.emitInvocation('single_shot_history', 'single_shot_history_generation', 'start', SERVER_TEXT_MODEL);
         try {
-            const extractStartedAt = Date.now();
-            const mergedExtraction = await this.groq.mergeMultipleExtractions(extractionParts, fullTranscription);
-            const extractDurationMs = Date.now() - extractStartedAt;
-
-            const transcriptTokens = this.estimateTokens(fullTranscription);
-            const hardMaxCorrections = transcriptTokens > 8000 ? 3 : 2;
-            let maxCorrections = TWO_CALL_ADAPTIVE_MODE ? 0 : (FAST_PATH_ADAPTIVE_VALIDATION ? 1 : hardMaxCorrections);
-            let correctionsApplied = 0;
-            const versions: PipelineResult['versions'] = [];
-            let generatedHistory = '';
-            let generationModel = '';
-            let activeMemoryUsed = false;
-            let rulePackVersion: number | undefined;
-            const ruleIdsUsed = new Set<string>();
-            let learningApplied = false;
-            let allValidations: ValidationResult[] = [];
-            let previousErrors: { type: string; field: string; reason: string; field_value?: string }[] = [];
-            let generationDurationMs = 0;
-            let validationDurationMs = 0;
-            let correctionRoundsExecuted = 0;
-            let earlyStopReason: 'clean_consensus' | 'low_risk_remaining' | 'max_rounds_reached' = 'max_rounds_reached';
-            let aggregateRiskLevel: 'low' | 'medium' | 'high' = 'low';
-
-            for (let attempt = 0; attempt <= maxCorrections; attempt++) {
-                const generationStartedAt = Date.now();
-                const genResult = await this.groq.generateFromExtraction(
-                    mergedExtraction,
-                    patientName,
-                    (previousErrors.length > 0 ? previousErrors : undefined) as ValidationError[] | undefined,
-                    classification
-                );
-                generationDurationMs += Date.now() - generationStartedAt;
-                correctionRoundsExecuted = attempt + 1;
-
-                generatedHistory = genResult.text;
-                generationModel = genResult.model;
-                if (genResult.active_memory_used) activeMemoryUsed = true;
-                if (typeof genResult.rule_pack_version === 'number') rulePackVersion = genResult.rule_pack_version;
-                if (Array.isArray(genResult.rule_ids_used)) {
-                    genResult.rule_ids_used.forEach((id) => {
-                        if (id) ruleIdsUsed.add(id);
-                    });
-                }
-                if (genResult.learning_applied) learningApplied = true;
-
-                versions.push({
-                    phase: attempt === 0 ? 'generation_merged' : `correction_${attempt}`,
-                    content: generatedHistory,
-                    model: generationModel,
-                    timestamp: Date.now()
-                });
-
-                const validationStartedAt = Date.now();
-                const { validations, consensus } = TWO_CALL_ADAPTIVE_MODE
-                    ? this.runDeterministicClinicalGuard(generatedHistory, mergedExtraction)
-                    : await this.groq.validateOutput(
-                        generatedHistory,
-                        mergedExtraction,
-                        fullTranscription,
-                        extractionMetaParts
-                    );
-                validationDurationMs += Date.now() - validationStartedAt;
-                allValidations.push(...validations);
-                aggregateRiskLevel = this.computeRiskLevel(consensus);
-
-                if (consensus.length === 0) {
-                    previousErrors = [];
-                    earlyStopReason = 'clean_consensus';
-                    break;
-                }
-
-                previousErrors = consensus;
-                if (TWO_CALL_ADAPTIVE_MODE) {
-                    earlyStopReason = 'max_rounds_reached';
-                    break;
-                }
-                maxCorrections = this.shouldEscalateCorrections(attempt, transcriptTokens, consensus);
-
-                const hasHighRiskError = consensus.some((error) =>
-                    (error.type === 'hallucination' || error.type === 'inconsistency') &&
-                    this.severityWeight(error.severity) >= 2
-                );
-                if (!hasHighRiskError && FAST_PATH_ADAPTIVE_VALIDATION && attempt >= 1) {
-                    earlyStopReason = 'low_risk_remaining';
-                    break;
-                }
-
-                if (attempt < maxCorrections) {
-                    correctionsApplied += 1;
-                    continue;
-                }
-            }
-
-            const durationMs = Date.now() - startTime;
-            const correctionDurationMs = Math.max(0, generationDurationMs + validationDurationMs);
-            const semanticChecks = this.groq.drainSemanticChecks();
-            const modelInvocations = this.groq.drainModelInvocations();
-            const invocationSummary = this.summarizeInvocations(modelInvocations);
-            const stageSessionId = sessionId || auditId;
-            const nowIso = new Date().toISOString();
-            void enqueueAuditEvent('pipeline_attempt', {
-                session_id: stageSessionId,
-                stage: 'extract',
-                attempt_index: 0,
-                status: 'completed',
-                started_at: nowIso,
-                finished_at: nowIso,
-                duration_ms: extractDurationMs,
-                metadata: { source: 'ai_service' }
-            });
-            void enqueueAuditEvent('pipeline_attempt', {
-                session_id: stageSessionId,
-                stage: 'generation',
-                attempt_index: Math.max(0, correctionRoundsExecuted - 1),
-                status: 'completed',
-                started_at: nowIso,
-                finished_at: nowIso,
-                duration_ms: generationDurationMs,
-                metadata: { source: 'ai_service', rounds_executed: correctionRoundsExecuted }
-            });
-            void enqueueAuditEvent('pipeline_attempt', {
-                session_id: stageSessionId,
-                stage: 'validation',
-                attempt_index: Math.max(0, correctionRoundsExecuted - 1),
-                status: 'completed',
-                started_at: nowIso,
-                finished_at: nowIso,
-                duration_ms: validationDurationMs,
-                metadata: { source: 'ai_service', risk_level: aggregateRiskLevel }
-            });
-            const errorCounts = (previousErrors || []).reduce(
-                (acc, err) => {
-                    acc[err.type] = (acc[err.type] || 0) + 1;
-                    return acc;
-                },
-                {} as Record<string, number>
-            );
-            const qualityPayload: {
-                corrections_applied: number;
-                error_counts: Record<string, number>;
-                uncertainty_flags: number;
-                duration_ms: number;
-                transcript_tokens: number;
-                quality_score?: number;
-                critical_gaps?: number;
-                t_extract_ms?: number;
-                t_generate_ms?: number;
-                t_validate_ms?: number;
-                t_corrections_ms?: number;
-                t_total_ms?: number;
-                rounds_executed?: number;
-                early_stop_reason?: string;
-                risk_level?: 'low' | 'medium' | 'high';
-                fallback_hops?: number;
-                logical_calls_used?: number;
-                physical_calls_used?: number;
-                provisional_reason?: string;
-                sanitization_applied?: boolean;
-                errors_raw_count?: number;
-                errors_final_count?: number;
-                neutralized_issues?: number;
-            } = {
-                corrections_applied: correctionsApplied,
-                error_counts: errorCounts,
-                uncertainty_flags: (previousErrors || []).length,
-                duration_ms: durationMs,
-                transcript_tokens: this.estimateTokens(fullTranscription),
-                t_extract_ms: extractDurationMs,
-                t_generate_ms: generationDurationMs,
-                t_validate_ms: validationDurationMs,
-                t_corrections_ms: correctionDurationMs,
-                t_total_ms: durationMs,
-                rounds_executed: correctionRoundsExecuted,
-                early_stop_reason: earlyStopReason,
-                risk_level: aggregateRiskLevel,
-                fallback_hops: modelInvocations.filter((item) => item.is_fallback).length,
-                logical_calls_used: 2,
-                physical_calls_used: modelInvocations.length
-            };
-
-            const historyOutput = this.sanitizeClinicalHistory(generatedHistory);
-            const rawGuard = this.runDeterministicClinicalGuard(generatedHistory, mergedExtraction);
-            const finalGuard = this.runDeterministicClinicalGuard(historyOutput, mergedExtraction);
-            const rawIssues = rawGuard.consensus || [];
-            const finalIssues = finalGuard.consensus || [];
-            allValidations.push(
-                ...rawGuard.validations.map((validation) => ({ ...validation, validator: 'raw_guard' })),
-                ...finalGuard.validations.map((validation) => ({ ...validation, validator: 'final_guard' }))
-            );
-
-            const finalIssueMap = new Set(finalIssues.map((issue) => this.issueFingerprint(issue)));
-            const neutralizedIssuesRaw = rawIssues
-                .filter((issue) => !finalIssueMap.has(this.issueFingerprint(issue)));
-            const preSanitizeIssues = rawIssues.map((issue) => this.toReconciliationIssue(issue as ValidationError, 'raw_guard'));
-            const postSanitizeIssues = finalIssues.map((issue) => this.toReconciliationIssue(issue as ValidationError, 'final_guard'));
-            const neutralizedIssues = neutralizedIssuesRaw.map((issue) => this.toReconciliationIssue(issue as ValidationError, 'raw_guard'));
-            const neutralizedIssueStrings = neutralizedIssues.map((issue) => `${issue.type}:${issue.field}:${issue.reason}`);
-            const postSanitizeIssueStrings = postSanitizeIssues.map((issue) => `${issue.type}:${issue.field}:${issue.reason}`);
-            const finalErrors = finalIssues;
-            const uncertaintyFlags: UncertaintyFlag[] = [
-                ...finalIssues.map(err => ({
-                    field_path: err.field,
-                    reason: err.reason,
-                    severity: (err.type === 'hallucination' ? 'high' : err.type === 'missing' ? 'medium' : 'low') as 'high' | 'medium' | 'low',
-                    value: err.field_value
-                })),
-                ...neutralizedIssueStrings.map(issue => ({
-                    field_path: 'sanitization',
-                    reason: `[SANITIZED_LEAK] ${issue}`,
-                    severity: 'low' as 'high' | 'medium' | 'low',
-                    value: undefined
-                }))
-            ];
-
-            const hasHighRiskError = finalErrors.some((error) =>
-                (error.type === 'hallucination' || error.type === 'inconsistency') &&
-                this.severityWeight((error as ValidationError).severity) >= 2
-            );
-            // Only mark provisional for genuine high-risk issues (hallucination/inconsistency with severity major+)
-            // Minor quality notes and missing-data flags should NOT block finalization to avoid alert fatigue
-            const provisionalReason = hasHighRiskError
-                ? 'high_risk_detected_requires_manual_review'
-                : undefined;
-            const pipelineStatus: 'completed' | 'degraded' = finalErrors.length > 0 ? 'degraded' : 'completed';
-            const resultStatus: 'completed' | 'provisional' = provisionalReason ? 'provisional' : 'completed';
-            const deterministicTriage: QualityTriageResult = {
-                quality_score: Math.max(25, 100 - (finalErrors.length * 10)),
-                critical_gaps: finalErrors
-                    .filter((error) => this.severityWeight((error as ValidationError).severity) >= 2)
-                    .slice(0, 5)
-                    .map((error) => ({
-                        field: error.field || 'unknown',
-                        reason: error.reason || 'Sin detalle',
-                        severity: (((error as ValidationError).severity || ((error.type === 'hallucination' || error.type === 'inconsistency') ? 'critical' : 'major')) as 'critical' | 'major' | 'minor')
-                    })),
-                doctor_next_actions: [
-                    'Revisar primero los gaps criticos detectados',
-                    'Confirmar campos con incertidumbre antes de finalizar',
-                    'Finalizar solo cuando no queden dudas clinicas'
-                ],
-                model: 'quality_triage_deterministic'
-            };
-
-            const triagePromise = FAST_PATH_ASYNC_TRIAGE
-                ? Promise.resolve(deterministicTriage)
-                : this.groq.generateQualityTriage({
-                    generatedHistory: historyOutput,
-                    remainingErrors: finalErrors as ValidationError[],
-                    classification
-                }).catch(() => deterministicTriage);
-
-            let triageResult = deterministicTriage;
-            if (!FAST_PATH_ASYNC_TRIAGE) {
-                triageResult = await triagePromise;
-            } else {
-                void triagePromise.then((resolved) => {
-                    void enqueueAuditEvent('pipeline_run_update', {
-                        session_id: sessionId || auditId,
-                        patient_name: patientName,
-                        status: pipelineStatus,
-                        metadata: {
-                            quality_score: resolved.quality_score,
-                            critical_gaps: resolved.critical_gaps.length,
-                            quality_triage_model: resolved.model
-                        }
-                    });
-                }).catch(() => {
-                    // Best effort async triage update.
-                });
-            }
-
-            qualityPayload.quality_score = triageResult.quality_score;
-            qualityPayload.critical_gaps = triageResult.critical_gaps.length;
-            qualityPayload.provisional_reason = provisionalReason;
-            qualityPayload.sanitization_applied = historyOutput.trim() !== (generatedHistory || '').trim();
-            qualityPayload.errors_raw_count = rawIssues.length;
-            qualityPayload.errors_final_count = finalIssues.length;
-            qualityPayload.neutralized_issues = neutralizedIssues.length;
-
-            void enqueueAuditEvent('pipeline_audit_bundle', {
-                audit_id: auditId,
-                session_id: sessionId || auditId,
-                audit_data: {
-                    patient_name: patientName,
-                    pipeline_version: 'merged-4-phase-v3-strict',
-                    models_used: {
-                        extraction: 'merged-multi-part',
-                        generation: generationModel,
-                        validation_a: allValidations[0]?.validator || 'unknown',
-                        validation_b: allValidations[1]?.validator || 'unknown',
-                        invocation_summary: invocationSummary,
-                        rule_pack_version: rulePackVersion || null,
-                        rule_count: ruleIdsUsed.size
-                    },
-                    extraction_data: {
-                        extraction: mergedExtraction,
-                        extraction_meta: extractionMetaParts,
-                        classification: classification || null
-                    },
-                    metadata: {
-                        learning_applied: learningApplied,
-                        rule_ids_used: Array.from(ruleIdsUsed),
-                        call_budget_mode: TWO_CALL_ADAPTIVE_MODE ? 'two_call_adaptive' : 'standard',
-                        logical_calls_used: 1 + (generatedHistory ? 1 : 0),
-                        physical_calls_used: modelInvocations.length,
-                        provisional_reason: provisionalReason || null,
-                        phase_timings_ms: {
-                            extract: extractDurationMs,
-                            generate: generationDurationMs,
-                            validate: validationDurationMs,
-                            corrections: correctionDurationMs,
-                            total: durationMs
-                        },
-                        rounds_executed: correctionRoundsExecuted,
-                        early_stop_reason: earlyStopReason,
-                        risk_level: aggregateRiskLevel
-                    },
-                    generation_versions: versions,
-                    history_output: historyOutput,
-                    validation_logs: allValidations,
-                    corrections_applied: correctionsApplied,
-                    successful: true,
-                    duration_ms: durationMs,
-                    created_at: new Date().toISOString()
-                },
-                extraction_meta: extractionMetaParts,
-                semantic_checks: semanticChecks,
-                model_invocations: modelInvocations,
-                quality_event: {
-                    record_id: auditId,
-                    event_type: 'pipeline_completed',
-                    payload: qualityPayload
-                }
-            }).catch((error) => {
-                console.error('[AIService] Failed to enqueue async audit event:', error);
-            });
-
-            return {
-                data: historyOutput,
-                model: generationModel,
-                extraction: mergedExtraction,
-                extraction_meta: extractionMetaParts,
-                classification,
-                validations: allValidations,
-                corrections_applied: correctionsApplied,
-                remaining_errors: finalErrors.length > 0 ? finalErrors : undefined,
-                active_memory_used: activeMemoryUsed,
-                uncertainty_flags: uncertaintyFlags.length > 0 ? uncertaintyFlags : undefined,
-                audit_id: auditId,
-                pipeline_status: pipelineStatus,
-                result_status: resultStatus,
-                session_id: sessionId,
-                rule_pack_version: rulePackVersion,
-                rule_ids_used: Array.from(ruleIdsUsed),
-                learning_applied: learningApplied,
-                quality_score: triageResult.quality_score,
-                critical_gaps: triageResult.critical_gaps,
-                doctor_next_actions: triageResult.doctor_next_actions,
-                quality_triage_model: triageResult.model,
-                correction_rounds_executed: correctionRoundsExecuted,
-                early_stop_reason: earlyStopReason,
-                risk_level: aggregateRiskLevel,
-                call_budget_mode: TWO_CALL_ADAPTIVE_MODE ? 'two_call_adaptive' : 'standard',
-                logical_calls_used: 1 + (generatedHistory ? 1 : 0),
-                physical_calls_used: modelInvocations.length,
-                provisional_reason: provisionalReason,
-                fallback_hops: modelInvocations.filter((item) => item.is_fallback).length,
-                sanitization_applied: historyOutput.trim() !== (generatedHistory || '').trim(),
-                errors_raw_count: rawIssues.length,
-                errors_final_count: finalIssues.length,
-                resolved_by_sanitization: neutralizedIssueStrings,
-                still_blocking_after_sanitization: postSanitizeIssueStrings,
-                reconciliation: {
-                    pre_sanitize_issues: preSanitizeIssues,
-                    post_sanitize_issues: postSanitizeIssues,
-                    neutralized_issues: neutralizedIssues
-                },
-                phase_timings_ms: {
-                    extract: extractDurationMs,
-                    generate: generationDurationMs,
-                    validate: validationDurationMs,
-                    corrections: correctionDurationMs,
-                    total: durationMs
-                },
-                output_tier: 'final',
-                gemini_calls_used: modelInvocations.filter((item) => item.provider === 'gemini').length,
-                one_call_policy_applied: GEMINI_ONE_CALL_STRICT,
-                degraded_reason_code: provisionalReason
-            };
-        } catch (error) {
-            this.groq.drainModelInvocations();
-            if (!this.isRetryableError(error)) throw error;
-            const reason = (error as Error)?.message || 'all_models_failed';
-            return {
-                data: this.buildProvisionalHistory(reason),
-                model: 'pipeline_provisional',
-                remaining_errors: [{ type: 'budget', field: 'pipeline', reason }],
-                pipeline_status: 'degraded',
-                result_status: 'provisional',
-                retry_after_ms: 30_000,
-                session_id: sessionId,
-                quality_score: 25,
-                critical_gaps: [{ field: 'pipeline', reason, severity: 'critical' }],
-                doctor_next_actions: [
-                    'Reintentar cuando haya cuota disponible',
-                    'Revisar los datos criticos manualmente',
-                    'No finalizar sin validar el contenido'
-                ],
-                quality_triage_model: 'quality_triage_fallback',
-                correction_rounds_executed: 0,
-                early_stop_reason: 'max_rounds_reached',
-                risk_level: 'high',
-                call_budget_mode: 'two_call_adaptive',
-                logical_calls_used: 2,
-                physical_calls_used: 0,
-                provisional_reason: reason,
-                fallback_hops: 0,
-                phase_timings_ms: {
-                    extract: 0,
-                    generate: 0,
-                    validate: 0,
-                    corrections: 0,
-                    total: 0
-                },
-                output_tier: 'final',
-                gemini_calls_used: 0,
-                one_call_policy_applied: GEMINI_ONE_CALL_STRICT,
-                degraded_reason_code: reason
-            };
-        }
-    }
-
-    private startAsyncGroqFollowup(params: {
-        sessionId: string;
-        patientName: string;
-        transcription: string;
-        generatedHistory: string;
-        extraction?: ExtractionResult;
-        extractionMeta?: ExtractionMeta[];
-    }): void {
-        const startedAt = Date.now();
-        void this.groq.validateOutput(
-            params.generatedHistory,
-            params.extraction || {
-                antecedentes: { alergias: null, enfermedades_cronicas: null, cirugias: null, tratamiento_habitual: null },
-                enfermedad_actual: { motivo_consulta: '', sintomas: [], evolucion: null },
-                exploraciones_realizadas: {},
-                diagnostico: [],
-                plan: ''
-            },
-            params.transcription,
-            params.extractionMeta || []
-        ).then(({ consensus, validations }) => {
-            const criticalCount = (consensus || []).filter((error) => this.severityWeight((error as ValidationError).severity) >= 2).length;
-            const status = criticalCount > 0 ? 'degraded' : 'completed';
-            void enqueueAuditEvent('pipeline_attempt', {
-                session_id: params.sessionId,
-                stage: 'followup_groq',
-                attempt_index: 0,
-                status,
-                started_at: new Date(startedAt).toISOString(),
-                finished_at: new Date().toISOString(),
-                duration_ms: Date.now() - startedAt,
-                metadata: {
-                    critical_gaps: criticalCount,
-                    validations: validations.map((item) => item.validator)
-                }
-            });
-            void enqueueAuditEvent('pipeline_run_update', {
-                session_id: params.sessionId,
-                patient_name: params.patientName,
-                status,
-                metadata: {
-                    followup_status: status,
-                    followup_critical_gaps: criticalCount
-                }
-            });
-        }).catch((error) => {
-            void enqueueAuditEvent('pipeline_attempt', {
-                session_id: params.sessionId,
-                stage: 'followup_groq',
-                attempt_index: 0,
-                status: 'failed',
-                started_at: new Date(startedAt).toISOString(),
-                finished_at: new Date().toISOString(),
-                duration_ms: Date.now() - startedAt,
-                error_message: (error as Error)?.message || 'followup_groq_failed'
-            });
-            void enqueueAuditEvent('pipeline_run_update', {
-                session_id: params.sessionId,
-                patient_name: params.patientName,
-                status: 'degraded',
-                metadata: {
-                    followup_status: 'failed',
-                    followup_error: (error as Error)?.message || 'followup_groq_failed'
-                }
-            });
-        });
-    }
-
-    private async generateMedicalHistorySingleShot(transcription: string, patientName: string = ""): Promise<AIResultWithMetadata> {
-        const startedAt = Date.now();
-        const auditId = this.buildAuditId();
-        this.groq.resetInvocationCounters();
-        const generationStartedAt = Date.now();
-        const singleShot = await this.groq.generateSingleShotHistory(transcription, patientName);
-        const generationDurationMs = Date.now() - generationStartedAt;
-
-        const generatedHistory = singleShot.history_markdown;
-        const historyOutput = this.sanitizeClinicalHistory(generatedHistory);
-        const rawGuard = this.runDeterministicClinicalGuard(generatedHistory, singleShot.extraction);
-        const finalGuard = this.runDeterministicClinicalGuard(historyOutput, singleShot.extraction);
-        const rawIssues = rawGuard.consensus || [];
-        const finalIssues = finalGuard.consensus || [];
-        const preSanitizeIssues = rawIssues.map((issue) => this.toReconciliationIssue(issue as ValidationError, 'raw_guard'));
-        const postSanitizeIssues = finalIssues.map((issue) => this.toReconciliationIssue(issue as ValidationError, 'final_guard'));
-        const finalIssueMap = new Set(finalIssues.map((issue) => this.issueFingerprint(issue)));
-        const neutralizedIssues = rawIssues
-            .filter((issue) => !finalIssueMap.has(this.issueFingerprint(issue)))
-            .map((issue) => this.toReconciliationIssue(issue as ValidationError, 'raw_guard'));
-        const neutralizedIssueStrings = neutralizedIssues.map((issue) => `${issue.type}:${issue.field}:${issue.reason}`);
-        const postSanitizeIssueStrings = postSanitizeIssues.map((issue) => `${issue.type}:${issue.field}:${issue.reason}`);
-
-        const hasHighRiskError = finalIssues.some((error) =>
-            (error.type === 'hallucination' || error.type === 'inconsistency') &&
-            this.severityWeight((error as ValidationError).severity) >= 2
-        );
-        const provisionalReason = hasHighRiskError ? 'high_risk_detected_requires_manual_review' : undefined;
-        const pipelineStatus: 'completed' | 'degraded' = finalIssues.length > 0 ? 'degraded' : 'completed';
-        const resultStatus: 'completed' | 'provisional' = provisionalReason ? 'provisional' : 'completed';
-        const allValidations: ValidationResult[] = [
-            ...rawGuard.validations.map((validation) => ({ ...validation, validator: 'raw_guard' })),
-            ...finalGuard.validations.map((validation) => ({ ...validation, validator: 'final_guard' }))
-        ];
-        const deterministicTriage: QualityTriageResult = {
-            quality_score: Math.max(25, 100 - (finalIssues.length * 10)),
-            critical_gaps: finalIssues
-                .filter((error) => this.severityWeight((error as ValidationError).severity) >= 2)
-                .slice(0, 5)
-                .map((error) => ({
-                    field: error.field || 'unknown',
-                    reason: error.reason || 'Sin detalle',
-                    severity: (((error as ValidationError).severity || ((error.type === 'hallucination' || error.type === 'inconsistency') ? 'critical' : 'major')) as 'critical' | 'major' | 'minor')
-                })),
-            doctor_next_actions: [
-                'Revisar primero los gaps criticos detectados',
-                'Confirmar campos con incertidumbre antes de finalizar',
-                'Finalizar solo cuando no queden dudas clinicas'
-            ],
-            model: 'quality_triage_deterministic'
-        };
-
-        const triagePromise = FAST_PATH_ASYNC_TRIAGE
-            ? Promise.resolve(deterministicTriage)
-            : this.groq.generateQualityTriage({
-                generatedHistory: historyOutput,
-                remainingErrors: finalIssues as ValidationError[],
-                classification: singleShot.classification
-            }).catch(() => deterministicTriage);
-        let triageResult = deterministicTriage;
-        if (!FAST_PATH_ASYNC_TRIAGE) {
-            triageResult = await triagePromise;
-        }
-
-        const modelInvocations = this.groq.drainModelInvocations();
-        const semanticChecks = this.groq.drainSemanticChecks();
-        const invocationSummary = this.summarizeInvocations(modelInvocations);
-        const durationMs = Date.now() - startedAt;
-        const uncertaintyFlags: UncertaintyFlag[] = [
-            ...finalIssues.map(err => ({
-                field_path: err.field,
-                reason: err.reason,
-                severity: (err.type === 'hallucination' ? 'high' : err.type === 'missing' ? 'medium' : 'low') as 'high' | 'medium' | 'low',
-                value: err.field_value
-            })),
-            ...(singleShot.uncertainty_flags || []),
-            ...neutralizedIssueStrings.map(issue => ({
-                field_path: 'sanitization',
-                reason: `[SANITIZED_LEAK] ${issue}`,
-                severity: 'low' as 'high' | 'medium' | 'low',
-                value: undefined
-            }))
-        ];
-
-        void enqueueAuditEvent('pipeline_audit_bundle', {
-            audit_id: auditId,
-            session_id: auditId,
-            audit_data: {
-                patient_name: patientName,
-                pipeline_version: 'single-shot-v1',
-                models_used: {
-                    extraction: singleShot.model,
-                    generation: singleShot.model,
-                    validation_a: 'raw_guard',
-                    validation_b: 'final_guard',
-                    invocation_summary: invocationSummary
-                },
-                extraction_data: {
-                    extraction: singleShot.extraction,
-                    extraction_meta: [],
-                    classification: singleShot.classification || null
-                },
-                metadata: {
-                    learning_applied: false,
-                    rule_ids_used: [],
-                    call_budget_mode: 'single_shot',
-                    logical_calls_used: 1,
-                    physical_calls_used: modelInvocations.length,
-                    provisional_reason: provisionalReason || null,
-                    phase_timings_ms: {
-                        extract: 0,
-                        generate: generationDurationMs,
-                        validate: 0,
-                        corrections: 0,
-                        total: durationMs
-                    },
-                    rounds_executed: 1,
-                    early_stop_reason: finalIssues.length === 0 ? 'clean_consensus' : 'low_risk_remaining',
-                    risk_level: this.computeRiskLevel(finalIssues)
-                },
-                generation_versions: [
-                    {
-                        phase: 'single_shot_generation',
-                        content: generatedHistory,
-                        model: singleShot.model,
-                        timestamp: Date.now()
-                    }
-                ],
-                history_output: historyOutput,
-                validation_logs: allValidations,
-                corrections_applied: 0,
-                successful: true,
-                duration_ms: durationMs,
-                created_at: new Date().toISOString()
-            },
-            extraction_meta: [],
-            semantic_checks: semanticChecks,
-            model_invocations: modelInvocations,
-            quality_event: {
-                record_id: auditId,
-                event_type: 'pipeline_completed',
-                payload: {
-                    corrections_applied: 0,
-                    error_counts: (finalIssues || []).reduce((acc, err) => {
-                        acc[err.type] = (acc[err.type] || 0) + 1;
-                        return acc;
-                    }, {} as Record<string, number>),
-                    uncertainty_flags: uncertaintyFlags.length,
-                    duration_ms: durationMs,
-                    transcript_tokens: this.estimateTokens(transcription),
-                    quality_score: triageResult.quality_score,
-                    critical_gaps: triageResult.critical_gaps.length,
-                    t_extract_ms: 0,
-                    t_generate_ms: generationDurationMs,
-                    t_validate_ms: 0,
-                    t_corrections_ms: 0,
-                    t_total_ms: durationMs,
-                    rounds_executed: 1,
-                    early_stop_reason: finalIssues.length === 0 ? 'clean_consensus' : 'low_risk_remaining',
-                    risk_level: this.computeRiskLevel(finalIssues),
-                    fallback_hops: modelInvocations.filter((item) => item.is_fallback).length,
-                    logical_calls_used: 1,
-                    physical_calls_used: modelInvocations.length,
-                    provisional_reason: provisionalReason,
-                    sanitization_applied: historyOutput.trim() !== (generatedHistory || '').trim(),
-                    errors_raw_count: rawIssues.length,
-                    errors_final_count: finalIssues.length,
-                    neutralized_issues: neutralizedIssues.length
-                }
-            }
-        }).catch((error) => {
-            console.error('[AIService] Failed to enqueue single-shot audit event:', error);
-        });
-
-        if (SINGLE_SHOT_ASYNC_FOLLOWUP && !GEMINI_ONE_CALL_STRICT) {
-            this.startAsyncGroqFollowup({
-                sessionId: auditId,
-                patientName,
-                transcription,
-                generatedHistory: historyOutput,
-                extraction: singleShot.extraction,
-                extractionMeta: []
-            });
-        }
-        const geminiCallsUsed = modelInvocations.filter((item) => item.provider === 'gemini').length;
-
-        return {
-            data: historyOutput,
-            model: singleShot.model,
-            extraction: singleShot.extraction,
-            extraction_meta: [],
-            classification: singleShot.classification,
-            validations: allValidations,
-            corrections_applied: 0,
-            remaining_errors: finalIssues.length > 0 ? finalIssues : undefined,
-            active_memory_used: false,
-            uncertainty_flags: uncertaintyFlags.length > 0 ? uncertaintyFlags : undefined,
-            audit_id: auditId,
-            pipeline_status: pipelineStatus,
-            result_status: resultStatus,
-            session_id: auditId,
-            learning_applied: false,
-            quality_score: triageResult.quality_score,
-            critical_gaps: triageResult.critical_gaps,
-            doctor_next_actions: triageResult.doctor_next_actions,
-            quality_triage_model: triageResult.model,
-            correction_rounds_executed: 1,
-            early_stop_reason: finalIssues.length === 0 ? 'clean_consensus' : 'low_risk_remaining',
-            risk_level: this.computeRiskLevel(finalIssues),
-            call_budget_mode: 'single_shot',
-            logical_calls_used: 1,
-            physical_calls_used: modelInvocations.length,
-            provisional_reason: provisionalReason,
-            fallback_hops: modelInvocations.filter((item) => item.is_fallback).length,
-            sanitization_applied: historyOutput.trim() !== (generatedHistory || '').trim(),
-            errors_raw_count: rawIssues.length,
-            errors_final_count: finalIssues.length,
-            resolved_by_sanitization: neutralizedIssueStrings,
-            still_blocking_after_sanitization: postSanitizeIssueStrings,
-            reconciliation: {
-                pre_sanitize_issues: preSanitizeIssues,
-                post_sanitize_issues: postSanitizeIssues,
-                neutralized_issues: neutralizedIssues
-            },
-            phase_timings_ms: {
-                extract: 0,
-                generate: generationDurationMs,
-                validate: 0,
-                corrections: 0,
-                total: durationMs
-            },
-            followup_status: SINGLE_SHOT_ASYNC_FOLLOWUP && !GEMINI_ONE_CALL_STRICT ? 'pending' : 'completed',
-            output_tier: 'final',
-            gemini_calls_used: geminiCallsUsed,
-            one_call_policy_applied: GEMINI_ONE_CALL_STRICT,
-            degraded_reason_code: provisionalReason
-        };
-    }
-
-    async generateMedicalHistory(transcription: string, patientName: string = ""): Promise<AIResultWithMetadata> {
-        try {
-            if (SINGLE_SHOT_HISTORY_MODE) {
-                return await this.generateMedicalHistorySingleShot(transcription, patientName);
-            }
-            this.groq.resetInvocationCounters();
-            const extractionResult = await this.extractOnly(transcription);
-            return await this.generateFromMergedExtractions(
-                [extractionResult.data],
+            const result = await postJson<AIResultWithMetadata>('/api/ai/generate-history', {
                 transcription,
                 patientName,
-                extractionResult.meta,
-                extractionResult.classification
-            );
-        } catch (error) {
-            this.groq.drainModelInvocations();
-            const failureAuditId = this.buildAuditId();
-            const reason = (error as Error)?.message || 'pipeline_error';
-            const provisionalHistory = this.buildProvisionalHistory(reason);
-            console.error('[AIService] Pipeline failed:', reason);
-            void enqueueAuditEvent('pipeline_audit_bundle', {
-                audit_id: failureAuditId,
-                session_id: failureAuditId,
-                audit_data: {
-                    patient_name: patientName,
-                    pipeline_version: SINGLE_SHOT_HISTORY_MODE ? 'single-shot-v1' : 'merged-4-phase-v3-strict',
-                    models_used: {},
-                    extraction_data: null,
-                    generation_versions: [],
-                    history_output: provisionalHistory,
-                    validation_logs: [],
-                    corrections_applied: 0,
-                    successful: false,
-                    duration_ms: 0,
-                    created_at: new Date().toISOString()
-                },
-                extraction_meta: [],
-                semantic_checks: [],
-                quality_event: {
-                    record_id: failureAuditId,
-                    event_type: 'pipeline_completed',
-                    payload: {
-                        corrections_applied: 0,
-                        error_counts: { pipeline_error: 1 },
-                        uncertainty_flags: 1,
-                        duration_ms: 0,
-                        transcript_tokens: this.estimateTokens(transcription)
-                    }
-                }
-            }).catch((enqueueError) => {
-                console.error('[AIService] Failed to enqueue failure audit:', enqueueError);
+                consultationType: specialty
             });
-            // Return provisional history instead of crashing — the doctor
-            // always sees a structured template they can fill in manually.
-            return {
-                data: provisionalHistory,
-                model: 'pipeline_failed',
-                remaining_errors: [{ type: 'error', field: 'pipeline', reason }],
-                pipeline_status: 'degraded',
-                result_status: 'failed_recoverable',
-                quality_score: 0,
-                critical_gaps: [{ field: 'pipeline', reason, severity: 'critical' as const }],
-                doctor_next_actions: [
-                    'Reintentar el procesamiento',
-                    'Verificar conexion a internet',
-                    'Revisar la transcripcion manualmente'
-                ],
-                quality_triage_model: 'quality_triage_fallback',
-                correction_rounds_executed: 0,
-                early_stop_reason: 'max_rounds_reached',
-                risk_level: 'high',
-                call_budget_mode: SINGLE_SHOT_HISTORY_MODE ? 'single_shot' : 'two_call_adaptive',
-                logical_calls_used: SINGLE_SHOT_HISTORY_MODE ? 1 : 2,
-                physical_calls_used: 0,
-                provisional_reason: reason,
-                fallback_hops: 0,
-                phase_timings_ms: { extract: 0, generate: 0, validate: 0, corrections: 0, total: 0 },
-                followup_status: 'failed',
-                output_tier: 'final',
-                gemini_calls_used: 0,
-                one_call_policy_applied: GEMINI_ONE_CALL_STRICT,
-                degraded_reason_code: reason
-            };
+            this.emitInvocation('single_shot_history', 'single_shot_history_generation', 'success', result.model);
+            return result;
+        } catch (error) {
+            this.emitInvocation('single_shot_history', 'single_shot_history_generation', 'error', SERVER_TEXT_MODEL, error);
+            throw error;
         }
     }
 
-    async generateMedicalReport(transcription: string, patientName: string = ""): Promise<AIResult<string>> {
-        const result = await this.groq.generateMedicalReport(transcription, patientName);
-        return { data: result.text, model: result.model };
+    async generateMedicalReport(
+        transcription: string,
+        patientName: string = '',
+        specialty: ClinicalSpecialtyId = 'otorrino'
+    ): Promise<AIResult<string>> {
+        this.emitInvocation('report', 'report_generation', 'start', SERVER_TEXT_MODEL);
+        try {
+            const result = await postJson<{ text: string; model: string }>('/api/ai/generate-report', {
+                transcription,
+                patientName,
+                consultationType: specialty
+            });
+            this.emitInvocation('report', 'report_generation', 'success', result.model);
+            return { data: result.text, model: result.model };
+        } catch (error) {
+            this.emitInvocation('report', 'report_generation', 'error', SERVER_TEXT_MODEL, error);
+            throw error;
+        }
     }
 
     async regenerateHistorySection(
         transcription: string,
         currentHistory: string,
         sectionTitle: string,
-        patientName: string = ""
+        patientName: string = '',
+        specialty: ClinicalSpecialtyId = 'otorrino'
     ): Promise<AIResult<string>> {
-        const prompt = `Eres un asistente medico ENT. Reescribe SOLO la seccion solicitada de una historia clinica.
-Paciente: ${patientName || 'Paciente'}
-Seccion objetivo: ${sectionTitle}
-Reglas:
-- Devuelve solo el contenido de la seccion objetivo (sin encabezado).
-- Mantener estilo medico claro y conciso.
-- Usar SOLO informacion de la transcripcion.
-- Si falta dato, indicar "No consta".
-
-TRANSCRIPCION:
-${transcription}
-
-HISTORIA ACTUAL:
-${currentHistory}`;
-
-        const text = await this.groq.chat(prompt, '', {
-            task: 'generation',
-            temperature: 0.1,
-            maxTokens: 900
-        });
-        return { data: text.trim(), model: 'task:generation' };
+        this.emitInvocation('generation', 'section_regeneration', 'start', SERVER_TEXT_MODEL);
+        try {
+            const result = await postJson<{ text: string; model: string }>('/api/ai/regenerate-section', {
+                transcription,
+                currentHistory,
+                sectionTitle,
+                patientName,
+                consultationType: specialty
+            });
+            this.emitInvocation('generation', 'section_regeneration', 'success', result.model);
+            return {
+                data: result.text,
+                model: result.model
+            };
+        } catch (error) {
+            this.emitInvocation('generation', 'section_regeneration', 'error', SERVER_TEXT_MODEL, error);
+            throw error;
+        }
     }
 }

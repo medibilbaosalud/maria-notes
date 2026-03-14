@@ -20,6 +20,7 @@ export interface PipelineStatusSnapshot {
     startedAt?: number;
     updatedAt: number;
     processedBatches: number[];
+    failedBatches: number[];
     pendingBatches: number[];
     nextExpectedBatch: number;
     missingBatches: number[];
@@ -39,6 +40,7 @@ export interface FinalizePayload {
     lastBatchIndex: number;
     finalBlob: Blob;
     missingBatches: number[];
+    failedBatches: number[];
     processedBatches: number[];
 }
 
@@ -75,6 +77,7 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
 
     private pending = new Map<number, Blob>();
     private processed = new Set<number>();
+    private failed = new Set<number>();
     private nextExpectedBatch = 0;
     private missingBatches = new Set<number>();
 
@@ -83,6 +86,7 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
     private finalizeRequest: FinalizeRequest<TFinalizeResult> | null = null;
     private drainPromise: Promise<void> | null = null;
     private finalizeRetries = 0;
+    private rescheduleAfterDrain = false;
 
     constructor(handlers: OrchestratorHandlers<TFinalizeResult>) {
         this.handlers = handlers;
@@ -106,6 +110,7 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
             startedAt: this.startedAt,
             updatedAt: this.updatedAt,
             processedBatches: Array.from(this.processed).sort((a, b) => a - b),
+            failedBatches: Array.from(this.failed).sort((a, b) => a - b),
             pendingBatches: Array.from(this.pending.keys()).sort((a, b) => a - b),
             nextExpectedBatch: this.nextExpectedBatch,
             missingBatches: Array.from(this.missingBatches).sort((a, b) => a - b)
@@ -121,6 +126,10 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
         }
         if (this.processed.has(batchIndex) || this.pending.has(batchIndex)) {
             return Promise.resolve();
+        }
+        if (this.failed.has(batchIndex)) {
+            this.failed.delete(batchIndex);
+            this.missingBatches.delete(batchIndex);
         }
 
         this.pending.set(batchIndex, blob);
@@ -164,9 +173,18 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
     }
 
     private scheduleDrain(): Promise<void> {
-        if (this.drainPromise) return this.drainPromise;
+        if (this.drainPromise) {
+            this.rescheduleAfterDrain = true;
+            return this.drainPromise;
+        }
         this.drainPromise = this.drain().finally(() => {
             this.drainPromise = null;
+            if (this.rescheduleAfterDrain) {
+                this.rescheduleAfterDrain = false;
+                if (this.pending.size > 0 || this.runningPartials.size > 0 || this.finalizeRequest) {
+                    void this.scheduleDrain();
+                }
+            }
         });
         return this.drainPromise;
     }
@@ -204,6 +222,7 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
                                     blob
                                 });
                                 this.processed.add(batchIndex);
+                                this.failed.delete(batchIndex);
                                 this.missingBatches.delete(batchIndex);
                                 // The original code used nextExpectedBatch for strict ordering.
                                 // We'll update it to be the first non-processed batch.
@@ -211,7 +230,7 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
                                 this.state = 'processing_partials';
                             } catch (error) {
                                 console.error(`[Orchestrator] Partial batch ${batchIndex} failed:`, error);
-                                this.processed.add(batchIndex);
+                                this.failed.add(batchIndex);
                                 this.missingBatches.add(batchIndex);
                                 this.updateNextExpected();
                             } finally {
@@ -237,8 +256,10 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
                 const expectedPartials = Math.max(0, finalizeReq.lastBatchIndex);
                 const isWaitingForPartials = this.runningPartials.size > 0;
                 const missing = this.computeMissingRange(0, expectedPartials - 1);
+                const failed = Array.from(this.failed).filter((idx) => idx >= 0 && idx <= expectedPartials - 1).sort((a, b) => a - b);
+                const unresolved = Array.from(new Set([...missing, ...failed])).sort((a, b) => a - b);
 
-                if (missing.length === 0 && !isWaitingForPartials) {
+                if (unresolved.length === 0 && !isWaitingForPartials) {
                     try {
                         const result = await this.handlers.finalize({
                             sessionId: context.sessionId,
@@ -246,6 +267,7 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
                             lastBatchIndex: finalizeReq.lastBatchIndex,
                             finalBlob: finalizeReq.finalBlob,
                             missingBatches: [],
+                            failedBatches: [],
                             processedBatches: Array.from(this.processed).sort((a, b) => a - b)
                         });
                         this.finalizeRequest = null;
@@ -275,19 +297,20 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
 
                 const waitedMs = Date.now() - finalizeReq.requestedAt;
                 if (waitedMs >= this.finalizeWaitMs) {
-                    missing.forEach((idx) => this.missingBatches.add(idx));
+                    unresolved.forEach((idx) => this.missingBatches.add(idx));
                     try {
                         const result = await this.handlers.finalize({
                             sessionId: context.sessionId,
                             patientName: context.patientName,
                             lastBatchIndex: finalizeReq.lastBatchIndex,
                             finalBlob: finalizeReq.finalBlob,
-                            missingBatches: missing,
+                            missingBatches: unresolved,
+                            failedBatches: failed,
                             processedBatches: Array.from(this.processed).sort((a, b) => a - b)
                         });
                         this.finalizeRequest = null;
-                        this.state = missing.length > 0 ? 'provisional' : 'completed';
-                        this.touch(missing.length > 0 ? `Missing partial batches: ${missing.join(', ')}` : undefined);
+                        this.state = unresolved.length > 0 ? 'provisional' : 'completed';
+                        this.touch(unresolved.length > 0 ? `Missing or failed partial batches: ${unresolved.join(', ')}` : undefined);
                         finalizeReq.resolve(result);
                         this.resetInternal(false);
                         break;
@@ -342,12 +365,14 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
     private resetInternal(resetContext = true): void {
         this.pending.clear();
         this.processed.clear();
+        this.failed.clear();
         this.missingBatches.clear();
         this.nextExpectedBatch = 0;
         this.running = false;
         this.drainPromise = null;
         this.finalizeRequest = null;
         this.finalizeRetries = 0;
+        this.rescheduleAfterDrain = false;
         if (resetContext) {
             this.sessionId = null;
             this.patientName = null;

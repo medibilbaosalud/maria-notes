@@ -1,0 +1,177 @@
+.specialty-entry-screen {
+  position: relative;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top left, rgba(38, 166, 154, 0.18), transparent 38%),
+    radial-gradient(circle at bottom right, rgba(15, 23, 42, 0.14), transparent 34%),
+    linear-gradient(145deg, #f7fbfa 0%, #eef5f4 48%, #f8fafc 100%);
+}
+
+.specialty-entry-backdrop {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(15, 23, 42, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(circle at center, black 35%, transparent 100%);
+}
+
+.specialty-entry-card {
+  position: relative;
+  z-index: 1;
+  width: min(840px, 100%);
+  padding: 2rem;
+  border-radius: 28px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(18px);
+}
+
+.specialty-entry-brand {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.specialty-entry-brand h1 {
+  margin: 0.15rem 0 0;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1;
+  letter-spacing: -0.05em;
+  color: #0f172a;
+}
+
+.specialty-entry-eyebrow {
+  margin: 0;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  color: #0f766e;
+}
+
+.specialty-entry-copy {
+  margin: 1rem 0 0;
+  max-width: 56ch;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: rgba(15, 23, 42, 0.76);
+}
+
+.specialty-entry-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.75rem;
+}
+
+.specialty-entry-option {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  padding: 1.15rem 1.2rem;
+  border-radius: 22px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.92) 100%);
+  color: #0f172a;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.specialty-entry-option:hover {
+  transform: translateY(-1px);
+  border-color: rgba(38, 166, 154, 0.35);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+}
+
+.specialty-entry-option.active {
+  border-color: rgba(13, 148, 136, 0.44);
+  background: linear-gradient(135deg, rgba(20, 184, 166, 0.14) 0%, rgba(255, 255, 255, 0.98) 100%);
+  box-shadow: 0 16px 36px rgba(13, 148, 136, 0.14);
+}
+
+.specialty-entry-option-icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 16px;
+  background: rgba(15, 118, 110, 0.1);
+  color: #0f766e;
+  flex-shrink: 0;
+}
+
+.specialty-entry-option-body {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.specialty-entry-option-body strong {
+  font-size: 1.08rem;
+}
+
+.specialty-entry-option-body span {
+  color: rgba(15, 23, 42, 0.68);
+  font-size: 0.92rem;
+}
+
+.specialty-entry-actions {
+  margin-top: 1.5rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.specialty-entry-continue {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  border: none;
+  border-radius: 999px;
+  padding: 0.9rem 1.25rem;
+  background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%);
+  color: white;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  box-shadow: 0 18px 36px rgba(15, 118, 110, 0.24);
+  transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+}
+
+.specialty-entry-continue:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 22px 42px rgba(15, 118, 110, 0.28);
+  filter: saturate(1.04);
+}
+
+@media (max-width: 760px) {
+  .specialty-entry-screen {
+    padding: 1rem;
+  }
+
+  .specialty-entry-card {
+    padding: 1.35rem;
+    border-radius: 24px;
+  }
+
+  .specialty-entry-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .specialty-entry-actions {
+    justify-content: stretch;
+  }
+
+  .specialty-entry-continue {
+    width: 100%;
+    justify-content: center;
+  }
+}

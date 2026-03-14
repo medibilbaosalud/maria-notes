@@ -9,7 +9,8 @@ import { evaluateAndPersistRuleImpactV2 } from '../services/learning/rule-evalua
 import ReactMarkdown from 'react-markdown';
 import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
-
+import { buildPrintableDocument, escapeHtml, renderPrintableMarkdown } from '../utils/printTemplates';
+import { getClinicalSpecialtyConfig, normalizeClinicalSpecialty } from '../clinical/specialties';
 
 interface SearchHistoryProps {
   apiKey: string;
@@ -140,7 +141,8 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
       const aiService = new AIService(apiKey);
       const reportResult = await aiService.generateMedicalReport(
         selectedRecord.transcription,
-        selectedRecord.patient_name
+        selectedRecord.patient_name,
+        normalizeClinicalSpecialty(selectedRecord.specialty || selectedRecord.consultation_type)
       );
       const report = reportResult.data;
 
@@ -174,12 +176,22 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
 
   const handlePrintReport = () => {
     const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      const htmlContent = reportContent
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\n/g, '<br>');
+    if (!printWindow) return;
+    {
+      printWindow.document.write(buildPrintableDocument({
+        specialty: normalizeClinicalSpecialty(selectedRecord?.specialty || selectedRecord?.consultation_type),
+        kind: 'report',
+        patientName: selectedRecord?.patient_name || 'Paciente',
+        content: reportContent,
+        pageTitle: getClinicalSpecialtyConfig(selectedRecord?.specialty || selectedRecord?.consultation_type).reportTitle
+      }));
+      printWindow.document.close();
+      return;
 
-      printWindow.document.write(`
+      const htmlContent = renderPrintableMarkdown(reportContent);
+      const safePatientName = escapeHtml(selectedRecord?.patient_name || 'Paciente');
+
+      printWindow!.document.write(`
         <html>
           <head>
             <title>Informe Médico - ${selectedRecord?.patient_name}</title>
@@ -211,7 +223,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
             <div class="report-title">INFORME MEDICO</div>
 
             <div class="patient-info">
-              <strong>Paciente:</strong> ${selectedRecord?.patient_name}
+              <strong>Paciente:</strong> ${safePatientName}
             </div>
 
             <div class="content">
@@ -229,7 +241,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           </body>
         </html>
       `);
-      printWindow.document.close();
+      printWindow!.document.close();
     }
   };
 
@@ -402,12 +414,22 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
 
   const handlePrintHistory = (content: string, patientName: string) => {
     const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      const htmlContent = content
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\n/g, '<br>');
+    if (!printWindow) return;
+    {
+      printWindow.document.write(buildPrintableDocument({
+        specialty: normalizeClinicalSpecialty(selectedRecord?.specialty || selectedRecord?.consultation_type),
+        kind: 'history',
+        patientName,
+        content,
+        pageTitle: getClinicalSpecialtyConfig(selectedRecord?.specialty || selectedRecord?.consultation_type).historyTitle
+      }));
+      printWindow.document.close();
+      return;
 
-      printWindow.document.write(`
+      const htmlContent = renderPrintableMarkdown(content);
+      const safePatientName = escapeHtml(patientName);
+
+      printWindow!.document.write(`
         <html>
           <head>
             <title>Historia Médica - ${patientName}</title>
@@ -439,7 +461,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
             <div class="report-title">HISTORIA CLÍNICA</div>
 
             <div class="patient-info">
-              <strong>Paciente:</strong> ${patientName}
+              <strong>Paciente:</strong> ${safePatientName}
             </div>
 
             <div class="content">
@@ -457,7 +479,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
           </body>
         </html>
       `);
-      printWindow.document.close();
+      printWindow!.document.close();
     }
   };
 
@@ -535,7 +557,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
                     </div>
                     <h3 className="card-name">{record.patient_name}</h3>
                     <div className="card-type">
-                      {record.consultation_type}
+                      {getClinicalSpecialtyConfig(record.specialty || record.consultation_type).displayName}
                     </div>
                   </div>
 
@@ -774,14 +796,9 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
                       placeholder="Escribe aquí el informe..."
                     />
                   ) : (
-                    <div
-                      className="report-preview markdown-body"
-                      dangerouslySetInnerHTML={{
-                        __html: reportContent
-                          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                          .replace(/\n/g, '<br />')
-                      }}
-                    />
+                    <div className="report-preview markdown-body">
+                      <ReactMarkdown>{reportContent}</ReactMarkdown>
+                    </div>
                   )
                 )}
               </div>

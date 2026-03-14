@@ -7,10 +7,23 @@ import { processDoctorFeedbackV2 } from '../services/doctor-feedback';
 import { evaluateAndPersistRuleImpactV2 } from '../services/learning/rule-evaluator';
 import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
+import { buildPrintableDocument } from '../utils/printTemplates';
+import { getClinicalSpecialtyConfig, normalizeClinicalSpecialty } from '../clinical/specialties';
 
 interface ReportsViewProps {
   apiKey?: string;
 }
+
+const escapeHtml = (value: string): string => value
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+const renderPrintableMarkdown = (value: string): string => escapeHtml(value || '')
+  .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+  .replace(/\n/g, '<br>');
 
 export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
   const [query, setQuery] = useState('');
@@ -103,15 +116,25 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
 
   const handlePrint = (content: string, patientName: string) => {
     const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      const htmlContent = content
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\n/g, '<br>');
+    if (!printWindow) return;
+    {
+      printWindow.document.write(buildPrintableDocument({
+        specialty: normalizeClinicalSpecialty(selectedRecord?.specialty || selectedRecord?.consultation_type),
+        kind: 'report',
+        patientName,
+        content,
+        pageTitle: getClinicalSpecialtyConfig(selectedRecord?.specialty || selectedRecord?.consultation_type).reportTitle
+      }));
+      printWindow.document.close();
+      return;
 
-      printWindow.document.write(`
+      const htmlContent = renderPrintableMarkdown(content);
+      const safePatientName = escapeHtml(patientName);
+
+      printWindow!.document.write(`
         <html>
           <head>
-            <title>Informe Medico - ${patientName}</title>
+            <title>Informe Medico - ${safePatientName}</title>
             <style>
               body { font-family: 'Georgia', serif; padding: 40px; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; }
               .header-container { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 60px; }
@@ -140,7 +163,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
             <div class="report-title">INFORME MEDICO</div>
 
             <div class="patient-info">
-              <strong>Paciente:</strong> ${patientName}
+              <strong>Paciente:</strong> ${safePatientName}
             </div>
 
             <div class="content">
@@ -158,7 +181,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
           </body>
         </html>
       `);
-      printWindow.document.close();
+      printWindow!.document.close();
     }
   };
 

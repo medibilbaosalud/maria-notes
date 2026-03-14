@@ -8,13 +8,14 @@
  * - Interactive demo/simulation controls
  */
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Save, Key, Download, Upload, Check, AlertCircle, Cloud, CloudOff, Play } from 'lucide-react';
+import { X, Save, Download, Upload, Check, AlertCircle, Cloud, CloudOff, Play, Mail, LogOut, Key } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { downloadBackup, importRecords } from '../services/backup';
 import { useCloudSync } from '../hooks/useCloudSync';
 import { syncFromCloud } from '../services/storage';
 import { useSimulation } from './Simulation/SimulationContext';
 import { motionTransitions } from '../features/ui/motion-tokens';
+import { signInWithMagicLink, signOutSupabase } from '../services/supabase';
 
 interface SettingsProps {
   apiKey: string;
@@ -27,9 +28,12 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [backupStatus, setBackupStatus] = useState<'idle' | 'exporting' | 'importing' | 'success' | 'error'>('idle');
   const [backupMessage, setBackupMessage] = useState('');
-  const { isCloudEnabled } = useCloudSync();
+  const { isCloudEnabled, isCloudAuthenticated, cloudUserEmail } = useCloudSync();
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [cloudSyncMessage, setCloudSyncMessage] = useState('');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authStatus, setAuthStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+  const [authMessage, setAuthMessage] = useState('');
   const { startSimulation } = useSimulation();
 
   useEffect(() => {
@@ -40,6 +44,32 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
     e.preventDefault();
     onSave(key);
     onClose();
+  };
+
+  const handleSendMagicLink = async () => {
+    setAuthStatus('sending');
+    setAuthMessage('Enviando enlace de acceso...');
+    try {
+      await signInWithMagicLink(authEmail);
+      setAuthStatus('success');
+      setAuthMessage('Revisa tu email para completar el acceso.');
+    } catch (error) {
+      setAuthStatus('error');
+      setAuthMessage(error instanceof Error ? error.message : 'No se pudo enviar el magic link');
+    }
+  };
+
+  const handleSignOut = async () => {
+    setAuthStatus('sending');
+    setAuthMessage('Cerrando sesion...');
+    try {
+      await signOutSupabase();
+      setAuthStatus('success');
+      setAuthMessage('Sesion cerrada. La app sigue en modo local.');
+    } catch (error) {
+      setAuthStatus('error');
+      setAuthMessage(error instanceof Error ? error.message : 'No se pudo cerrar sesion');
+    }
   };
 
   const handleExport = async () => {
@@ -121,18 +151,9 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
         <form onSubmit={handleSubmit}>
           <div className="settings-modal-body">
             <div className="settings-form-group">
-              <label>Groq API Key</label>
-              <div className="settings-input-wrapper">
-                <input
-                  type="password"
-                  value={key}
-                  onChange={(e) => setKey(e.target.value)}
-                  placeholder="Pegar tu API Key aqui (gsk_...)"
-                  className="settings-text-input"
-                />
-              </div>
+              <label>Motor AI Web</label>
               <p className="settings-help-text">
-                Tu clave se almacena localmente en tu dispositivo y nunca se comparte.
+                La version web usa rutas internas seguras en Vercel. Las claves de proveedor ya no se guardan en este navegador.
               </p>
             </div>
 
@@ -186,7 +207,7 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
                 )}
               </AnimatePresence>
 
-              {isCloudEnabled && (
+              {isCloudEnabled && isCloudAuthenticated && (
                 <div className="settings-cloud-sync-row">
                   <button
                     type="button"
@@ -222,12 +243,16 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
                 <div className="settings-cloud-info">
                   {isCloudEnabled ? <Cloud size={20} /> : <CloudOff size={20} />}
                   <div className="settings-cloud-text">
-                    <span className="settings-cloud-status" data-ui-state={isCloudEnabled ? 'success' : 'warning'}>
-                      {isCloudEnabled ? 'Activado (Permanente)' : 'No configurado'}
+                    <span className="settings-cloud-status" data-ui-state={isCloudEnabled && isCloudAuthenticated ? 'success' : 'warning'}>
+                      {isCloudEnabled
+                        ? (isCloudAuthenticated ? 'Configurado y autenticado' : 'Configurado, pendiente de login')
+                        : 'No configurado'}
                     </span>
                     <span className="settings-cloud-desc">
                       {isCloudEnabled
-                        ? 'Los datos se guardan localmente y en Supabase'
+                        ? (isCloudAuthenticated
+                          ? `Los datos se guardan localmente y en Supabase como ${cloudUserEmail || 'usuario autenticado'}`
+                          : 'Sin sesion activa: la app funciona en modo local hasta iniciar sesion')
                         : 'Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY para activar sync'}
                     </span>
                   </div>
@@ -248,6 +273,48 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
                   <span className="settings-toggle-knob" />
                 </button>
               </div>
+              {isCloudEnabled && (
+                <div className="settings-auth-card">
+                  <div className="settings-auth-header">
+                    <Mail size={18} />
+                    <span>{isCloudAuthenticated ? 'Sesion cloud activa' : 'Acceso cloud por magic link'}</span>
+                  </div>
+                  {!isCloudAuthenticated && (
+                    <>
+                      <input
+                        type="email"
+                        value={authEmail}
+                        onChange={(e) => setAuthEmail(e.target.value)}
+                        placeholder="tu@email.com"
+                        className="settings-text-input"
+                      />
+                      <button
+                        type="button"
+                        className="settings-btn-backup settings-btn-full"
+                        onClick={() => void handleSendMagicLink()}
+                        disabled={authStatus === 'sending' || !authEmail.trim()}
+                      >
+                        <Mail size={16} />
+                        Enviar Magic Link
+                      </button>
+                    </>
+                  )}
+                  {isCloudAuthenticated && (
+                    <button
+                      type="button"
+                      className="settings-btn-backup settings-btn-full"
+                      onClick={() => void handleSignOut()}
+                      disabled={authStatus === 'sending'}
+                    >
+                      <LogOut size={16} />
+                      Cerrar Sesion Cloud
+                    </button>
+                  )}
+                  {authStatus !== 'idle' && (
+                    <p className="settings-help-text settings-help-tight">{authMessage}</p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="settings-form-group settings-help-section">

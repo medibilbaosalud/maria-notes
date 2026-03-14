@@ -13,11 +13,15 @@ import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
 import { downloadRecordAsJson } from '../utils/export';
 import type { PipelineUiError } from '../types/pipeline';
+import type { ClinicalSpecialtyId } from '../clinical/specialties';
+import { getClinicalSpecialtyConfig } from '../clinical/specialties';
+import { buildPrintableDocument } from '../utils/printTemplates';
 
 interface HistoryViewProps {
   content: string;
   isLoading: boolean;
   patientName?: string;
+  specialty?: ClinicalSpecialtyId;
   originalContent?: string; // Raw AI output (baseline) if available
   transcription?: string; // Needed for learning context
   apiKey?: string; // Needed for Qwen3 analysis call
@@ -127,6 +131,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   content,
   isLoading,
   patientName,
+  specialty = 'otorrino',
   originalContent,
   transcription,
   apiKey,
@@ -141,6 +146,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onRegenerateSection
 }) => {
   const doctorScoreEnabled = String(import.meta.env.VITE_DOCTOR_SCORE_ENABLED || 'true').toLowerCase() === 'true';
+  const specialtyConfig = getClinicalSpecialtyConfig(specialty);
   // ... (existing state)
   const [copied, setCopied] = useState(false);
 
@@ -402,14 +408,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     }));
 
     await saveFieldConfirmation({
-      record_id: metadata?.auditId,
+      record_id: recordId,
       field_path: flag.field_path,
       suggested_value: flag.value,
       confirmed
     });
 
     await logQualityEvent({
-      record_id: metadata?.auditId,
+      record_id: recordId,
       event_type: confirmed ? 'field_confirmation' : 'field_rejection',
       payload: {
         field_path: flag.field_path,
@@ -533,7 +539,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         });
       }
       logQualityEvent({
-        record_id: metadata?.auditId,
+        record_id: recordId,
         event_type: 'doctor_edit',
         payload: {
           length_diff: Math.abs(editValue.length - historyText.length),
@@ -602,60 +608,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const handlePrintReport = () => {
     const printWindow = window.open('', '_blank');
     if (printWindow) {
-      const htmlContent = reportContent
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\n/g, '<br>');
-
-      printWindow.document.write(`
-        <html>
-          <head>
-            <title>Informe Médico - ${patientName}</title>
-            <style>
-              body { font-family: 'Georgia', serif; padding: 40px; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; }
-              .header-container { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 60px; }
-              .logo-img { width: 180px; height: auto; }
-              .doctor-info { text-align: right; font-family: 'Arial', sans-serif; font-size: 14px; color: #000; }
-              .doctor-name { font-weight: bold; font-size: 16px; margin-bottom: 4px; }
-              .report-title { text-align: center; font-weight: bold; text-decoration: underline; font-size: 18px; margin-bottom: 40px; text-transform: uppercase; }
-              .patient-info { margin-bottom: 30px; font-size: 16px; }
-              .content { font-size: 16px; text-align: justify; }
-              .footer { margin-top: 80px; text-align: center; font-size: 12px; color: #000; font-family: 'Arial', sans-serif; }
-              strong { font-weight: bold; color: #000; }
-            </style>
-          </head>
-          <body>
-            <div class="header-container">
-              <img src="${window.location.origin}/medibilbao_logo.png" alt="MediBilbao Salud" class="logo-img" />
-              <div class="doctor-info">
-                <div class="doctor-name">Dra. Itziar Gotxi</div>
-                <div>Especialista en</div>
-                <div>Otorrinolaringología</div>
-                <br/>
-                <div>Nº. Col. 484809757</div>
-              </div>
-            </div>
-
-            <div class="report-title">INFORME MEDICO</div>
-
-            <div class="patient-info">
-              <strong>Paciente:</strong> ${patientName}
-            </div>
-
-            <div class="content">
-              ${htmlContent}
-            </div>
-
-            <div class="footer">
-              <div>MediSalud Bilbao Gran Vía 63bis 2º dpto.6 48011 BILBAO Tel: 944329670</div>
-              <div>Email:info@medibilbaosalud.com www.medibilbaosalud.com</div>
-            </div>
-
-            <script>
-              window.onload = function() { window.print(); window.close(); }
-            </script>
-          </body>
-        </html>
-      `);
+      printWindow.document.write(buildPrintableDocument({
+        specialty,
+        kind: 'report',
+        patientName: patientName || 'Paciente',
+        content: reportContent,
+        pageTitle: specialtyConfig.reportTitle
+      }));
       printWindow.document.close();
     }
   };
