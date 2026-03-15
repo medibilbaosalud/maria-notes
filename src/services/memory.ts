@@ -283,14 +283,24 @@ export class MemoryService {
         };
     }
 
-    static async consolidateDailyLessons(groqApiKey: string | string[]): Promise<void> {
+    static async consolidateDailyLessons(
+        groqApiKey: string | string[],
+        options?: {
+            specialty?: string;
+            artifactType?: LearningArtifactType;
+            section?: string;
+        }
+    ): Promise<void> {
         void groqApiKey;
         if (!supabase || !LEARNING_V2_ENABLED) return;
         if (MemoryService.pipelineBusy) return;
         if (MemoryService.isCircuitOpen()) return;
+        const specialty = normalizeClinicalSpecialty(options?.specialty);
+        const artifactType = options?.artifactType || 'medical_history';
+        const section = options?.section || 'generation';
 
         try {
-            const rules = await MemoryService.getCandidateRules(500, 'medical_history');
+            const rules = await MemoryService.getCandidateRules(500, artifactType);
             const activeRules = rules.filter((rule) => rule.lifecycle_state === 'active' || rule.lifecycle_state === 'shadow');
             if (activeRules.length === 0) return;
 
@@ -298,7 +308,7 @@ export class MemoryService {
                 id: rule.id,
                 text: rule.rule_text,
                 category: (rule.category as RulePackRule['category']) || 'style',
-                priority: MemoryService.buildRulePriority(rule, { specialty: 'otorrino', artifactType: 'medical_history' }),
+                priority: MemoryService.buildRulePriority(rule, { specialty, artifactType }),
                 confidence: Number(rule.confidence_score || 0),
                 specialty: MemoryService.resolveRuleSpecialty(rule.rule_json),
                 artifact_type: MemoryService.resolveRuleArtifactType(rule.rule_json),
@@ -327,9 +337,9 @@ export class MemoryService {
                 });
 
             await MemoryService.ensureActiveRulePack(prioritizedRules, {
-                specialty: 'otorrino',
-                artifactType: 'medical_history',
-                section: 'generation'
+                specialty,
+                artifactType,
+                section
             });
 
             // Keep legacy long-term memory synchronized as plain text fallback.
@@ -517,7 +527,13 @@ export class MemoryService {
         }
     }
 
-    static async getHybridContext(): Promise<HybridContext> {
+    static async getHybridContext(options?: {
+        specialty?: string;
+        artifactType?: LearningArtifactType;
+        section?: string;
+        classification?: ConsultationClassification;
+        tokenBudget?: number;
+    }): Promise<HybridContext> {
         if (!supabase) return { global_rules: '', daily_lessons: '', total_lessons_count: 0 };
 
         try {
@@ -530,10 +546,11 @@ export class MemoryService {
             }
 
             const rulePackContext = await MemoryService.getRulePackContext({
-                section: 'generation',
-                specialty: 'otorrino',
-                artifactType: 'medical_history',
-                tokenBudget: 900
+                section: options?.section || 'generation',
+                specialty: normalizeClinicalSpecialty(options?.specialty),
+                artifactType: options?.artifactType || 'medical_history',
+                classification: options?.classification,
+                tokenBudget: options?.tokenBudget || 900
             });
             const rules = rulePackContext.applied_rules;
             const grouped = {

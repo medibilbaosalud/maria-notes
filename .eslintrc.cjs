@@ -7,7 +7,13 @@ module.exports = {
   },
   parser: '@typescript-eslint/parser',
   plugins: ['@typescript-eslint'],
-  ignorePatterns: ['dist', 'dist-electron', 'node_modules'],
+  ignorePatterns: [
+    'dist',
+    'dist-electron',
+    'node_modules',
+    'test-results',
+    'old_supabase.ts',
+    'old_supabase_utf8.ts',
+  ],
   rules: {},
 };
-

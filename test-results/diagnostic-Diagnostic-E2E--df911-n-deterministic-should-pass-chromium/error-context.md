@@ -1,0 +1,54 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e4]:
+  - complementary [ref=e5]:
+    - generic [ref=e7]:
+      - heading "Maria Notes" [level=1] [ref=e8]
+      - generic [ref=e9]:
+        - generic [ref=e10]: BY
+        - generic [ref=e11]:
+          - img "MediBilbao Salud Logo" [ref=e13]
+          - generic [ref=e14]: MediBilbao Salud
+    - navigation "Navegacion principal" [ref=e15]:
+      - button "Consulta" [ref=e16] [cursor=pointer]:
+        - img [ref=e18]
+        - generic [ref=e21]: Consulta
+      - button "Historial" [ref=e22] [cursor=pointer]:
+        - img [ref=e24]
+        - generic [ref=e27]: Historial
+      - button "Informes" [ref=e28] [cursor=pointer]:
+        - img [ref=e30]
+        - generic [ref=e33]: Informes
+      - button "Zona Test" [ref=e34] [cursor=pointer]:
+        - img [ref=e36]
+        - generic [ref=e38]: Zona Test
+    - generic [ref=e39]:
+      - button "Abrir lecciones IA" [ref=e40] [cursor=pointer]:
+        - img [ref=e41]
+        - generic [ref=e43]: Lecciones IA
+      - button "Abrir configuracion" [ref=e44] [cursor=pointer]:
+        - img [ref=e45]
+        - generic [ref=e48]: Configuracion
+  - main [ref=e49]:
+    - radiogroup "Modo clínico activo" [ref=e50]:
+      - button "Otorrino" [pressed] [ref=e51] [cursor=pointer]
+      - button "Psicologia" [ref=e52] [cursor=pointer]
+    - generic [ref=e55]:
+      - generic [ref=e57]:
+        - generic [ref=e58]:
+          - img "MediBilbao Salud Logo" [ref=e60]
+          - heading "Maria Notes" [level=2] [ref=e61]
+        - generic [ref=e62]:
+          - generic [ref=e65]: Listo para grabar
+          - generic [ref=e66]: 0:00
+        - generic [ref=e69]:
+          - img
+          - textbox "Nombre del paciente..." [ref=e70]
+        - button "Iniciar Consulta Grabar y procesar con AI" [disabled] [ref=e72]:
+          - img [ref=e74]
+          - generic [ref=e77]:
+            - generic [ref=e78]: Iniciar Consulta
+            - generic [ref=e79]: Grabar y procesar con AI
+      - generic [ref=e95]: Listo para grabar
+```
