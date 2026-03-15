@@ -17,6 +17,8 @@ type SimulationStepId =
     | 'simulate_typing'
     | 'click_save'
     | 'finish_learning'
+    | 'move_to_feedback'
+    | 'submit_feedback'
     | 'finish';
 
 type SimulationStep = {
@@ -135,6 +137,18 @@ const OTORRINO_SCRIPT: SimulationStep[] = [
         caption: "¡Analizando correcciones! He actualizado mis parámetros para que la próxima nota use TU estructura preferida."
     },
     {
+        id: 'move_to_feedback',
+        targetId: 'feedback-score-10',
+        duration: 3000,
+        caption: "Maria Notes quiere mejorar. Lo último es valorar la calidad clínica de la nota generada."
+    },
+    {
+        id: 'submit_feedback',
+        targetId: 'feedback-submit-btn',
+        duration: 3000,
+        caption: "Enviamos la valoración para que el sistema aprenda de tus preferencias."
+    },
+    {
         id: 'finish',
         action: () => { /* Stop simulation handles cleanup */ }
     }
@@ -248,6 +262,18 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
         id: 'finish_learning',
         duration: 8000,
         caption: "📍 Fase 6 · Informe y continuidad: Desde «Informes» puedes generar un documento para derivación o archivo. En «Historial» recuperas sesiones anteriores. Maria Notes se adapta a TU forma de trabajar. ¡Bienvenida!"
+    },
+    {
+        id: 'move_to_feedback',
+        targetId: 'feedback-score-10',
+        duration: 3500,
+        caption: "Por último, valoras el borrador. Esto ayuda a Maria a refinar el tono terapéutico para tus próximas sesiones."
+    },
+    {
+        id: 'submit_feedback',
+        targetId: 'feedback-submit-btn',
+        duration: 3500,
+        caption: "Con un solo clic, envías tu feedback clínico y cierras la consulta."
     },
     {
         id: 'finish',

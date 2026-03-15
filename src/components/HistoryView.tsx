@@ -1338,6 +1338,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       <button
                         key={score}
                         type="button"
+                        id={`feedback-score-${score}`}
                         className={`feedback-score-chip ${doctorFeedbackScore === score ? 'active' : ''}`}
                         onClick={() => setDoctorFeedbackScore(score)}
                       >
@@ -1365,6 +1366,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   </button>
                   <button
                     type="button"
+                    id="feedback-submit-btn"
                     className={`action-button primary ${doctorFeedbackSubmitted ? 'success' : ''}`}
                     onClick={() => void handleDoctorFeedbackSubmit()}
                     disabled={!doctorFeedbackScore || doctorFeedbackSubmitting}

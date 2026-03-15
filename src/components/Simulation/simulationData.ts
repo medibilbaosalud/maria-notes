@@ -26,6 +26,7 @@ Extracción de cerumen mediante lavado con agua templada. Se comprueba integrida
     `.trim(),
 
     pipelineMetadata: {
+        auditId: "demo-audit-id",
         corrections: 0,
         models: { generation: "llama-3-70b", validation: "qwen-2.5-med" },
         errorsFixed: 0,
@@ -84,6 +85,7 @@ Continuar con reestructuración cognitiva centrada en anticipación catastrófic
     `.trim(),
 
     pipelineMetadata: {
+        auditId: "demo-psy-audit-id",
         corrections: 0,
         models: { generation: "llama-3-70b", validation: "qwen-2.5-med" },
         errorsFixed: 0,
