@@ -5,7 +5,9 @@ import type { ClinicalSpecialtyId } from '../../clinical/specialties';
 type SimulationStepId =
     | 'intro'
     | 'move_to_input'
+    | 'type_patient_name'
     | 'move_to_record'
+    | 'click_record'
     | 'processing_1'
     | 'processing_2'
     | 'wait_for_highlight'
@@ -56,6 +58,46 @@ const OTORRINO_SCRIPT: SimulationStep[] = [
         id: 'intro',
         duration: 4000,
         caption: "Bienvenida, Dra. Gotxi. Vamos a ver una consulta completa desde cero."
+    },
+    {
+        id: 'move_to_input',
+        targetId: 'patient-name-input',
+        duration: 2000,
+        caption: "Primero identificamos al paciente."
+    },
+    {
+        id: 'type_patient_name',
+        targetId: 'patient-name-input',
+        duration: 3500,
+        action: () => {
+            const el = document.getElementById('patient-name-input') as HTMLInputElement;
+            if (el) {
+                const name = "Paciente Demo (Simulación)";
+                let i = 0;
+                const interval = setInterval(() => {
+                    el.value = name.slice(0, i + 1);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    i++;
+                    if (i >= name.length) clearInterval(interval);
+                }, 80);
+            }
+        },
+        caption: "Escribimos el nombre del paciente..."
+    },
+    {
+        id: 'move_to_record',
+        targetId: 'main-record-btn',
+        duration: 2000,
+        caption: "Iniciamos la consulta para que Maria Notes empiece a escuchar."
+    },
+    {
+        id: 'click_record',
+        targetId: 'main-record-btn',
+        duration: 1000,
+        action: () => {
+            const el = document.getElementById('main-record-btn');
+            if (el) el.click();
+        }
     },
     {
         id: 'processing_1',
@@ -171,10 +213,38 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
         caption: "Primero, identificamos al paciente que ha venido a terapia."
     },
     {
+        id: 'type_patient_name',
+        targetId: 'patient-name-input',
+        duration: 4000,
+        action: () => {
+            const el = document.getElementById('patient-name-input') as HTMLInputElement;
+            if (el) {
+                const name = "Paciente Demo Psicología (Simulación)";
+                let i = 0;
+                const interval = setInterval(() => {
+                    el.value = name.slice(0, i + 1);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    i++;
+                    if (i >= name.length) clearInterval(interval);
+                }, 75);
+            }
+        },
+        caption: "Escribimos el nombre del paciente..."
+    },
+    {
         id: 'move_to_record',
         targetId: 'main-record-btn',
         duration: 2500,
         caption: "Pulsamos en Iniciar Consulta y Maria Notes empezará a escuchar discretamente."
+    },
+    {
+        id: 'click_record',
+        targetId: 'main-record-btn',
+        duration: 1000,
+        action: () => {
+            const el = document.getElementById('main-record-btn');
+            if (el) el.click();
+        }
     },
 
     // Phase 1 — Recording & Transcription
@@ -327,6 +397,10 @@ export const SimulationProvider: React.FC<{ children: ReactNode }> = ({ children
         if (step.targetId) {
             const el = document.getElementById(step.targetId);
             if (el) {
+                // Ensure element is in view for the cursor to target it
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                
+                // Wait a bit for scroll to finish before calculating position
                 const rect = el.getBoundingClientRect();
                 setCursorPosition({
                     x: rect.left + rect.width / 2,

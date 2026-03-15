@@ -339,7 +339,7 @@ const AppContent = () => {
         if (!demoData) return;
 
         // Skip view switch for prep steps
-        const prepSteps = ['intro', 'move_to_input', 'move_to_record'];
+        const prepSteps = ['intro', 'move_to_input', 'type_patient_name', 'move_to_record', 'click_record'];
         if (currentStep && prepSteps.includes(currentStep.id)) {
             setCurrentView('record');
             return;
