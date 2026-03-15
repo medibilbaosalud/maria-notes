@@ -299,20 +299,21 @@ const AppContent = () => {
     >('idle');
     const contextSpecialtyRef = useRef<ClinicalSpecialtyId>(contextSpecialty);
 
+    const lockContextSpecialty = useCallback((specialty: ClinicalSpecialtyId) => {
+        contextSpecialtyRef.current = specialty;
+        setContextSpecialty(specialty);
+    }, []);
+
     const handleSpecialtyChange = useCallback((specialty: ClinicalSpecialtyId) => {
+        setActiveSpecialty(specialty);
         lockContextSpecialty(specialty);
         safeSetLocalStorage(SPECIALTY_PREFERENCE_STORAGE_KEY, specialty);
-    }, []);
+    }, [lockContextSpecialty]);
 
     const handleWorkspaceEntry = useCallback(() => {
         safeSetLocalStorage(SPECIALTY_PREFERENCE_STORAGE_KEY, activeSpecialty);
         setHasChosenWorkspaceMode(true);
     }, [activeSpecialty]);
-
-    const lockContextSpecialty = useCallback((specialty: ClinicalSpecialtyId) => {
-        contextSpecialtyRef.current = specialty;
-        setContextSpecialty(specialty);
-    }, []);
 
     useEffect(() => {
         contextSpecialtyRef.current = contextSpecialty;
