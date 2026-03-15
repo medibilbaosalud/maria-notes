@@ -7,6 +7,8 @@ import type {
     ValidationResult
 } from './groq';
 import type { ClinicalSpecialtyId } from '../clinical/specialties';
+import { MemoryService } from './memory';
+import type { LearningArtifactType } from './learning/types';
 
 export interface AIResult<T> {
     data: T;
@@ -106,6 +108,28 @@ type InvocationCounters = {
 
 const SERVER_TEXT_MODEL = 'gemini:gemini-3-flash-preview';
 const SERVER_TRANSCRIPTION_MODEL = 'gemini:gemini-3-flash-preview';
+
+const buildLearningPayload = async (
+    specialty: ClinicalSpecialtyId,
+    artifactType: LearningArtifactType,
+    section: string
+): Promise<Record<string, unknown> | undefined> => {
+    const rulePackContext = await MemoryService.getRulePackContext({
+        specialty,
+        artifactType,
+        section,
+        tokenBudget: artifactType === 'medical_report' ? 650 : 900
+    });
+    if (!rulePackContext.applied_rules.length) return undefined;
+    return {
+        promptContext: rulePackContext.prompt_context,
+        rulePackVersion: rulePackContext.pack.version,
+        ruleIdsUsed: rulePackContext.applied_rules.map((rule) => rule.id),
+        specialty,
+        artifactType,
+        section
+    };
+};
 
 const blobToBase64 = async (blob: Blob): Promise<string> => {
     const buffer = await blob.arrayBuffer();
@@ -229,6 +253,7 @@ export class AIService {
     }> {
         this.emitInvocation('extract', 'extract', 'start', SERVER_TEXT_MODEL);
         try {
+            const learningContext = await buildLearningPayload(specialty, 'medical_history', 'extraction');
             const result = await postJson<{
                 data: ExtractionResult;
                 meta: ExtractionMeta[];
@@ -236,7 +261,8 @@ export class AIService {
                 model: string;
             }>('/api/ai/extract', {
                 transcription,
-                consultationType: specialty
+                consultationType: specialty,
+                learningContext
             });
             this.emitInvocation('extract', 'extract', 'success', result.model);
             return {
@@ -257,10 +283,12 @@ export class AIService {
     ): Promise<AIResultWithMetadata> {
         this.emitInvocation('single_shot_history', 'single_shot_history_generation', 'start', SERVER_TEXT_MODEL);
         try {
+            const learningContext = await buildLearningPayload(specialty, 'medical_history', 'generation');
             const result = await postJson<AIResultWithMetadata>('/api/ai/generate-history', {
                 transcription,
                 patientName,
-                consultationType: specialty
+                consultationType: specialty,
+                learningContext
             });
             this.emitInvocation('single_shot_history', 'single_shot_history_generation', 'success', result.model);
             return result;
@@ -277,10 +305,12 @@ export class AIService {
     ): Promise<AIResult<string>> {
         this.emitInvocation('report', 'report_generation', 'start', SERVER_TEXT_MODEL);
         try {
+            const learningContext = await buildLearningPayload(specialty, 'medical_report', 'generation');
             const result = await postJson<{ text: string; model: string }>('/api/ai/generate-report', {
                 transcription,
                 patientName,
-                consultationType: specialty
+                consultationType: specialty,
+                learningContext
             });
             this.emitInvocation('report', 'report_generation', 'success', result.model);
             return { data: result.text, model: result.model };
@@ -299,12 +329,14 @@ export class AIService {
     ): Promise<AIResult<string>> {
         this.emitInvocation('generation', 'section_regeneration', 'start', SERVER_TEXT_MODEL);
         try {
+            const learningContext = await buildLearningPayload(specialty, 'medical_history', sectionTitle || 'generation');
             const result = await postJson<{ text: string; model: string }>('/api/ai/regenerate-section', {
                 transcription,
                 currentHistory,
                 sectionTitle,
                 patientName,
-                consultationType: specialty
+                consultationType: specialty,
+                learningContext
             });
             this.emitInvocation('generation', 'section_regeneration', 'success', result.model);
             return {

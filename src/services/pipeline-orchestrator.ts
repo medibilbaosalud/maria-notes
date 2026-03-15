@@ -63,7 +63,6 @@ const DEFAULT_FINALIZE_WAIT_MS = 180_000;
 
 const MAX_CONCURRENT_PARTIALS = 4; // Allow parallel STT/Extraction
 const MAX_FINALIZE_RETRIES = 2;
-const MAX_FINALIZE_TOTAL_MS = 120_000;
 
 export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
     private readonly handlers: OrchestratorHandlers<TFinalizeResult>;
@@ -278,8 +277,9 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
                         break;
                     } catch (error) {
                         const totalWaitedMs = Date.now() - finalizeReq.requestedAt;
+                        const retryBudgetMs = Math.max(this.finalizeWaitMs, DEFAULT_FINALIZE_WAIT_MS);
 
-                        if (this.finalizeRetries < MAX_FINALIZE_RETRIES && totalWaitedMs < MAX_FINALIZE_TOTAL_MS) {
+                        if (this.finalizeRetries < MAX_FINALIZE_RETRIES && totalWaitedMs < retryBudgetMs) {
                             this.finalizeRetries++;
                             this.state = 'processing_partials';
                             this.touch(`finalize retry ${this.finalizeRetries}/${MAX_FINALIZE_RETRIES}: ${(error as Error)?.message || 'error'}`);
@@ -289,7 +289,7 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
                             break;
                         }
                         this.state = 'failed';
-                        const failReason = totalWaitedMs >= MAX_FINALIZE_TOTAL_MS ? 'pipeline_timeout' : ((error as Error)?.message || 'finalize_failed');
+                        const failReason = totalWaitedMs >= retryBudgetMs ? 'pipeline_timeout' : ((error as Error)?.message || 'finalize_failed');
                         this.touch(failReason);
                         throw new Error(failReason);
                     }

@@ -17,6 +17,33 @@ export type LearningArtifactType = 'medical_history' | 'medical_report';
 
 export type LearningSignalStrength = 'low' | 'medium' | 'high';
 
+export type LearningEditIntent =
+    | 'terminology'
+    | 'missing_data'
+    | 'hallucination'
+    | 'clinical_decision'
+    | 'style'
+    | 'formatting';
+
+export type LearningDoctorReasonCode =
+    | 'terminologia'
+    | 'omision'
+    | 'error_clinico'
+    | 'redaccion'
+    | 'formato'
+    | 'otro';
+
+export type LearningScopeLevel = 'field' | 'section' | 'document';
+
+export type LearningEditScope = 'minor' | 'sectional' | 'structural';
+
+export interface LearningRuleContext {
+    specialty?: string;
+    artifact_type?: LearningArtifactType;
+    target_section?: string;
+    source_view?: DoctorEditSource;
+}
+
 export interface LearningEventMetadata extends Record<string, unknown> {
     artifact_type?: LearningArtifactType;
     source_view?: DoctorEditSource;
@@ -24,6 +51,15 @@ export interface LearningEventMetadata extends Record<string, unknown> {
     edit_distance_ratio?: number;
     sections_changed?: number;
     record_uuid?: string;
+    specialty?: string;
+    target_section?: string;
+    scope_level?: LearningScopeLevel;
+    edit_scope?: LearningEditScope;
+    edit_intent?: LearningEditIntent;
+    doctor_reason_code?: LearningDoctorReasonCode;
+    is_manual_save?: boolean;
+    is_autosave?: boolean;
+    manual_weight?: number;
 }
 
 export interface StructuredLearningEvent {
@@ -42,6 +78,13 @@ export interface StructuredLearningEvent {
     normalized_before: string;
     normalized_after: string;
     signature_hash: string;
+    specialty?: string;
+    artifact_type?: LearningArtifactType;
+    target_section?: string;
+    scope_level?: LearningScopeLevel;
+    edit_intent?: LearningEditIntent;
+    doctor_reason_code?: LearningDoctorReasonCode;
+    manual_weight?: number;
     metadata?: LearningEventMetadata;
     created_at?: string;
 }
@@ -60,6 +103,11 @@ export interface RuleCandidateRecord {
     promoted_at?: string;
     blocked_reason?: string;
     metrics_snapshot?: Record<string, unknown>;
+    specialty?: string;
+    artifact_type?: LearningArtifactType;
+    target_section?: string;
+    scope_level?: LearningScopeLevel;
+    doctor_reason_code?: LearningDoctorReasonCode;
     created_at?: string;
     updated_at?: string;
 }
@@ -86,6 +134,12 @@ export interface RulePackRule {
     category: LearningRuleCategory;
     priority: number;
     confidence: number;
+    specialty?: string;
+    artifact_type?: LearningArtifactType;
+    target_section?: string;
+    scope_level?: LearningScopeLevel;
+    doctor_reason_code?: LearningDoctorReasonCode;
+    manual_weight?: number;
     applicable_when?: Record<string, unknown>;
     source_rule_ids: string[];
     updated_at?: string;
@@ -114,6 +168,12 @@ export interface RuleEvaluationInput {
     hallucination_delta: number;
     inconsistency_delta: number;
     score: number;
+    specialty?: string;
+    artifact_type?: LearningArtifactType;
+    target_section?: string;
+    scope_level?: LearningScopeLevel;
+    doctor_reason_code?: LearningDoctorReasonCode;
+    manual_weight?: number;
     metadata?: Record<string, unknown>;
 }
 

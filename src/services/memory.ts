@@ -3,6 +3,7 @@ import { getTaskModels } from './model-registry';
 import { recordLearningMetric } from './audit-worker';
 import type { ConsultationClassification } from './groq';
 import type { LearningArtifactType, RulePack, RulePackContext, RulePackRule } from './learning/types';
+import { normalizeClinicalSpecialty } from '../clinical/specialties';
 
 const MEMORY_MODEL = getTaskModels('memory')[0] || 'llama-3.3-70b-versatile';
 const RULEPACK_APPLY_ENABLED = String(import.meta.env.VITE_RULEPACK_APPLY_ENABLED ?? 'true').toLowerCase() === 'true';
@@ -83,6 +84,45 @@ export class MemoryService {
         return raw === 'medical_report' ? 'medical_report' : 'medical_history';
     }
 
+    private static resolveRuleSpecialty(ruleJson: Record<string, unknown> | null | undefined): string {
+        const raw = String(
+            ruleJson?.specialty
+            || (ruleJson?.applicable_when as Record<string, unknown> | undefined)?.specialty
+            || ''
+        );
+        return normalizeClinicalSpecialty(raw);
+    }
+
+    private static resolveRuleSection(ruleJson: Record<string, unknown> | null | undefined): string {
+        return String(
+            ruleJson?.target_section
+            || ruleJson?.section
+            || (ruleJson?.applicable_when as Record<string, unknown> | undefined)?.section
+            || ''
+        ).toLowerCase();
+    }
+
+    private static doesRuleMatchContext(
+        ruleJson: Record<string, unknown> | null | undefined,
+        context: { specialty?: string; artifactType?: LearningArtifactType; section?: string }
+    ): boolean {
+        const requestSpecialty = normalizeClinicalSpecialty(context.specialty);
+        const ruleSpecialty = MemoryService.resolveRuleSpecialty(ruleJson);
+        if (requestSpecialty && ruleSpecialty && requestSpecialty !== ruleSpecialty) return false;
+
+        const requestArtifactType = context.artifactType || 'medical_history';
+        const ruleArtifactType = MemoryService.resolveRuleArtifactType(ruleJson);
+        if (requestArtifactType !== ruleArtifactType) return false;
+
+        const requestSection = String(context.section || '').toLowerCase();
+        const ruleSection = MemoryService.resolveRuleSection(ruleJson);
+        if (ruleSection && requestSection && !ruleSection.includes(requestSection) && !requestSection.includes(ruleSection)) {
+            return false;
+        }
+
+        return true;
+    }
+
     private static isPreferredClinicalCategory(category: string): boolean {
         return ['clinical', 'missing_data', 'hallucination', 'terminology'].includes(String(category || '').toLowerCase());
     }
@@ -92,7 +132,12 @@ export class MemoryService {
         category?: string;
         rule_json?: Record<string, unknown> | null;
         last_seen_at?: string;
-    }, context: { section?: string; classification?: ConsultationClassification }): number {
+    }, context: {
+        section?: string;
+        specialty?: string;
+        artifactType?: LearningArtifactType;
+        classification?: ConsultationClassification;
+    }): number {
         const confidence = Number(rule.confidence_score || 0);
         const categoryWeight = rule.category === 'hallucination'
             ? 1.35
@@ -106,10 +151,18 @@ export class MemoryService {
 
         let relevance = 1;
         const ruleJson = (rule.rule_json || {}) as Record<string, unknown>;
-        const targetSection = String(ruleJson.section || '').toLowerCase();
+        if (!MemoryService.doesRuleMatchContext(ruleJson, context)) return 0;
+
+        const targetSection = MemoryService.resolveRuleSection(ruleJson);
         const requestSection = String(context.section || '').toLowerCase();
         if (targetSection && requestSection && targetSection.includes(requestSection)) {
             relevance += 0.35;
+        }
+
+        const requestSpecialty = normalizeClinicalSpecialty(context.specialty);
+        const ruleSpecialty = MemoryService.resolveRuleSpecialty(ruleJson);
+        if (requestSpecialty && ruleSpecialty && requestSpecialty === ruleSpecialty) {
+            relevance += 0.3;
         }
 
         const entArea = String(context.classification?.ent_area || '').toLowerCase();
@@ -124,7 +177,7 @@ export class MemoryService {
         return confidence * categoryWeight * relevance * recencyBoost;
     }
 
-    private static async getCandidateRules(limit = 300): Promise<Array<{
+    private static async getCandidateRules(limit = 300, artifactType: LearningArtifactType = 'medical_history'): Promise<Array<{
         id: string;
         rule_text: string;
         rule_json: Record<string, unknown>;
@@ -155,16 +208,22 @@ export class MemoryService {
             updated_at: string;
         }>;
 
-        return rows.filter((rule) => MemoryService.resolveRuleArtifactType(rule.rule_json) === 'medical_history');
+        return rows.filter((rule) => MemoryService.resolveRuleArtifactType(rule.rule_json) === artifactType);
     }
 
-    private static async ensureActiveRulePack(rules: RulePackRule[]): Promise<{ id: string; version: number }> {
+    private static async ensureActiveRulePack(
+        rules: RulePackRule[],
+        context: { specialty: string; artifactType: LearningArtifactType; section: string }
+    ): Promise<{ id: string; version: number }> {
         if (!supabase) return { id: 'local', version: 0 };
 
         const { data: existingActive } = await supabase
             .from('ai_rule_pack_versions_v2')
             .select('id, version, pack_json')
             .eq('active', true)
+            .eq('specialty', context.specialty)
+            .eq('artifact_type', context.artifactType)
+            .eq('target_section', context.section)
             .order('version', { ascending: false })
             .limit(1)
             .maybeSingle();
@@ -200,8 +259,14 @@ export class MemoryService {
             .from('ai_rule_pack_versions_v2')
             .insert([{
                 version: nextVersion,
+                specialty: context.specialty,
+                artifact_type: context.artifactType,
+                target_section: context.section,
                 pack_json: {
                     model: MEMORY_MODEL,
+                    specialty: context.specialty,
+                    artifact_type: context.artifactType,
+                    target_section: context.section,
                     rules: compactRules
                 },
                 active: true,
@@ -225,7 +290,7 @@ export class MemoryService {
         if (MemoryService.isCircuitOpen()) return;
 
         try {
-            const rules = await MemoryService.getCandidateRules(500);
+            const rules = await MemoryService.getCandidateRules(500, 'medical_history');
             const activeRules = rules.filter((rule) => rule.lifecycle_state === 'active' || rule.lifecycle_state === 'shadow');
             if (activeRules.length === 0) return;
 
@@ -233,8 +298,14 @@ export class MemoryService {
                 id: rule.id,
                 text: rule.rule_text,
                 category: (rule.category as RulePackRule['category']) || 'style',
-                priority: MemoryService.buildRulePriority(rule, {}),
+                priority: MemoryService.buildRulePriority(rule, { specialty: 'otorrino', artifactType: 'medical_history' }),
                 confidence: Number(rule.confidence_score || 0),
+                specialty: MemoryService.resolveRuleSpecialty(rule.rule_json),
+                artifact_type: MemoryService.resolveRuleArtifactType(rule.rule_json),
+                target_section: String((rule.rule_json || {}).target_section || (rule.rule_json || {}).section || ''),
+                scope_level: ((rule.rule_json || {}).scope_level as RulePackRule['scope_level']) || 'section',
+                doctor_reason_code: ((rule.rule_json || {}).doctor_reason_code as RulePackRule['doctor_reason_code']) || undefined,
+                manual_weight: Number((rule.rule_json || {}).manual_weight || 1),
                 applicable_when: (rule.rule_json || {}).applicable_when as Record<string, unknown> | undefined,
                 source_rule_ids: [rule.id],
                 updated_at: rule.updated_at
@@ -255,7 +326,11 @@ export class MemoryService {
                     return b.priority - a.priority;
                 });
 
-            await MemoryService.ensureActiveRulePack(prioritizedRules);
+            await MemoryService.ensureActiveRulePack(prioritizedRules, {
+                specialty: 'otorrino',
+                artifactType: 'medical_history',
+                section: 'generation'
+            });
 
             // Keep legacy long-term memory synchronized as plain text fallback.
             const legacySummary = prioritizedRules
@@ -307,10 +382,14 @@ export class MemoryService {
 
     static async getRulePackContext(options?: {
         section?: string;
+        specialty?: string;
+        artifactType?: LearningArtifactType;
         classification?: ConsultationClassification;
         tokenBudget?: number;
     }): Promise<RulePackContext> {
         const section = options?.section || 'generation';
+        const specialty = normalizeClinicalSpecialty(options?.specialty);
+        const artifactType = options?.artifactType || 'medical_history';
         const classification = options?.classification;
         const tokenBudget = Math.max(300, Math.min(1200, options?.tokenBudget || 850));
 
@@ -330,18 +409,25 @@ export class MemoryService {
             };
         }
 
-        const cacheKey = JSON.stringify({ section, ent: classification?.ent_area || '', urg: classification?.urgency || '', budget: tokenBudget });
+        const cacheKey = JSON.stringify({
+            section,
+            specialty,
+            artifactType,
+            ent: classification?.ent_area || '',
+            urg: classification?.urgency || '',
+            budget: tokenBudget
+        });
         const now = Date.now();
         const cached = MemoryService.rulePackCache.get(cacheKey);
         if (cached && cached.expiresAt > now) return cached.value;
         if ((MemoryService.pipelineBusy || MemoryService.isCircuitOpen()) && cached) return cached.value;
 
         try {
-            const candidates = await MemoryService.getCandidateRules(300);
+            const candidates = await MemoryService.getCandidateRules(300, artifactType);
             const ranked = candidates
                 .map((rule) => ({
                     ...rule,
-                    priority: MemoryService.buildRulePriority(rule, { section, classification })
+                    priority: MemoryService.buildRulePriority(rule, { section, specialty, artifactType, classification })
                 }))
                 .filter((rule) => {
                     if (rule.priority <= 0) return false;
@@ -377,6 +463,12 @@ export class MemoryService {
                     category: (rule.category as RulePackRule['category']) || 'style',
                     confidence: Number(rule.confidence_score || 0),
                     priority: Number(rule.priority || 0),
+                    specialty: MemoryService.resolveRuleSpecialty(rule.rule_json),
+                    artifact_type: MemoryService.resolveRuleArtifactType(rule.rule_json),
+                    target_section: String((rule.rule_json || {}).target_section || (rule.rule_json || {}).section || ''),
+                    scope_level: ((rule.rule_json || {}).scope_level as RulePackRule['scope_level']) || 'section',
+                    doctor_reason_code: ((rule.rule_json || {}).doctor_reason_code as RulePackRule['doctor_reason_code']) || undefined,
+                    manual_weight: Number((rule.rule_json || {}).manual_weight || 1),
                     applicable_when: (rule.rule_json || {}).applicable_when as Record<string, unknown> | undefined,
                     source_rule_ids: [rule.id],
                     updated_at: rule.updated_at
@@ -385,7 +477,11 @@ export class MemoryService {
                 if (applied.length >= 25) break;
             }
 
-            const persistedPack = await MemoryService.ensureActiveRulePack(applied);
+            const persistedPack = await MemoryService.ensureActiveRulePack(applied, {
+                specialty,
+                artifactType,
+                section
+            });
             const promptContext = applied.length > 0
                 ? lines.join('\n')
                 : 'Ninguna regla de aprendizaje activa.';
@@ -433,7 +529,12 @@ export class MemoryService {
                 return MemoryService.hybridCache.value;
             }
 
-            const rulePackContext = await MemoryService.getRulePackContext({ section: 'generation', tokenBudget: 900 });
+            const rulePackContext = await MemoryService.getRulePackContext({
+                section: 'generation',
+                specialty: 'otorrino',
+                artifactType: 'medical_history',
+                tokenBudget: 900
+            });
             const rules = rulePackContext.applied_rules;
             const grouped = {
                 terminology: rules.filter((r) => MemoryService.normalizeCategory(r.category) === 'terminology').map((r) => r.text),

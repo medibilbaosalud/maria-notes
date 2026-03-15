@@ -1,0 +1,1 @@
+id,rule_id,metric_date,window_start,window_end,uses,accepted,overridden,edit_delta,hallucination_delta,inconsistency_delta,score,specialty,artifact_type,target_section,scope_level,doctor_reason_code,metadata,owner_user_id,created_at

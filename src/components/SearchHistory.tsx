@@ -303,7 +303,8 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
       auditId: params.record.audit_id,
       source: params.source,
       artifactType: params.artifactType,
-      allowAutosaveLearn: true
+      allowAutosaveLearn: true,
+      specialty: normalizeClinicalSpecialty(params.record.specialty || params.record.consultation_type)
     }).then((learningResult) => {
       if (!learningResult?.candidate_ids?.length) return;
       void evaluateAndPersistRuleImpactV2({
@@ -312,6 +313,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ apiKey, onLoadReco
         doctorOutput: params.doctorText || '',
         source: params.source,
         artifactType: params.artifactType,
+        specialty: normalizeClinicalSpecialty(params.record.specialty || params.record.consultation_type),
         metadata: {
           record_id: params.record.record_uuid,
           audit_id: params.record.audit_id || null,

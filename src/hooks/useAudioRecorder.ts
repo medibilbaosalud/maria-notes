@@ -29,6 +29,7 @@ interface UseAudioRecorderOptions {
 
 const MIN_BATCH_BYTES = 1024;
 const MAX_BATCH_BYTES = 20 * 1024 * 1024;
+const UNSPLITTABLE_BATCH_ROTATE_BYTES = 16 * 1024 * 1024;
 const MIN_SPLIT_CHUNK_BYTES = 512 * 1024;
 const RECORDER_TIMESLICE_MS = 1000;
 const RECORDER_ROTATE_STOP_START = String(import.meta.env.VITE_RECORDER_ROTATE_STOP_START || 'true').toLowerCase() === 'true';
@@ -51,6 +52,12 @@ const splitBlobBySize = (blob: Blob, maxBytes: number): Blob[] => {
     if (!left.size || !right.size) return [blob];
     return [...splitBlobBySize(left, maxBytes), ...splitBlobBySize(right, maxBytes)];
 };
+
+const getRotationByteLimit = (mimeType: string): number => (
+    canSafelyBinarySplit(new Blob([], { type: mimeType }))
+        ? MAX_BATCH_BYTES
+        : Math.min(MAX_BATCH_BYTES, UNSPLITTABLE_BATCH_ROTATE_BYTES)
+);
 
 export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
     const { onBatchReady, onFinalReady, batchIntervalMs = 5 * 60 * 1000 } = options;
@@ -169,7 +176,7 @@ export const useAudioRecorder = (options: UseAudioRecorderOptions = {}) => {
             if (flushResolverRef.current) {
                 flushResolverRef.current();
             }
-            if (!stopRequestedRef.current && bufferedBytesRef.current >= MAX_BATCH_BYTES) {
+            if (!stopRequestedRef.current && bufferedBytesRef.current >= getRotationByteLimit(mimeTypeRef.current)) {
                 void enqueueOperation(async () => {
                     if (rotateInProgressRef.current) return;
                     rotateInProgressRef.current = true;

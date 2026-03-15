@@ -678,7 +678,15 @@ const computeRiskLevel = (errors) => {
     return errors.length >= 3 ? 'medium' : 'low';
 };
 
-const buildGenerateHistoryPrompt = (transcription, patientName, consultationType) => {
+const formatLearningPromptContext = (learningContext) => {
+    if (!learningContext || !String(learningContext.promptContext || '').trim()) return '';
+    return `REGLAS DE APRENDIZAJE DEL PROFESIONAL (APLICAR SOLO SI NO CONTRADICEN LA TRANSCRIPCION):
+${String(learningContext.promptContext).slice(0, 4000)}
+
+No cites estas reglas en la salida. No inventes datos para cumplirlas.`;
+};
+
+const buildGenerateHistoryPrompt = (transcription, patientName, consultationType, learningContext) => {
     const specialty = getSpecialtyConfig(consultationType);
     const specialtyRole = specialty.specialty === 'psicologia' ? 'psicologia clinica' : 'otorrinolaringologia';
     return `Eres un asistente clinico experto en ${specialtyRole}. Responde SOLO JSON valido.
@@ -692,6 +700,7 @@ ${specialty.historyTemplate}
 - No incluyas bloques internos del sistema.
 
 ${specialty.styleProfile}
+${formatLearningPromptContext(learningContext)}
 
 Paciente: ${patientName || 'Paciente'}
 
@@ -702,11 +711,12 @@ Salida JSON exacta con esquema:
 ${buildHistorySchemaHint(consultationType)}`;
 };
 
-const buildExtractionPrompt = (transcription, consultationType) => `Extrae datos clinicos de ${normalizeConsultationType(consultationType) === 'psicologia' ? 'psicologia clinica' : 'otorrinolaringologia'} en JSON. Responde SOLO JSON valido.
+const buildExtractionPrompt = (transcription, consultationType, learningContext) => `Extrae datos clinicos de ${normalizeConsultationType(consultationType) === 'psicologia' ? 'psicologia clinica' : 'otorrinolaringologia'} en JSON. Responde SOLO JSON valido.
 Reglas:
 - Usa solo datos presentes en la transcripcion.
 - No inventes diagnosticos, pruebas ni antecedentes.
 - Si falta un dato, usa [] o null segun corresponda.
+${formatLearningPromptContext(learningContext)}
 
 TRANSCRIPCION:
 ${String(transcription || '').slice(0, 24000)}
@@ -734,17 +744,18 @@ Schema:
 ${specialty.classificationHint}`;
 };
 
-const buildReportPrompt = (transcription, patientName, consultationType) => `Genera un informe ${getSpecialtyConfig(consultationType).reportLabel} profesional en espanol para ${patientName || 'Paciente'}.
+const buildReportPrompt = (transcription, patientName, consultationType, learningContext) => `Genera un informe ${getSpecialtyConfig(consultationType).reportLabel} profesional en espanol para ${patientName || 'Paciente'}.
 Reglas:
 - Basate solo en la transcripcion.
 - No inventes diagnosticos ni pruebas no mencionadas.
 - Si falta un dato, indica "No consta".
 - Responde en texto Markdown simple.
+${formatLearningPromptContext(learningContext)}
 
 TRANSCRIPCION:
 ${String(transcription || '').slice(0, 18000)}`;
 
-const buildSectionPrompt = ({ transcription, currentHistory, sectionTitle, patientName, consultationType }) => `Eres un asistente medico experto en ${normalizeConsultationType(consultationType) === 'psicologia' ? 'psicologia clinica' : 'otorrinolaringologia'}. Reescribe SOLO la seccion solicitada.
+const buildSectionPrompt = ({ transcription, currentHistory, sectionTitle, patientName, consultationType, learningContext }) => `Eres un asistente medico experto en ${normalizeConsultationType(consultationType) === 'psicologia' ? 'psicologia clinica' : 'otorrinolaringologia'}. Reescribe SOLO la seccion solicitada.
 Paciente: ${patientName || 'Paciente'}
 Seccion objetivo: ${sectionTitle}
 Reglas:
@@ -752,6 +763,7 @@ Reglas:
 - Usa solo datos de la transcripcion.
 - Mantiene estilo clinico breve.
 - Si falta dato, escribe "No consta".
+${formatLearningPromptContext(learningContext)}
 
 TRANSCRIPCION:
 ${String(transcription || '').slice(0, 18000)}
@@ -761,13 +773,13 @@ ${String(currentHistory || '').slice(0, 12000)}`;
 
 const buildProvisionalHistory = (reason, consultationType) => getSpecialtyConfig(consultationType).provisionalHistory(reason);
 
-export const generateMedicalHistoryPayload = async ({ transcription, patientName, consultationType }) => {
+export const generateMedicalHistoryPayload = async ({ transcription, patientName, consultationType, learningContext }) => {
     const specialty = normalizeConsultationType(consultationType);
     const startedAt = Date.now();
     try {
         const [historyResponse, classificationResponse] = await Promise.all([
             callPreferredTextModel({
-                prompt: buildGenerateHistoryPrompt(transcription, patientName, specialty),
+                prompt: buildGenerateHistoryPrompt(transcription, patientName, specialty, learningContext),
                 jsonMode: true,
                 temperature: 0.1,
                 maxTokens: 2600
@@ -845,7 +857,7 @@ export const generateMedicalHistoryPayload = async ({ transcription, patientName
             pipeline_status: pipelineStatus,
             result_status: resultStatus,
             session_id: randomUUID(),
-            learning_applied: false,
+            learning_applied: Boolean(learningContext?.promptContext),
             quality_score: Math.max(25, 100 - (issues.length * 10)),
             critical_gaps: criticalGaps,
             doctor_next_actions: [
@@ -890,6 +902,8 @@ export const generateMedicalHistoryPayload = async ({ transcription, patientName
             followup_status: 'completed',
             output_tier: 'final',
             gemini_calls_used: geminiCallsUsed,
+            rule_pack_version: Number(learningContext?.rulePackVersion || 0) || undefined,
+            rule_ids_used: Array.isArray(learningContext?.ruleIdsUsed) ? learningContext.ruleIdsUsed : undefined,
             one_call_policy_applied: false,
             degraded_reason_code: provisionalReason || historyResponse.fallback_reason || classificationResponse.fallback_reason
         };
@@ -929,11 +943,11 @@ export const generateMedicalHistoryPayload = async ({ transcription, patientName
     }
 };
 
-export const extractMedicalDataPayload = async ({ transcription, consultationType }) => {
+export const extractMedicalDataPayload = async ({ transcription, consultationType, learningContext }) => {
     const specialty = normalizeConsultationType(consultationType);
     const [extractionResponse, classificationResponse] = await Promise.all([
         callPreferredTextModel({
-            prompt: buildExtractionPrompt(transcription, specialty),
+            prompt: buildExtractionPrompt(transcription, specialty, learningContext),
             jsonMode: true,
             temperature: 0,
             maxTokens: 1200
@@ -953,9 +967,9 @@ export const extractMedicalDataPayload = async ({ transcription, consultationTyp
     };
 };
 
-export const generateMedicalReportPayload = async ({ transcription, patientName, consultationType }) => {
+export const generateMedicalReportPayload = async ({ transcription, patientName, consultationType, learningContext }) => {
     const response = await callPreferredTextModel({
-        prompt: buildReportPrompt(transcription, patientName, consultationType),
+        prompt: buildReportPrompt(transcription, patientName, consultationType, learningContext),
         jsonMode: false,
         temperature: 0.2,
         maxTokens: 1800

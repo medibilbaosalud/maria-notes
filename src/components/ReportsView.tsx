@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Search, FileOutput, ChevronRight, Printer, Copy, Check, Pencil, Save, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
@@ -33,8 +33,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
   const [copied, setCopied] = useState(false);
   const [isEditingReport, setIsEditingReport] = useState(false);
   const [editedReportContent, setEditedReportContent] = useState('');
+  const [doctorReasonCode, setDoctorReasonCode] = useState<'terminologia' | 'omision' | 'error_clinico' | 'redaccion' | 'formato' | 'otro' | ''>('');
+
+  const reportEditIsSignificant = useMemo(() => {
+    const base = selectedRecord?.medical_report || '';
+    if (!isEditingReport) return false;
+    const normalizedBase = base.trim();
+    const normalizedEdited = editedReportContent.trim();
+    if (!normalizedBase || !normalizedEdited) return false;
+    const delta = Math.abs(normalizedEdited.length - normalizedBase.length);
+    return delta >= 24 || normalizedBase !== normalizedEdited;
+  }, [editedReportContent, isEditingReport, selectedRecord]);
 
   const queueReportLearning = useCallback((record: MedicalRecord, beforeReport: string, afterReport: string) => {
+    const specialty = normalizeClinicalSpecialty(record.specialty || record.consultation_type);
     void processDoctorFeedbackV2({
       transcription: record.transcription || '',
       aiText: beforeReport || '',
@@ -44,7 +56,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
       auditId: record.audit_id,
       source: 'report_save',
       artifactType: 'medical_report',
-      allowAutosaveLearn: true
+      allowAutosaveLearn: true,
+      specialty,
+      doctorReasonCode: doctorReasonCode || undefined
     }).then((learningResult) => {
       if (!learningResult?.candidate_ids?.length) return;
       void evaluateAndPersistRuleImpactV2({
@@ -53,6 +67,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
         doctorOutput: afterReport || '',
         source: 'report_save',
         artifactType: 'medical_report',
+        specialty,
+        doctorReasonCode: doctorReasonCode || undefined,
         metadata: {
           record_id: record.record_uuid,
           audit_id: record.audit_id || null,
@@ -91,6 +107,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
   const handleStartEditReport = () => {
     if (selectedRecord?.medical_report) {
       setEditedReportContent(selectedRecord.medical_report);
+      setDoctorReasonCode('');
       setIsEditingReport(true);
     }
   };
@@ -104,6 +121,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
         setSelectedRecord({ ...selectedRecord, medical_report: editedReportContent });
         setResults(results.map((r) => r.record_uuid === selectedRecord.record_uuid ? { ...r, medical_report: editedReportContent } : r));
         queueReportLearning(selectedRecord, beforeReport, editedReportContent);
+        setDoctorReasonCode('');
         setIsEditingReport(false);
       } else {
         alert('No se pudo guardar el informe.');
@@ -248,7 +266,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
                         <button className="reports-action-button success" onClick={handleSaveReport} data-ui-state="success">
                           <Save size={16} /> Guardar
                         </button>
-                        <button className="reports-action-button secondary" onClick={() => setIsEditingReport(false)} data-ui-state="idle">
+                        <button className="reports-action-button secondary" onClick={() => { setIsEditingReport(false); setDoctorReasonCode(''); }} data-ui-state="idle">
                           <X size={16} /> Cancelar
                         </button>
                       </>
@@ -270,12 +288,38 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
                 </div>
                 <div className="reports-body">
                   {isEditingReport ? (
+                    <>
                     <textarea
                       className="reports-editor"
                       value={editedReportContent}
                       onChange={(e) => setEditedReportContent(e.target.value)}
                       placeholder="Editar informe..."
                     />
+                    {reportEditIsSignificant && (
+                      <div className="learning-reason-box">
+                        <span className="learning-reason-label">Motivo del cambio</span>
+                        <div className="learning-reason-chips">
+                          {[
+                            ['terminologia', 'Terminologia'],
+                            ['omision', 'Omisión'],
+                            ['error_clinico', 'Error clínico'],
+                            ['redaccion', 'Redacción'],
+                            ['formato', 'Formato'],
+                            ['otro', 'Otro']
+                          ].map(([value, label]) => (
+                            <button
+                              key={value}
+                              type="button"
+                              className={`learning-chip ${doctorReasonCode === value ? 'active' : ''}`}
+                              onClick={() => setDoctorReasonCode((current) => current === value ? '' : value as typeof doctorReasonCode)}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    </>
                   ) : (
                     <div className="reports-markdown-content">
                       <ReactMarkdown>{selectedRecord.medical_report}</ReactMarkdown>
@@ -570,6 +614,45 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
           outline: none;
           border-color: var(--brand-primary);
           box-shadow: 0 0 0 3px rgba(38, 166, 154, 0.1);
+        }
+
+        .learning-reason-box {
+          margin-top: 0.9rem;
+          padding: 0.85rem 1rem;
+          border-radius: 10px;
+          border: 1px solid #dbeafe;
+          background: #f8fbff;
+        }
+
+        .learning-reason-label {
+          display: block;
+          font-size: 0.8rem;
+          font-weight: 700;
+          color: #1e3a8a;
+          margin-bottom: 0.55rem;
+        }
+
+        .learning-reason-chips {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.45rem;
+        }
+
+        .learning-chip {
+          border: 1px solid #bfdbfe;
+          background: #eff6ff;
+          color: #1d4ed8;
+          border-radius: 999px;
+          padding: 0.35rem 0.75rem;
+          font-size: 0.78rem;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .learning-chip.active {
+          background: #1d4ed8;
+          color: #fff;
+          border-color: #1d4ed8;
         }
 
         @media (max-width: 1024px) {

@@ -105,6 +105,16 @@
   transform: translateY(-1px);
 }
 
+.guide-btn {
+  background: linear-gradient(135deg, rgba(255, 247, 237, 0.9), rgba(240, 253, 250, 0.92));
+  color: #0f172a;
+  border: 1px solid rgba(13, 148, 136, 0.18);
+}
+
+.guide-btn:hover {
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.98), rgba(236, 253, 245, 0.98));
+}
+
 .settings-btn:focus-visible {
   box-shadow: var(--focus-ring);
 }

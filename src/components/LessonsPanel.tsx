@@ -27,6 +27,8 @@ interface RuleCandidateRow {
     };
 }
 
+const getRuleJson = (rule: RuleCandidateRow): Record<string, any> => (rule.rule_json || {}) as Record<string, any>;
+
 const tabs: LearningLifecycleState[] = ['candidate', 'shadow', 'active', 'deprecated', 'blocked'];
 
 const tabLabel: Record<LearningLifecycleState, string> = {
@@ -54,6 +56,8 @@ export default function LessonsPanel({ onClose, readOnly = false }: LessonsPanel
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<LearningLifecycleState>('active');
     const [updatingId, setUpdatingId] = useState<string | null>(null);
+    const [specialtyFilter, setSpecialtyFilter] = useState<'all' | 'otorrino' | 'psicologia'>('all');
+    const [categoryFilter, setCategoryFilter] = useState<'all' | string>('all');
 
     const loadRules = async () => {
         if (!supabase) {
@@ -82,7 +86,14 @@ export default function LessonsPanel({ onClose, readOnly = false }: LessonsPanel
         void loadRules();
     }, []);
 
-    const filtered = useMemo(() => rules.filter((rule) => rule.lifecycle_state === activeTab), [rules, activeTab]);
+    const filtered = useMemo(() => rules.filter((rule) => {
+        if (rule.lifecycle_state !== activeTab) return false;
+        const ruleJson = getRuleJson(rule);
+        const specialty = String(ruleJson.specialty || ruleJson.applicable_when?.specialty || 'otorrino');
+        if (specialtyFilter !== 'all' && specialty !== specialtyFilter) return false;
+        if (categoryFilter !== 'all' && rule.category !== categoryFilter) return false;
+        return true;
+    }), [activeTab, categoryFilter, rules, specialtyFilter]);
 
     const updateLifecycle = async (rule: RuleCandidateRow, nextState: LearningLifecycleState, reason: string) => {
         if (readOnly || !supabase || updatingId) return;
@@ -149,6 +160,23 @@ export default function LessonsPanel({ onClose, readOnly = false }: LessonsPanel
                     ))}
                 </div>
 
+                <div className="filters-row">
+                    <select value={specialtyFilter} onChange={(event) => setSpecialtyFilter(event.target.value as typeof specialtyFilter)}>
+                        <option value="all">Todas las especialidades</option>
+                        <option value="otorrino">Otorrino</option>
+                        <option value="psicologia">Psicología</option>
+                    </select>
+                    <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+                        <option value="all">Todas las categorías</option>
+                        <option value="clinical">Clínico</option>
+                        <option value="missing_data">Omisión</option>
+                        <option value="hallucination">Alucinación</option>
+                        <option value="terminology">Terminología</option>
+                        <option value="style">Redacción</option>
+                        <option value="formatting">Formato</option>
+                    </select>
+                </div>
+
                 <div className="content">
                     {loading ? (
                         <div className="state">Cargando reglas...</div>
@@ -161,13 +189,19 @@ export default function LessonsPanel({ onClose, readOnly = false }: LessonsPanel
                                     <div className="rule-badges">
                                         <span className="badge">{rule.category}</span>
                                         <span className="badge">
-                                            {String(rule.rule_json?.artifact_type || 'medical_history')}
+                                            {String(getRuleJson(rule).artifact_type || 'medical_history')}
                                         </span>
                                         <span className="badge">
-                                            {String(rule.rule_json?.source_view || 'history_save')}
+                                            {String(getRuleJson(rule).specialty || getRuleJson(rule).applicable_when?.specialty || 'otorrino')}
                                         </span>
                                         <span className="badge">
-                                            {String(rule.rule_json?.signal_strength || 'medium')}
+                                            {String(getRuleJson(rule).target_section || getRuleJson(rule).section || 'generation')}
+                                        </span>
+                                        <span className="badge">
+                                            {String(getRuleJson(rule).source_view || 'history_save')}
+                                        </span>
+                                        <span className="badge">
+                                            {String(getRuleJson(rule).signal_strength || 'medium')}
                                         </span>
                                         <span className="badge">conf {rule.confidence_score.toFixed(2)}</span>
                                         <span className="badge">ev {rule.evidence_count}</span>
@@ -183,6 +217,10 @@ export default function LessonsPanel({ onClose, readOnly = false }: LessonsPanel
                                     <span>edit ?: {Number(rule.metrics_snapshot?.edit_delta || 0).toFixed(3)}</span>
                                     <span>halluc ?: {Number(rule.metrics_snapshot?.hallucination_delta || 0).toFixed(3)}</span>
                                     <span>incons ?: {Number(rule.metrics_snapshot?.inconsistency_delta || 0).toFixed(3)}</span>
+                                </div>
+                                <div className="rule-evidence-row">
+                                    <span>motivo: {String(getRuleJson(rule).doctor_reason_code || 'sin_motivo')}</span>
+                                    <span>manual_weight: {Number(getRuleJson(rule).manual_weight || 1).toFixed(2)}</span>
                                 </div>
 
                                 {!readOnly && (
@@ -305,6 +343,19 @@ export default function LessonsPanel({ onClose, readOnly = false }: LessonsPanel
                     display: grid;
                     gap: 0.75rem;
                 }
+                .filters-row {
+                    display: flex;
+                    gap: 0.65rem;
+                    padding: 0 1.2rem 0.8rem;
+                }
+                .filters-row select {
+                    border: 1px solid #cbd5e1;
+                    border-radius: 10px;
+                    background: #fff;
+                    color: #0f172a;
+                    padding: 0.45rem 0.7rem;
+                    font-size: 0.82rem;
+                }
                 .state {
                     color: #64748b;
                     font-size: 0.9rem;
@@ -351,6 +402,13 @@ export default function LessonsPanel({ onClose, readOnly = false }: LessonsPanel
                     grid-template-columns: repeat(4, minmax(0, 1fr));
                     gap: 0.4rem;
                     font-size: 0.78rem;
+                    color: #475569;
+                }
+                .rule-evidence-row {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 0.8rem;
+                    font-size: 0.76rem;
                     color: #475569;
                 }
                 .actions {

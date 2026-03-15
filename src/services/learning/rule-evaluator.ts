@@ -3,6 +3,8 @@ import { deriveDecisionType, resolveNextLifecycleState } from './rule-lifecycle'
 import {
     DoctorEditSource,
     LearningArtifactType,
+    LearningDoctorReasonCode,
+    LearningRuleCategory,
     LearningLifecycleState,
     RuleEvaluationInput,
     RuleEvaluationWindow
@@ -139,6 +141,10 @@ export interface EvaluateRuleImpactV2Params {
     doctorOutput: string;
     source: DoctorEditSource;
     artifactType: LearningArtifactType;
+    specialty?: string;
+    targetSection?: string;
+    scopeLevel?: 'field' | 'section' | 'document';
+    doctorReasonCode?: LearningDoctorReasonCode;
     hallucinationDelta?: number;
     inconsistencyDelta?: number;
     metadata?: Record<string, unknown>;
@@ -212,7 +218,8 @@ const evaluateAndPersistRuleImpactLegacy = async (params: EvaluateRuleImpactPara
         const prevState = candidate.lifecycle_state as LearningLifecycleState;
         const nextState = resolveNextLifecycleState(prevState, {
             evidence_count: Number(candidate.evidence_count || 0),
-            contradiction_count: Number(candidate.contradiction_count || 0)
+            contradiction_count: Number(candidate.contradiction_count || 0),
+            category: String(candidate.category || '') as LearningRuleCategory
         }, toWindow(payload));
 
         if (nextState !== prevState) {
@@ -300,10 +307,20 @@ export const evaluateAndPersistRuleImpactV2 = async (params: EvaluateRuleImpactV
                 ...params.metadata,
                 source: params.source,
                 artifact_type: params.artifactType,
+                specialty: params.specialty || null,
+                target_section: params.targetSection || null,
+                scope_level: params.scopeLevel || 'document',
+                doctor_reason_code: params.doctorReasonCode || null,
                 source_weight: weight,
                 sections_changed: sectionsChanged,
                 trivial_edit: trivialEdit
-            }
+            },
+            specialty: params.specialty,
+            artifact_type: params.artifactType,
+            target_section: params.targetSection,
+            scope_level: params.scopeLevel,
+            doctor_reason_code: params.doctorReasonCode,
+            manual_weight: weight
         };
         evalInput.score = scoreFromInput(evalInput, weight);
 
@@ -317,6 +334,11 @@ export const evaluateAndPersistRuleImpactV2 = async (params: EvaluateRuleImpactV
             hallucination_delta: evalInput.hallucination_delta,
             inconsistency_delta: evalInput.inconsistency_delta,
             score: evalInput.score,
+            specialty: params.specialty || null,
+            artifact_type: params.artifactType,
+            target_section: params.targetSection || null,
+            scope_level: params.scopeLevel || 'document',
+            doctor_reason_code: params.doctorReasonCode || null,
             metadata: evalInput.metadata || {}
         };
 
@@ -337,7 +359,8 @@ export const evaluateAndPersistRuleImpactV2 = async (params: EvaluateRuleImpactV
         const prevState = candidate.lifecycle_state as LearningLifecycleState;
         const nextState = resolveNextLifecycleState(prevState, {
             evidence_count: Number(candidate.evidence_count || 0),
-            contradiction_count: Number(candidate.contradiction_count || 0)
+            contradiction_count: Number(candidate.contradiction_count || 0),
+            category: String(candidate.category || '') as LearningRuleCategory
         }, toWindow(payload));
 
         if (nextState !== prevState) {
@@ -357,6 +380,10 @@ export const evaluateAndPersistRuleImpactV2 = async (params: EvaluateRuleImpactV
                     rule_id: ruleId,
                     decision_type: decision,
                     reason: 'automatic_evaluation_v2',
+                    specialty: params.specialty || null,
+                    artifact_type: params.artifactType,
+                    target_section: params.targetSection || null,
+                    doctor_reason_code: params.doctorReasonCode || null,
                     metrics_snapshot: payload,
                     context: {
                         previous_state: prevState,

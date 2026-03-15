@@ -40,6 +40,7 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { SimulationProvider, useSimulation } from './components/Simulation/SimulationContext';
 import { SimulationOverlay } from './components/Simulation/SimulationOverlay';
 import { convertBlobToWav } from './utils/audioProcessing';
+import { sortTranscriptChunksForMerge } from './utils/transcriptChunks';
 import { PipelineStageTracker } from './components/PipelineStageTracker';
 import { SpecialtyEntryScreen } from './components/SpecialtyEntryScreen';
 import { usePipelineStatusViewModel } from './features/ui/usePipelineStatusViewModel';
@@ -67,6 +68,11 @@ const LessonsPanel = lazy(() => import('./components/LessonsPanel'));
 
 const INTERNAL_AI_ROUTE_KEY = 'server-routed';
 const SPECIALTY_PREFERENCE_STORAGE_KEY = 'maria_notes_specialty_preference';
+const ONBOARDING_STORAGE_KEY = 'maria_notes_onboarding_state';
+const ONBOARDING_VERSION_BY_SPECIALTY: Record<ClinicalSpecialtyId, string> = {
+    otorrino: 'otorrino_core_v1',
+    psicologia: 'jone_psicologia_v1'
+};
 const PIPELINE_V4_ENABLED = String(import.meta.env.VITE_PIPELINE_V4_ENABLED || 'true').toLowerCase() === 'true';
 const MAX_SAFE_AUDIO_BLOB_BYTES = 20 * 1024 * 1024;
 
@@ -153,6 +159,30 @@ const getApiKeys = (userKey?: string) => {
 };
 
 const getInitialApiKey = () => '';
+
+const readOnboardingState = (): Partial<Record<ClinicalSpecialtyId, string>> => {
+    try {
+        const raw = safeGetLocalStorage(ONBOARDING_STORAGE_KEY, '{}');
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return {};
+        return parsed as Partial<Record<ClinicalSpecialtyId, string>>;
+    } catch {
+        return {};
+    }
+};
+
+const hasSeenOnboardingFor = (specialty: ClinicalSpecialtyId): boolean => {
+    const state = readOnboardingState();
+    return state[specialty] === ONBOARDING_VERSION_BY_SPECIALTY[specialty];
+};
+
+const markOnboardingSeen = (specialty: ClinicalSpecialtyId): void => {
+    const nextState = {
+        ...readOnboardingState(),
+        [specialty]: ONBOARDING_VERSION_BY_SPECIALTY[specialty]
+    };
+    safeSetLocalStorage(ONBOARDING_STORAGE_KEY, JSON.stringify(nextState));
+};
 
 // canSafelyBinarySplitAudio removed — all audio is pre-converted to WAV now
 
@@ -321,6 +351,18 @@ const AppContent = () => {
     }, [isLoading]);
 
     useEffect(() => {
+        if (!hasChosenWorkspaceMode) return;
+        if (activeSpecialty !== 'psicologia') return;
+        if (hasSeenOnboardingFor(activeSpecialty)) return;
+        setShowWelcomeModal(true);
+    }, [activeSpecialty, hasChosenWorkspaceMode]);
+
+    const handleCloseWelcomeModal = useCallback(() => {
+        markOnboardingSeen(activeSpecialty);
+        setShowWelcomeModal(false);
+    }, [activeSpecialty]);
+
+    const handleOpenWelcomeModal = useCallback(() => {
         setShowWelcomeModal(true);
     }, []);
 
@@ -907,6 +949,7 @@ const AppContent = () => {
         session_id: string;
         session_version?: number;
         batch_index: number;
+        cloud_batch_index?: number;
         text: string;
         status: 'completed' | 'failed';
         error_reason?: string;
@@ -932,7 +975,9 @@ const AppContent = () => {
                             session_version: typeof payload.session_version === 'number'
                                 ? payload.session_version
                                 : sessionVersionRef.current,
-                            batch_index: payload.batch_index,
+                            batch_index: typeof payload.cloud_batch_index === 'number'
+                                ? payload.cloud_batch_index
+                                : payload.batch_index,
                             part_index: payload.part_index || 0,
                             text: payload.text || '',
                             status: payload.status,
@@ -1078,6 +1123,7 @@ const AppContent = () => {
                         session_id: sessionId,
                         session_version: sessionVersion,
                         batch_index: partBatchIndex,
+                        cloud_batch_index: batchIndex,
                         text: transcriptResult.data,
                         status: 'completed',
                         part_index: idx,
@@ -1116,6 +1162,7 @@ const AppContent = () => {
                         session_id: sessionId,
                         session_version: sessionVersion,
                         batch_index: partBatchIndex,
+                        cloud_batch_index: batchIndex,
                         text: '',
                         status: 'failed',
                         error_reason: (error as Error)?.message || 'stt_failed',
@@ -1643,11 +1690,7 @@ const AppContent = () => {
                     PIPELINE_CLOUD_MERGE_TIMEOUT_MS,
                     () => new Error(`cloud_merge_fetch_timeout:${PIPELINE_CLOUD_MERGE_TIMEOUT_MS}`)
                 );
-                const mergedFromCloud = cloudChunks
-                    .sort((a, b) => {
-                        if (a.batch_index !== b.batch_index) return a.batch_index - b.batch_index;
-                        return (a.part_index || 0) - (b.part_index || 0);
-                    })
+                const mergedFromCloud = sortTranscriptChunksForMerge(cloudChunks)
                     .map((chunk) => chunk.text || '')
                     .join(' ')
                     .trim();
@@ -3207,7 +3250,9 @@ const AppContent = () => {
                     <AnimatePresence>
                         {showWelcomeModal && (
                             <OnboardingModal
-                                onClose={() => setShowWelcomeModal(false)}
+                                specialty={activeSpecialty}
+                                clinicianName={activeSpecialty === 'psicologia' ? 'Jone' : undefined}
+                                onClose={handleCloseWelcomeModal}
                                 onOpenSettings={() => setShowSettings(true)}
                                 onNavigate={setCurrentView}
                                 onStartDemo={startSimulation}
@@ -3225,6 +3270,7 @@ const AppContent = () => {
                         onNavigate={setCurrentView}
                         onOpenSettings={() => setShowSettings(true)}
                         onOpenLessons={() => setShowLessons(true)}
+                        onOpenGuide={handleOpenWelcomeModal}
                         activeSpecialty={activeSpecialty}
                         onSpecialtyChange={handleSpecialtyChange}
                     >

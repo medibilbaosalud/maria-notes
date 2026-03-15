@@ -71,6 +71,40 @@ const modalContentVariants = {
   exit: { opacity: 0, scale: 0.98, y: 6, transition: motionTransitions.fast }
 };
 
+const detectSectionDeltaCount = (beforeText: string, afterText: string): number => {
+  const sectionRegex = /^##\s+(.+)$/gim;
+  const parse = (value: string) => {
+    const sections = new Map<string, string>();
+    const lines = String(value || '').split('\n');
+    let current = 'HEADER';
+    let buffer: string[] = [];
+    const flush = () => {
+      sections.set(current, buffer.join('\n').trim());
+      buffer = [];
+    };
+    for (const line of lines) {
+      const match = line.trim().match(/^##\s+(.+)$/);
+      if (match) {
+        flush();
+        current = match[1].trim().toUpperCase();
+        continue;
+      }
+      buffer.push(line);
+    }
+    flush();
+    return sections;
+  };
+  void sectionRegex;
+  const before = parse(beforeText);
+  const after = parse(afterText);
+  const keys = new Set([...before.keys(), ...after.keys()]);
+  let changes = 0;
+  keys.forEach((key) => {
+    if ((before.get(key) || '') !== (after.get(key) || '')) changes += 1;
+  });
+  return changes;
+};
+
 const LoadingMessages = () => {
   const messages = [
     "Analizando audio...",
@@ -171,6 +205,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isRegeneratingSection, setIsRegeneratingSection] = useState(false);
   const [selectedSection, setSelectedSection] = useState<string>('ENFERMEDAD ACTUAL');
+  const [doctorReasonCode, setDoctorReasonCode] = useState<'terminologia' | 'omision' | 'error_clinico' | 'redaccion' | 'formato' | 'otro' | ''>('');
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const moreActionsRef = useRef<HTMLDetailsElement | null>(null);
   const quickCommands = ['Niega', 'Sin cambios', 'Sin hallazgos relevantes'];
@@ -191,6 +226,15 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
   // Split content into History and Maria Notes
   const [historyText, mariaNotes] = content ? content.split('---MARIA_NOTES---') : ['', ''];
+  const isSignificantHistoryEdit = useMemo(() => {
+    if (!isEditing) return false;
+    const baseline = (originalHistoryRef.current || historyText || '').trim();
+    const current = (editValue || '').trim();
+    if (!baseline || !current || baseline === current) return false;
+    const delta = Math.abs(current.length - baseline.length);
+    const sectionDelta = detectSectionDeltaCount(baseline, current);
+    return delta >= 24 || sectionDelta >= 2;
+  }, [editValue, historyText, isEditing]);
 
   useEffect(() => {
     if (recordId !== lastRecordIdRef.current) {
@@ -463,6 +507,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
   const handleEditClick = () => {
     setEditValue(historyText);
+    setDoctorReasonCode('');
     setIsEditing(true);
   };
 
@@ -512,7 +557,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           auditId: metadata?.auditId,
           source: 'history_save',
           artifactType: 'medical_history',
-          allowAutosaveLearn: true
+          allowAutosaveLearn: true,
+          specialty,
+          doctorReasonCode: doctorReasonCode || undefined
         }).then((learningResult) => {
           if (learningResult?.candidate_ids?.length) {
             console.log('[HistoryView] Learning event registrado:', learningResult.event_ids.length);
@@ -525,6 +572,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               doctorOutput: editValue,
               source: 'history_save',
               artifactType: 'medical_history',
+              specialty,
+              targetSection: selectedSection,
+              doctorReasonCode: doctorReasonCode || undefined,
               hallucinationDelta: hallucinationCount > 0 ? 0.005 : 0,
               inconsistencyDelta: inconsistencyCount > 0 ? 0.005 : 0,
               metadata: {
@@ -562,12 +612,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         source: 'edit'
       }
     ]);
+    setDoctorReasonCode('');
     setIsEditing(false);
-  }, [apiKey, editValue, historyText, metadata, persistContent, recordId, transcription]);
+  }, [apiKey, doctorReasonCode, editValue, historyText, metadata, persistContent, recordId, selectedSection, specialty, transcription]);
 
   const handleCancelEdit = () => {
     setIsEditing(false);
     setEditValue('');
+    setDoctorReasonCode('');
   };
 
   const saveEditRef = useRef(handleSaveEdit);
@@ -720,7 +772,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           auditId: metadata?.auditId,
           source: 'history_autosave',
           artifactType: 'medical_history',
-          allowAutosaveLearn: true
+          allowAutosaveLearn: true,
+          specialty
         }).then((learningResult) => {
           if (!learningResult?.candidate_ids?.length) return;
           const hallucinationCount = (metadata?.remainingErrors || []).filter((err) => err.type === 'hallucination').length;
@@ -731,6 +784,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             doctorOutput: editValue,
             source: 'history_autosave',
             artifactType: 'medical_history',
+            specialty,
+            targetSection: selectedSection,
             hallucinationDelta: hallucinationCount > 0 ? 0.005 : 0,
             inconsistencyDelta: inconsistencyCount > 0 ? 0.005 : 0,
             metadata: {
@@ -759,7 +814,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       }
     }, 1200);
     return () => clearTimeout(timeout);
-  }, [apiKey, editValue, historyText, isEditing, metadata, persistContent, recordId, transcription]);
+  }, [apiKey, editValue, historyText, isEditing, metadata, persistContent, recordId, selectedSection, specialty, transcription]);
 
   const reviewCompleted = (metadata?.uncertaintyFlags?.length || 0) === 0
     || (metadata?.uncertaintyFlags || []).every((flag) => flagDecisions[flag.field_path]);
@@ -786,6 +841,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       : 'Sin guardar';
   const handleLoadVersion = (version: HistoryVersion) => {
     setEditValue(version.content);
+    setDoctorReasonCode('');
     setIsEditing(true);
     setHasEdited(true);
     setShowVersionsModal(false);
@@ -1124,6 +1180,30 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       resize: 'vertical'
                     }}
                   />
+                  {isSignificantHistoryEdit && (
+                    <div className="learning-reason-box">
+                      <span className="learning-reason-label">Motivo del cambio</span>
+                      <div className="learning-reason-chips">
+                        {[
+                          ['terminologia', 'Terminologia'],
+                          ['omision', 'Omisión'],
+                          ['error_clinico', 'Error clínico'],
+                          ['redaccion', 'Redacción'],
+                          ['formato', 'Formato'],
+                          ['otro', 'Otro']
+                        ].map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            className={`learning-chip ${doctorReasonCode === value ? 'active' : ''}`}
+                            onClick={() => setDoctorReasonCode((current) => current === value ? '' : value as typeof doctorReasonCode)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="command-bar">
                     <span>Comandos rápidos:</span>
@@ -2276,6 +2356,45 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           flex-wrap: wrap;
           font-size: 0.85rem;
           color: #475569;
+        }
+
+        .learning-reason-box {
+          margin-top: 0.85rem;
+          padding: 0.85rem 1rem;
+          border-radius: 10px;
+          border: 1px solid #dbeafe;
+          background: #f8fbff;
+        }
+
+        .learning-reason-label {
+          display: block;
+          font-size: 0.8rem;
+          font-weight: 700;
+          color: #1e3a8a;
+          margin-bottom: 0.55rem;
+        }
+
+        .learning-reason-chips {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.45rem;
+        }
+
+        .learning-chip {
+          border: 1px solid #bfdbfe;
+          background: #eff6ff;
+          color: #1d4ed8;
+          padding: 0.35rem 0.75rem;
+          border-radius: 999px;
+          font-size: 0.78rem;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .learning-chip.active {
+          background: #1d4ed8;
+          border-color: #1d4ed8;
+          color: #fff;
         }
 
         .command-chip {

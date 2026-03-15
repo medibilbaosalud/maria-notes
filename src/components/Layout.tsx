@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Settings, Mic, FileText, FileBarChart, FlaskConical, Lightbulb } from 'lucide-react';
+import { Settings, Mic, FileText, FileBarChart, FlaskConical, Lightbulb, BookOpen } from 'lucide-react';
 import { MBSLogo } from './MBSLogo';
 import { motionTransitions } from '../features/ui/motion-tokens';
 import type { ClinicalSpecialtyId } from '../clinical/specialties';
@@ -12,6 +12,7 @@ interface LayoutProps {
   children: React.ReactNode;
   onOpenSettings: () => void;
   onOpenLessons?: () => void;
+  onOpenGuide?: () => void;
   currentView: 'record' | 'history' | 'reports' | 'test-lab' | 'result';
   onNavigate: (view: 'record' | 'history' | 'reports' | 'test-lab' | 'result') => void;
   activeSpecialty: ClinicalSpecialtyId;
@@ -22,6 +23,7 @@ export const Layout: React.FC<LayoutProps> = ({
   children,
   onOpenSettings,
   onOpenLessons,
+  onOpenGuide,
   currentView,
   onNavigate,
   activeSpecialty,
@@ -76,6 +78,12 @@ export const Layout: React.FC<LayoutProps> = ({
         </nav>
 
         <div className="sidebar-footer">
+          {onOpenGuide && activeSpecialty === 'psicologia' && (
+            <button className="settings-btn guide-btn" onClick={onOpenGuide} aria-label="Abrir guia de Jone">
+              <BookOpen size={20} />
+              <span>Guia Jone</span>
+            </button>
+          )}
           {onOpenLessons && (
             <button className="settings-btn lessons-btn" onClick={onOpenLessons} aria-label="Abrir lecciones IA">
               <Lightbulb size={20} />

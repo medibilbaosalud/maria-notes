@@ -1,6 +1,7 @@
-﻿import { LearningLifecycleState, RuleCandidateRecord, RuleEvaluationWindow } from './types';
+import { LearningLifecycleState, RuleCandidateRecord, RuleEvaluationWindow } from './types';
 
-const RULE_AUTO_PROMOTE_ENABLED = String(import.meta.env.VITE_RULE_AUTO_PROMOTE_ENABLED ?? 'true').toLowerCase() === 'true';
+const env = ((import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env) || {};
+const RULE_AUTO_PROMOTE_ENABLED = String(env.VITE_RULE_AUTO_PROMOTE_ENABLED ?? 'true').toLowerCase() === 'true';
 
 const CATEGORY_WEIGHT: Record<string, number> = {
     hallucination: 1.3,
@@ -12,6 +13,12 @@ const CATEGORY_WEIGHT: Record<string, number> = {
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const isSafetyCriticalCategory = (category?: string): boolean =>
+    ['clinical', 'missing_data', 'hallucination'].includes(String(category || '').toLowerCase());
+
+const minEvidenceForShadow = (category?: string): number => isSafetyCriticalCategory(category) ? 4 : 2;
+const maxContradictionRatioForShadow = (category?: string): number => isSafetyCriticalCategory(category) ? 0.12 : 0.25;
+const minAcceptanceForActivation = (category?: string): number => isSafetyCriticalCategory(category) ? 0.78 : 0.62;
 
 export const contradictionRatio = (candidate: Pick<RuleCandidateRecord, 'evidence_count' | 'contradiction_count'>): number => {
     const evidence = Math.max(1, Number(candidate.evidence_count || 0));
@@ -38,35 +45,43 @@ export const computeConfidenceScore = (params: {
     return clamp(baseEvidence * contradictionPenalty * categoryWeight * recencyDecay * overridePenalty, 0, 1);
 };
 
-export const shouldMoveCandidateToShadow = (candidate: Pick<RuleCandidateRecord, 'evidence_count' | 'contradiction_count'>): boolean => {
+export const shouldMoveCandidateToShadow = (
+    candidate: Pick<RuleCandidateRecord, 'evidence_count' | 'contradiction_count' | 'category'>
+): boolean => {
     if (!RULE_AUTO_PROMOTE_ENABLED) return false;
-    return candidate.evidence_count >= 3 && contradictionRatio(candidate) < 0.25;
+    return candidate.evidence_count >= minEvidenceForShadow(candidate.category)
+        && contradictionRatio(candidate) <= maxContradictionRatioForShadow(candidate.category);
 };
 
-export const shouldPromoteShadowToActive = (window: RuleEvaluationWindow): boolean => {
+export const shouldPromoteShadowToActive = (window: RuleEvaluationWindow, category?: string): boolean => {
     if (!RULE_AUTO_PROMOTE_ENABLED) return false;
     return (
-        window.edit_rate_delta <= -0.05
-        && window.hallucination_delta <= 0.005
-        && window.inconsistency_delta <= 0.005
+        window.edit_rate_delta <= (isSafetyCriticalCategory(category) ? -0.08 : -0.03)
+        && window.hallucination_delta <= (isSafetyCriticalCategory(category) ? 0 : 0.005)
+        && window.inconsistency_delta <= (isSafetyCriticalCategory(category) ? 0 : 0.005)
+        && (1 - window.doctor_override_rate) >= minAcceptanceForActivation(category)
     );
 };
 
-export const shouldDemoteActive = (window: RuleEvaluationWindow): boolean => {
+export const shouldDemoteActive = (window: RuleEvaluationWindow, category?: string): boolean => {
     return (
-        window.edit_rate_delta > 0
-        || window.hallucination_delta > 0.005
-        || window.inconsistency_delta > 0.005
+        window.edit_rate_delta > (isSafetyCriticalCategory(category) ? -0.01 : 0)
+        || window.hallucination_delta > (isSafetyCriticalCategory(category) ? 0 : 0.005)
+        || window.inconsistency_delta > (isSafetyCriticalCategory(category) ? 0 : 0.005)
+        || window.doctor_override_rate > (isSafetyCriticalCategory(category) ? 0.15 : 0.32)
     );
 };
 
-export const shouldBlockActive = (window: RuleEvaluationWindow): boolean => {
+export const shouldBlockActive = (window: RuleEvaluationWindow, category?: string): boolean => {
+    if (isSafetyCriticalCategory(category)) {
+        return window.hallucination_delta > 0 || window.inconsistency_delta > 0 || window.doctor_override_rate > 0.34;
+    }
     return window.hallucination_delta > 0.015 || window.inconsistency_delta > 0.015;
 };
 
 export const resolveNextLifecycleState = (
     currentState: LearningLifecycleState,
-    candidate: Pick<RuleCandidateRecord, 'evidence_count' | 'contradiction_count'>,
+    candidate: Pick<RuleCandidateRecord, 'evidence_count' | 'contradiction_count' | 'category'>,
     window?: RuleEvaluationWindow
 ): LearningLifecycleState => {
     if (currentState === 'blocked') return 'blocked';
@@ -77,17 +92,17 @@ export const resolveNextLifecycleState = (
 
     if (currentState === 'shadow') {
         if (!window) return 'shadow';
-        return shouldPromoteShadowToActive(window) ? 'active' : 'shadow';
+        return shouldPromoteShadowToActive(window, candidate.category) ? 'active' : 'shadow';
     }
 
     if (currentState === 'active') {
         if (!window) return 'active';
-        if (shouldBlockActive(window)) return 'blocked';
-        if (shouldDemoteActive(window)) return 'deprecated';
+        if (shouldBlockActive(window, candidate.category)) return 'blocked';
+        if (shouldDemoteActive(window, candidate.category)) return 'deprecated';
         return 'active';
     }
 
-    if (currentState === 'deprecated' && window && shouldPromoteShadowToActive(window)) {
+    if (currentState === 'deprecated' && window && shouldPromoteShadowToActive(window, candidate.category)) {
         return 'active';
     }
 
@@ -106,4 +121,3 @@ export const deriveDecisionType = (
     if (nextState === 'shadow') return 'force_shadow';
     return 'rollback';
 };
-

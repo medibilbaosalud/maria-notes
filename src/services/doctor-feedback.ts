@@ -3,16 +3,21 @@ import { getTaskModels } from './model-registry';
 import { GroqService } from './groq';
 import { computeConfidenceScore, deriveDecisionType, resolveNextLifecycleState } from './learning/rule-lifecycle';
 import {
+    LearningDoctorReasonCode,
+    LearningEditIntent,
+    LearningEditScope,
     DoctorEditSource,
     LearningArtifactType,
     LearningEventResult,
     LearningLifecycleState,
     LearningRuleCategory,
+    LearningScopeLevel,
     LearningSignalStrength,
     RuleCandidateRecord,
     StructuredLearningEvent
 } from './learning/types';
 import { recordLearningMetric } from './audit-worker';
+import { normalizeClinicalSpecialty, type ClinicalSpecialtyId } from '../clinical/specialties';
 
 const ANALYZER_MODEL = getTaskModels('feedback')[0] || 'qwen/qwen3-32b';
 const LEARNING_CAPTURE_V2_ENABLED = String(import.meta.env.VITE_LEARNING_CAPTURE_V2 ?? 'true').toLowerCase() === 'true';
@@ -55,11 +60,14 @@ export interface ProcessDoctorFeedbackV2Params {
     source: DoctorEditSource;
     artifactType: LearningArtifactType;
     allowAutosaveLearn: boolean;
+    specialty?: ClinicalSpecialtyId | string;
+    doctorReasonCode?: LearningDoctorReasonCode;
 }
 
 const AUTOSAVE_SOURCES: DoctorEditSource[] = ['history_autosave', 'search_history_autosave'];
 
 const isAutosaveSource = (source: DoctorEditSource): boolean => AUTOSAVE_SOURCES.includes(source);
+const isManualSaveSource = (source: DoctorEditSource): boolean => !isAutosaveSource(source);
 
 const hashText = (value: string): string => deterministicHash(normalizeText(value || ''));
 
@@ -267,6 +275,60 @@ export function detectChanges(aiHistory: string, doctorHistory: string): ChangeD
     return changes;
 }
 
+const inferEditIntent = (category: LearningRuleCategory): LearningEditIntent => {
+    if (category === 'clinical') return 'clinical_decision';
+    return category;
+};
+
+const inferScopeLevel = (
+    change: ChangeDetected,
+    editDistanceRatio: number,
+    sectionsChanged: number
+): LearningScopeLevel => {
+    if (sectionsChanged >= 3 || editDistanceRatio >= 0.12) return 'document';
+    if ((change.original || '').includes('\n') || (change.edited || '').includes('\n') || editDistanceRatio >= 0.04) {
+        return 'section';
+    }
+    return 'field';
+};
+
+const inferEditScope = (
+    editDistanceRatio: number,
+    sectionsChanged: number
+): LearningEditScope => {
+    if (sectionsChanged >= 3 || editDistanceRatio >= 0.12) return 'structural';
+    if (sectionsChanged >= 2 || editDistanceRatio >= 0.04) return 'sectional';
+    return 'minor';
+};
+
+const deriveManualWeight = (source: DoctorEditSource): number => isAutosaveSource(source) ? 0.45 : 1;
+
+const buildFieldPath = (section: string, change: ChangeDetected): string => {
+    const normalizedSection = normalizeHeader(section || 'GENERAL').toLowerCase().replace(/\s+/g, '_');
+    const firstEditedLine = String(change.edited || change.original || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .find(Boolean);
+    const label = firstEditedLine
+        ? normalizeText(firstEditedLine.split(':')[0]).replace(/\s+/g, '_')
+        : 'content';
+    return `section.${normalizedSection}.${label || 'content'}`;
+};
+
+const buildSignatureHash = (params: {
+    specialty?: string;
+    artifactType?: LearningArtifactType;
+    section: string;
+    intent: LearningEditIntent;
+    normalizedAfter: string;
+}): string => deterministicHash([
+    normalizeClinicalSpecialty(params.specialty),
+    params.artifactType || 'medical_history',
+    normalizeHeader(params.section),
+    params.intent,
+    params.normalizedAfter
+].join('|'));
+
 const categorizeDeterministically = (change: ChangeDetected): LearningRuleCategory | null => {
     const s = normalizeText(`${change.section} ${change.original} ${change.edited}`);
     if (/alucin|invent|hallucin/.test(s)) return 'hallucination';
@@ -373,23 +435,31 @@ export const extractStructuredEdits = (
         editDistanceRatio?: number;
         sectionsChanged?: number;
         recordUuid?: string;
+        specialty?: string;
+        doctorReasonCode?: LearningDoctorReasonCode;
     }
 ): StructuredLearningEvent[] => {
     const changes = detectChanges(aiHistory, doctorHistory);
+    const editScope = inferEditScope(options?.editDistanceRatio || 0, options?.sectionsChanged || changes.length);
+    const manualWeight = deriveManualWeight((options?.sourceView || 'history_save') as DoctorEditSource);
     return changes.map((change) => {
         const category = categorizeDeterministically(change) || 'style';
         const normalizedBefore = normalizeText(change.original);
         const normalizedAfter = normalizeText(change.edited);
-        const signatureHash = deterministicHash([
-            normalizeHeader(change.section),
-            normalizedBefore,
-            normalizedAfter,
-            category
-        ].join('|'));
+        const intent = inferEditIntent(category);
+        const targetSection = normalizeHeader(change.section || 'GENERAL');
+        const signatureHash = buildSignatureHash({
+            specialty: options?.specialty,
+            artifactType: options?.artifactType,
+            section: targetSection,
+            intent,
+            normalizedAfter
+        });
+        const scopeLevel = inferScopeLevel(change, options?.editDistanceRatio || 0, options?.sectionsChanged || changes.length);
 
         return {
-            section: normalizeHeader(change.section || 'GENERAL'),
-            field_path: `section.${normalizeHeader(change.section || 'GENERAL').toLowerCase().replace(/\s+/g, '_')}`,
+            section: targetSection,
+            field_path: buildFieldPath(targetSection, change),
             before_value: change.original,
             after_value: change.edited,
             change_type: change.type,
@@ -399,14 +469,30 @@ export const extractStructuredEdits = (
             normalized_before: normalizedBefore,
             normalized_after: normalizedAfter,
             signature_hash: signatureHash,
+            specialty: normalizeClinicalSpecialty(options?.specialty),
+            artifact_type: options?.artifactType,
+            target_section: targetSection,
+            scope_level: scopeLevel,
+            edit_intent: intent,
+            doctor_reason_code: options?.doctorReasonCode,
+            manual_weight: manualWeight,
             metadata: {
-                section: change.section,
+                section: targetSection,
                 artifact_type: options?.artifactType,
                 source_view: options?.sourceView,
                 signal_strength: options?.signalStrength,
                 edit_distance_ratio: options?.editDistanceRatio,
                 sections_changed: options?.sectionsChanged,
-                record_uuid: options?.recordUuid
+                record_uuid: options?.recordUuid,
+                specialty: normalizeClinicalSpecialty(options?.specialty),
+                target_section: targetSection,
+                scope_level: scopeLevel,
+                edit_scope: editScope,
+                edit_intent: intent,
+                doctor_reason_code: options?.doctorReasonCode,
+                is_manual_save: isManualSaveSource((options?.sourceView || 'history_save') as DoctorEditSource),
+                is_autosave: isAutosaveSource((options?.sourceView || 'history_save') as DoctorEditSource),
+                manual_weight: manualWeight
             }
         };
     });
@@ -454,6 +540,40 @@ const persistLearningDecision = async (
     if (decisionType === 'block') recordLearningMetric('rule_conflict_incidents');
 };
 
+const updateEvidenceRollup = async (event: StructuredLearningEvent): Promise<void> => {
+    if (!supabase) return;
+    const signatureHash = event.signature_hash;
+    const { data: existing } = await supabase
+        .from('ai_rule_evidence_rollups')
+        .select('*')
+        .eq('signature_hash', signatureHash)
+        .maybeSingle();
+
+    const nextRecurrence = Number(existing?.recurrence_count || 0) + 1;
+    const contradictionRate = 0;
+    const manualWeight = Number(event.manual_weight || 1);
+    const isAutosave = Boolean(event.metadata?.is_autosave);
+    const payload = {
+        signature_hash: signatureHash,
+        specialty: event.specialty || 'otorrino',
+        artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
+        target_section: event.target_section || event.section,
+        recurrence_count: nextRecurrence,
+        contradiction_rate: contradictionRate,
+        manual_weight_total: Number(existing?.manual_weight_total || 0) + (isAutosave ? 0 : manualWeight),
+        autosave_weight_total: Number(existing?.autosave_weight_total || 0) + (isAutosave ? manualWeight : 0),
+        last_event_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+    };
+
+    if (existing?.id) {
+        await supabase.from('ai_rule_evidence_rollups').update(payload).eq('id', existing.id);
+        return;
+    }
+
+    await supabase.from('ai_rule_evidence_rollups').insert([payload]);
+};
+
 export const upsertRuleCandidateFromEvent = async (
     event: StructuredLearningEvent,
     fallbackSummary: string
@@ -461,10 +581,11 @@ export const upsertRuleCandidateFromEvent = async (
     if (!supabase) return {};
 
     const reverseSignature = deterministicHash([
+        normalizeClinicalSpecialty(event.specialty),
+        event.artifact_type || event.metadata?.artifact_type || 'medical_history',
         normalizeHeader(event.section),
-        event.normalized_after,
-        event.normalized_before,
-        event.category
+        event.edit_intent || inferEditIntent(event.category),
+        event.normalized_before
     ].join('|'));
 
     const [{ data: existing }, { data: reverse }] = await Promise.all([
@@ -487,9 +608,23 @@ export const upsertRuleCandidateFromEvent = async (
                 evidence_count: reverseEvidence,
                 contradiction_count: reverseContradiction,
                 confidence_score: reverseScore,
+                specialty: event.specialty || 'otorrino',
+                artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
+                target_section: event.target_section || event.section,
+                scope_level: event.scope_level || 'section',
                 rule_json: {
                     ...(reverse.rule_json || {}),
-                    artifact_type: event.metadata?.artifact_type || (reverse.rule_json as Record<string, unknown> | undefined)?.artifact_type || 'medical_history',
+                    specialty: event.specialty || (reverse.rule_json as Record<string, unknown> | undefined)?.specialty || 'otorrino',
+                    artifact_type: event.artifact_type || event.metadata?.artifact_type || (reverse.rule_json as Record<string, unknown> | undefined)?.artifact_type || 'medical_history',
+                    target_section: event.target_section || event.section,
+                    scope_level: event.scope_level || 'section',
+                    doctor_reason_code: event.doctor_reason_code || undefined,
+                    manual_weight: event.manual_weight ?? 1,
+                    applicable_when: {
+                        specialty: event.specialty || 'otorrino',
+                        artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
+                        section: event.target_section || event.section
+                    },
                     source_view: event.metadata?.source_view || (reverse.rule_json as Record<string, unknown> | undefined)?.source_view || 'history_save',
                     signal_strength: event.metadata?.signal_strength || (reverse.rule_json as Record<string, unknown> | undefined)?.signal_strength || 'medium'
                 },
@@ -517,7 +652,8 @@ export const upsertRuleCandidateFromEvent = async (
         const prevState = (existing.lifecycle_state || 'candidate') as LearningLifecycleState;
         const nextState = resolveNextLifecycleState(prevState, {
             evidence_count: nextEvidence,
-            contradiction_count: nextContradiction
+            contradiction_count: nextContradiction,
+            category: String(existing.category || event.category) as LearningRuleCategory
         });
 
         await supabase
@@ -526,9 +662,24 @@ export const upsertRuleCandidateFromEvent = async (
                 evidence_count: nextEvidence,
                 confidence_score: nextConfidence,
                 lifecycle_state: nextState,
+                specialty: event.specialty || 'otorrino',
+                artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
+                target_section: event.target_section || event.section,
+                scope_level: event.scope_level || 'section',
+                doctor_reason_code: event.doctor_reason_code || undefined,
                 rule_json: {
                     ...(existing.rule_json || {}),
-                    artifact_type: event.metadata?.artifact_type || (existing.rule_json as Record<string, unknown> | undefined)?.artifact_type || 'medical_history',
+                    specialty: event.specialty || (existing.rule_json as Record<string, unknown> | undefined)?.specialty || 'otorrino',
+                    artifact_type: event.artifact_type || event.metadata?.artifact_type || (existing.rule_json as Record<string, unknown> | undefined)?.artifact_type || 'medical_history',
+                    target_section: event.target_section || event.section,
+                    scope_level: event.scope_level || 'section',
+                    doctor_reason_code: event.doctor_reason_code || undefined,
+                    manual_weight: event.manual_weight ?? 1,
+                    applicable_when: {
+                        specialty: event.specialty || 'otorrino',
+                        artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
+                        section: event.target_section || event.section
+                    },
                     source_view: event.metadata?.source_view || (existing.rule_json as Record<string, unknown> | undefined)?.source_view || 'history_save',
                     signal_strength: event.metadata?.signal_strength || (existing.rule_json as Record<string, unknown> | undefined)?.signal_strength || 'medium'
                 },
@@ -569,15 +720,25 @@ export const upsertRuleCandidateFromEvent = async (
         signature_hash: event.signature_hash,
         rule_text: fallbackSummary,
         rule_json: {
+            specialty: event.specialty || 'otorrino',
             section: event.section,
+            target_section: event.target_section || event.section,
             field_path: event.field_path,
             before: event.before_value,
             after: event.after_value,
             source: event.source,
             category: event.category,
-            artifact_type: event.metadata?.artifact_type || 'medical_history',
+            artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
             source_view: event.metadata?.source_view || 'history_save',
-            signal_strength: event.metadata?.signal_strength || 'medium'
+            signal_strength: event.metadata?.signal_strength || 'medium',
+            scope_level: event.scope_level || 'section',
+            doctor_reason_code: event.doctor_reason_code || undefined,
+            manual_weight: event.manual_weight ?? 1,
+            applicable_when: {
+                specialty: event.specialty || 'otorrino',
+                artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
+                section: event.target_section || event.section
+            }
         },
         category: event.category,
         evidence_count: 1,
@@ -588,6 +749,11 @@ export const upsertRuleCandidateFromEvent = async (
             category: event.category
         }),
         lifecycle_state: 'candidate',
+        specialty: event.specialty || 'otorrino',
+        artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
+        target_section: event.target_section || event.section,
+        scope_level: event.scope_level || 'section',
+        doctor_reason_code: event.doctor_reason_code || undefined,
         last_seen_at: new Date().toISOString()
     };
 
@@ -805,6 +971,7 @@ export const processDoctorFeedbackV2 = async (
     }
 
     const signalStrength = inferSignalStrength(params.source, editDistanceRatio, sectionsChanged);
+    const specialty = normalizeClinicalSpecialty(params.specialty);
     const changeCategoryHints = changes.map((change) => categorizeDeterministically(change));
     const unresolvedCount = changeCategoryHints.filter((value) => !value).length;
     const uniqueDeterministic = new Set(changeCategoryHints.filter((value): value is LearningRuleCategory => Boolean(value)));
@@ -830,6 +997,9 @@ export const processDoctorFeedbackV2 = async (
         editDistanceRatio,
         sectionsChanged,
         recordUuid: params.recordId
+        ,
+        specialty,
+        doctorReasonCode: params.doctorReasonCode
     }).map((event) => normalizeLearningEvent(event, {
         recordId: params.recordId,
         auditId: params.auditId,
@@ -857,12 +1027,14 @@ export const processDoctorFeedbackV2 = async (
             ...event,
             category: effectiveCategory,
             severity: severityByCategory[effectiveCategory],
-            signature_hash: deterministicHash([
-                normalizeHeader(event.section),
-                event.normalized_before,
-                event.normalized_after,
-                effectiveCategory
-            ].join('|'))
+            edit_intent: inferEditIntent(effectiveCategory),
+            signature_hash: buildSignatureHash({
+                specialty,
+                artifactType: params.artifactType,
+                section: event.section,
+                intent: inferEditIntent(effectiveCategory),
+                normalizedAfter: event.normalized_after
+            })
         };
 
         const afterHash = hashText(normalizedEvent.after_value);
@@ -881,7 +1053,15 @@ export const processDoctorFeedbackV2 = async (
             sections_changed: sectionsChanged,
             record_uuid: params.recordId,
             after_hash: afterHash,
-            final_text_hash: finalTextHash
+            final_text_hash: finalTextHash,
+            specialty,
+            target_section: normalizedEvent.target_section || normalizedEvent.section,
+            scope_level: normalizedEvent.scope_level || 'section',
+            edit_intent: normalizedEvent.edit_intent || inferEditIntent(effectiveCategory),
+            doctor_reason_code: params.doctorReasonCode || undefined,
+            is_manual_save: isManualSaveSource(params.source),
+            is_autosave: isAutosaveSource(params.source),
+            manual_weight: normalizedEvent.manual_weight ?? deriveManualWeight(params.source)
         };
 
         const { data: createdEvent } = await supabase
@@ -901,6 +1081,10 @@ export const processDoctorFeedbackV2 = async (
                 normalized_before: normalizedEvent.normalized_before,
                 normalized_after: normalizedEvent.normalized_after,
                 signature_hash: normalizedEvent.signature_hash,
+                specialty,
+                artifact_type: params.artifactType,
+                target_section: normalizedEvent.target_section || normalizedEvent.section,
+                scope_level: normalizedEvent.scope_level || 'section',
                 metadata
             }])
             .select('id')
@@ -908,10 +1092,12 @@ export const processDoctorFeedbackV2 = async (
 
         if (createdEvent?.id) {
             eventIds.push(createdEvent.id);
-            acceptedStructuredEvents.push({
+            const acceptedEvent = {
                 ...normalizedEvent,
                 metadata
-            });
+            };
+            acceptedStructuredEvents.push(acceptedEvent);
+            await updateEvidenceRollup(acceptedEvent);
         }
 
         const candidate = await upsertRuleCandidateFromEvent(

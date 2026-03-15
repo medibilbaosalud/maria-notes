@@ -1,0 +1,1 @@
+id,record_id,audit_id,session_id,section,field_path,before_value,after_value,change_type,severity,source,category,normalized_before,normalized_after,signature_hash,specialty,artifact_type,target_section,scope_level,metadata,owner_user_id,created_at,updated_at
