@@ -3256,7 +3256,7 @@ const AppContent = () => {
                                 onClose={handleCloseWelcomeModal}
                                 onOpenSettings={() => setShowSettings(true)}
                                 onNavigate={setCurrentView}
-                                onStartDemo={startSimulation}
+                                onStartDemo={() => startSimulation(activeSpecialty)}
                             />
                         )}
                     </AnimatePresence>

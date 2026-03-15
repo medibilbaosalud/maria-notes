@@ -1,4 +1,6 @@
-export const simulationData = {
+import type { ClinicalSpecialtyId } from '../../clinical/specialties';
+
+export const otorrinoSimulationData = {
     patientName: "Paciente Demo (Simulación)",
     history: `
 MOTIVO DE CONSULTA:
@@ -23,13 +25,11 @@ TRATAMIENTO:
 Extracción de cerumen mediante lavado con agua templada. Se comprueba integridad timpánica posterior.
     `.trim(),
 
-    // This replicates the structure returned by the AI Pipeline
     pipelineMetadata: {
         corrections: 0,
         models: { generation: "llama-3-70b", validation: "qwen-2.5-med" },
         errorsFixed: 0,
         versionsCount: 1,
-        // The key part: "Uncertainty Flags" aka "Dudas"
         uncertaintyFlags: [
             {
                 field_path: "motivo_consulta",
@@ -60,3 +60,67 @@ Extracción de cerumen mediante lavado con agua templada. Se comprueba integrida
         }
     }
 };
+
+export const psychologySimulationData = {
+    patientName: "Paciente Demo Psicología (Simulación)",
+    history: `
+MOTIVO DE CONSULTA:
+Seguimiento de cuadro ansioso-depresivo. Tercera sesión.
+
+ANTECEDENTES RELEVANTES:
+Primer episodio depresivo hace dos años tras pérdida de empleo. Tratamiento farmacológico previo con sertralina 50 mg (retirada por decisión propia hace 6 meses). Sin ideación autolítica en ningún momento.
+
+HISTORIA CLÍNICA:
+Paciente de 38 años que acude a tercera sesión de seguimiento. Refiere mejoría parcial del ánimo desde la última sesión. Mantiene dificultad para conciliar el sueño (latencia de 40-50 minutos). Ha comenzado a implementar las pautas de higiene del sueño. Describe episodios de ansiedad anticipatoria ante situaciones laborales nuevas, con respuesta fisiológica (taquicardia, sudoración palmar) que remite en 15-20 minutos. Relación de pareja estable, identifica apoyo social como factor protector.
+
+OBSERVACIONES CLÍNICAS:
+Aspecto cuidado. Contacto visual adecuado. Discurso coherente y fluido. Afecto congruente. No se observan signos de agitación psicomotriz. Insight conservado. Motivación activa para el proceso terapéutico.
+
+IMPRESIÓN CLÍNICA:
+Trastorno adaptativo mixto con ansiedad y ánimo depresivo, en evolución favorable. Respuesta parcial a intervención cognitivo-conductual.
+
+PLAN TERAPÉUTICO:
+Continuar con reestructuración cognitiva centrada en anticipación catastrófica laboral. Introducir técnica de exposición gradual. Mantener registro de pensamientos automáticos. Próxima sesión en 15 días.
+    `.trim(),
+
+    pipelineMetadata: {
+        corrections: 0,
+        models: { generation: "llama-3-70b", validation: "qwen-2.5-med" },
+        errorsFixed: 0,
+        versionsCount: 1,
+        uncertaintyFlags: [
+            {
+                field_path: "antecedentes_relevantes",
+                value: "sertralina 50 mg",
+                reason: "¿Confirmas la dosis de sertralina? El paciente mencionó '50' pero no quedó claro si eran 50 o 100 mg.",
+                severity: "medium" as "medium"
+            }
+        ],
+        extractionMeta: [
+            {
+                chunk_id: "demo_psy_chunk_1",
+                field_evidence: [
+                    {
+                        field_path: "antecedentes_relevantes",
+                        value: "sertralina 50 mg",
+                        chunk_id: "demo_psy_chunk_1",
+                        evidence_snippet: "...tomaba sertralina, creo que eran cincuenta miligramos...",
+                        confidence: 0.72
+                    }
+                ]
+            }
+        ],
+        classification: {
+            visit_type: "Seguimiento",
+            ent_area: "Psicología Clínica",
+            urgency: "Normal",
+            confidence: 0.97
+        }
+    }
+};
+
+/** Backward-compatible alias — default export stays the same shape as before */
+export const simulationData = otorrinoSimulationData;
+
+export const getSimulationDataForSpecialty = (specialty: ClinicalSpecialtyId) =>
+    specialty === 'psicologia' ? psychologySimulationData : otorrinoSimulationData;
