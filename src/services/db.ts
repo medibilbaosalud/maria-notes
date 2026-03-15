@@ -278,6 +278,48 @@ export interface AuditOutboxItem {
     updated_at: string;
 }
 
+export interface AiLearningEvent {
+    id?: number;
+    record_id?: string;
+    audit_id?: string;
+    session_id?: string;
+    section: string;
+    field_path?: string;
+    before_value: string;
+    after_value: string;
+    change_type: string;
+    severity: string;
+    source: string;
+    category: string;
+    normalized_before: string;
+    normalized_after: string;
+    signature_hash: string;
+    specialty?: string;
+    artifact_type?: string;
+    target_section?: string;
+    scope_level?: string;
+    metadata?: Record<string, unknown>;
+    created_at?: string;
+    updated_at?: string;
+}
+
+export interface AiImprovementLesson {
+    id?: number;
+    original_transcription: string;
+    ai_generated_history: string;
+    doctor_edited_history: string;
+    changes_detected: any[];
+    lesson_summary: string;
+    improvement_category: string;
+    is_format: boolean;
+    status: string;
+    recurrence_count: number;
+    record_id?: string;
+    last_seen_at: string;
+    created_at?: string;
+    updated_at?: string;
+}
+
 const db = new Dexie('MariaNotesDB') as Dexie & {
     medical_records: EntityTable<MedicalRecord, 'id'>;
     lab_test_logs: EntityTable<LabTestLog, 'id'>;
@@ -288,6 +330,8 @@ const db = new Dexie('MariaNotesDB') as Dexie & {
     transcript_segments: EntityTable<TranscriptSegment, 'id'>;
     extraction_segments: EntityTable<ExtractionSegment, 'id'>;
     pipeline_failures: EntityTable<PipelineFailure, 'id'>;
+    ai_learning_events: EntityTable<AiLearningEvent, 'id'>;
+    ai_improvement_lessons: EntityTable<AiImprovementLesson, 'id'>;
 };
 
 const generateUuid = (): string => {
@@ -349,6 +393,20 @@ db.version(6).stores({
     transcript_segments: '++id, [session_id+batch_index], session_id, batch_index, status, updated_at',
     extraction_segments: '++id, [session_id+batch_index], session_id, batch_index, status, updated_at',
     pipeline_failures: '++id, session_id, stage, created_at'
+});
+
+db.version(7).stores({
+    medical_records: '++id, record_uuid, idempotency_key, patient_name, output_tier, source_session_id, created_at, updated_at',
+    lab_test_logs: '++id, test_name, created_at',
+    pipeline_jobs: '++id, session_id, status, result_status, next_attempt_at, updated_at',
+    audit_outbox: '++id, status, next_attempt_at, created_at, updated_at',
+    consultation_sessions: '++id, session_id, status, next_attempt_at, updated_at, ttl_expires_at',
+    audio_segments: '++id, [session_id+batch_index], session_id, batch_index, status, is_final, updated_at',
+    transcript_segments: '++id, [session_id+batch_index], session_id, batch_index, status, updated_at',
+    extraction_segments: '++id, [session_id+batch_index], session_id, batch_index, status, updated_at',
+    pipeline_failures: '++id, session_id, stage, created_at',
+    ai_learning_events: '++id, record_id, audit_id, session_id, signature_hash, created_at',
+    ai_improvement_lessons: '++id, record_id, improvement_category, created_at'
 });
 
 export { db };

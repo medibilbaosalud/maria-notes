@@ -7,7 +7,9 @@ import {
     type AudioSegment,
     type TranscriptSegment,
     type ExtractionSegment,
-    type PipelineFailure
+    type PipelineFailure,
+    type AiLearningEvent,
+    type AiImprovementLesson
 } from './db';
 import { hasSupabaseSession, supabase } from './supabase';
 import { isCloudSyncEnabled } from '../hooks/useCloudSync';
@@ -114,6 +116,42 @@ const syncToCloud = async (record: MedicalRecord, operation: 'insert' | 'update'
             },
             created_at: nowIso()
         });
+    }
+};
+
+export const saveAiLearningEvent = async (event: Omit<AiLearningEvent, 'id'>): Promise<number | null> => {
+    try {
+        const now = nowIso();
+        const localEvent = { ...event, created_at: now, updated_at: now };
+        const id = await db.ai_learning_events.add(localEvent);
+
+        const client = getCloudClient();
+        if (client) {
+            const { error } = await client.from('ai_learning_events').insert([event]);
+            if (error) console.error('[Cloud Sync] AiLearningEvent insert error:', error.message);
+        }
+        return id ?? null;
+    } catch (error) {
+        console.error('Error saving AiLearningEvent:', error);
+        return null;
+    }
+};
+
+export const saveAiImprovementLesson = async (lesson: Omit<AiImprovementLesson, 'id'>): Promise<number | null> => {
+    try {
+        const now = nowIso();
+        const localLesson = { ...lesson, created_at: now, updated_at: now };
+        const id = await db.ai_improvement_lessons.add(localLesson);
+
+        const client = getCloudClient();
+        if (client) {
+            const { error } = await client.from('ai_improvement_lessons').insert([lesson]);
+            if (error) console.error('[Cloud Sync] AiImprovementLesson insert error:', error.message);
+        }
+        return id ?? null;
+    } catch (error) {
+        console.error('Error saving AiImprovementLesson:', error);
+        return null;
     }
 };
 

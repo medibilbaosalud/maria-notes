@@ -1,4 +1,4 @@
-﻿import { supabase } from './supabase';
+import { supabase } from './supabase';
 import { getTaskModels } from './model-registry';
 import { GroqService } from './groq';
 import { computeConfidenceScore, deriveDecisionType, resolveNextLifecycleState } from './learning/rule-lifecycle';
@@ -18,6 +18,7 @@ import {
 } from './learning/types';
 import { recordLearningMetric } from './audit-worker';
 import { normalizeClinicalSpecialty, type ClinicalSpecialtyId } from '../clinical/specialties';
+import { saveAiLearningEvent, saveAiImprovementLesson } from './storage';
 
 const ANALYZER_MODEL = getTaskModels('feedback')[0] || 'qwen/qwen3-32b';
 const LEARNING_CAPTURE_V2_ENABLED = String(import.meta.env.VITE_LEARNING_CAPTURE_V2 ?? 'true').toLowerCase() === 'true';
@@ -863,29 +864,25 @@ const processDoctorFeedbackLegacy = async (
             ].join('|'))
         };
 
-        const { data: createdEvent } = await supabase
-            .from('ai_learning_events')
-            .insert([{
-                record_id: normalizedEvent.record_id,
-                audit_id: normalizedEvent.audit_id,
-                session_id: normalizedEvent.session_id,
-                section: normalizedEvent.section,
-                field_path: normalizedEvent.field_path,
-                before_value: normalizedEvent.before_value,
-                after_value: normalizedEvent.after_value,
-                change_type: normalizedEvent.change_type,
-                severity: normalizedEvent.severity,
-                source: normalizedEvent.source,
-                category: normalizedEvent.category,
-                normalized_before: normalizedEvent.normalized_before,
-                normalized_after: normalizedEvent.normalized_after,
-                signature_hash: normalizedEvent.signature_hash,
-                metadata: normalizedEvent.metadata || {}
-            }])
-            .select('id')
-            .maybeSingle();
+        const createdEventId = await saveAiLearningEvent({
+            record_id: normalizedEvent.record_id,
+            audit_id: normalizedEvent.audit_id,
+            session_id: normalizedEvent.session_id,
+            section: normalizedEvent.section,
+            field_path: normalizedEvent.field_path,
+            before_value: normalizedEvent.before_value,
+            after_value: normalizedEvent.after_value,
+            change_type: normalizedEvent.change_type,
+            severity: normalizedEvent.severity,
+            source: normalizedEvent.source,
+            category: normalizedEvent.category,
+            normalized_before: normalizedEvent.normalized_before,
+            normalized_after: normalizedEvent.normalized_after,
+            signature_hash: normalizedEvent.signature_hash,
+            metadata: normalizedEvent.metadata || {}
+        });
 
-        if (createdEvent?.id) eventIds.push(createdEvent.id);
+        if (createdEventId) eventIds.push(String(createdEventId));
 
         const candidate = await upsertRuleCandidateFromEvent(normalizedEvent, ruleSummary);
         if (candidate.candidate_id) candidateIds.push(candidate.candidate_id);
@@ -902,7 +899,7 @@ const processDoctorFeedbackLegacy = async (
         const similar = similarLessons.data?.find((lesson) => similarityScore(String(lesson.lesson_summary || ''), ruleSummary) >= 0.6);
         const recurrenceCount = similar ? Number(similar.recurrence_count || 1) + 1 : 1;
 
-        await supabase.from('ai_improvement_lessons').insert([{
+        await saveAiImprovementLesson({
             original_transcription: transcription,
             ai_generated_history: aiHistory,
             doctor_edited_history: doctorHistory,
@@ -914,7 +911,7 @@ const processDoctorFeedbackLegacy = async (
             recurrence_count: recurrenceCount,
             record_id: recordId,
             last_seen_at: new Date().toISOString()
-        }]);
+        });
     }
 
     if (eventIds.length > 0) {
@@ -1064,34 +1061,30 @@ export const processDoctorFeedbackV2 = async (
             manual_weight: normalizedEvent.manual_weight ?? deriveManualWeight(params.source)
         };
 
-        const { data: createdEvent } = await supabase
-            .from('ai_learning_events')
-            .insert([{
-                record_id: normalizedEvent.record_id,
-                audit_id: normalizedEvent.audit_id,
-                session_id: normalizedEvent.session_id,
-                section: normalizedEvent.section,
-                field_path: normalizedEvent.field_path,
-                before_value: normalizedEvent.before_value,
-                after_value: normalizedEvent.after_value,
-                change_type: normalizedEvent.change_type,
-                severity: normalizedEvent.severity,
-                source: params.source,
-                category: normalizedEvent.category,
-                normalized_before: normalizedEvent.normalized_before,
-                normalized_after: normalizedEvent.normalized_after,
-                signature_hash: normalizedEvent.signature_hash,
-                specialty,
-                artifact_type: params.artifactType,
-                target_section: normalizedEvent.target_section || normalizedEvent.section,
-                scope_level: normalizedEvent.scope_level || 'section',
-                metadata
-            }])
-            .select('id')
-            .maybeSingle();
+        const createdEventId = await saveAiLearningEvent({
+            record_id: normalizedEvent.record_id,
+            audit_id: normalizedEvent.audit_id,
+            session_id: normalizedEvent.session_id,
+            section: normalizedEvent.section,
+            field_path: normalizedEvent.field_path,
+            before_value: normalizedEvent.before_value,
+            after_value: normalizedEvent.after_value,
+            change_type: normalizedEvent.change_type,
+            severity: normalizedEvent.severity,
+            source: params.source,
+            category: normalizedEvent.category,
+            normalized_before: normalizedEvent.normalized_before,
+            normalized_after: normalizedEvent.normalized_after,
+            signature_hash: normalizedEvent.signature_hash,
+            specialty,
+            artifact_type: params.artifactType,
+            target_section: normalizedEvent.target_section || normalizedEvent.section,
+            scope_level: normalizedEvent.scope_level || 'section',
+            metadata
+        });
 
-        if (createdEvent?.id) {
-            eventIds.push(createdEvent.id);
+        if (createdEventId) {
+            eventIds.push(String(createdEventId));
             const acceptedEvent = {
                 ...normalizedEvent,
                 metadata
@@ -1120,7 +1113,7 @@ export const processDoctorFeedbackV2 = async (
         const similar = similarLessons.data?.find((lesson) => similarityScore(String(lesson.lesson_summary || ''), ruleSummary) >= 0.6);
         const recurrenceCount = similar ? Number(similar.recurrence_count || 1) + 1 : 1;
 
-        await supabase.from('ai_improvement_lessons').insert([{
+        await saveAiImprovementLesson({
             original_transcription: params.transcription || '',
             ai_generated_history: aiText,
             doctor_edited_history: doctorText,
@@ -1132,7 +1125,7 @@ export const processDoctorFeedbackV2 = async (
             recurrence_count: recurrenceCount,
             record_id: params.recordId,
             last_seen_at: new Date().toISOString()
-        }]);
+        });
     }
 
     if (dedupedCount > 0) {

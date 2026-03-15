@@ -17,18 +17,13 @@ export const useCloudSync = () => {
 
     const isCloudEnabled = hasCloudConfig();
 
-    // No-ops for state changes
-    const toggleCloud = () => { };
-    const enableCloud = () => { };
-    const disableCloud = () => { };
-
     return {
         isCloudEnabled,
         isCloudAuthenticated: authSnapshot.isAuthenticated,
         cloudUserEmail: authSnapshot.userEmail,
-        toggleCloud,
-        enableCloud,
-        disableCloud
+        toggleCloud: () => { console.warn("Cloud sync is always enabled by system policy."); },
+        enableCloud: () => { },
+        disableCloud: () => { }
     };
 };
 
