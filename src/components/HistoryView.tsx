@@ -7,7 +7,13 @@ import { MBSLogo } from './MBSLogo';
 import { AIAuditWidget } from './AIAuditWidget';
 import { processDoctorFeedbackV2 } from '../services/doctor-feedback';
 import type { ExtractionMeta, ConsultationClassification, UncertaintyFlag, FieldEvidence } from '../services/groq';
-import { saveFieldConfirmation, logQualityEvent, saveDoctorSatisfactionEvent } from '../services/supabase';
+import {
+  saveFieldConfirmation,
+  logQualityEvent,
+  saveDoctorSatisfactionEvent,
+  saveClinicalGenerationDiagnosticEdit,
+  upsertClinicalGenerationDiagnostic
+} from '../services/supabase';
 import { evaluateAndPersistRuleImpactV2 } from '../services/learning/rule-evaluator';
 import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
@@ -104,6 +110,29 @@ const detectSectionDeltaCount = (beforeText: string, afterText: string): number 
     if ((before.get(key) || '') !== (after.get(key) || '')) changes += 1;
   });
   return changes;
+};
+
+const mapDoctorReasonToEditType = (
+  reason: 'terminologia' | 'omision' | 'error_clinico' | 'redaccion' | 'formato' | 'otro' | '',
+  beforeText: string,
+  afterText: string
+): 'added' | 'removed' | 'rewritten' | 'terminology' | 'style' | 'formatting' | 'clinical_precision' | 'omission' => {
+  if (reason === 'terminologia') return 'terminology';
+  if (reason === 'omision') return 'omission';
+  if (reason === 'error_clinico') return 'clinical_precision';
+  if (reason === 'redaccion') return 'style';
+  if (reason === 'formato') return 'formatting';
+  if (!beforeText.trim() && afterText.trim()) return 'added';
+  if (beforeText.trim() && !afterText.trim()) return 'removed';
+  return 'rewritten';
+};
+
+const estimateEditImportance = (beforeText: string, afterText: string): 'low' | 'medium' | 'high' => {
+  const delta = Math.abs((afterText || '').length - (beforeText || '').length);
+  const sectionDelta = detectSectionDeltaCount(beforeText, afterText);
+  if (delta >= 180 || sectionDelta >= 3) return 'high';
+  if (delta >= 40 || sectionDelta >= 1) return 'medium';
+  return 'low';
 };
 
 const LoadingMessages = () => {
@@ -221,6 +250,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const originalHistoryRef = useRef<string>('');
   const lastSavedValueRef = useRef<string>('');
   const lastRecordIdRef = useRef<string | null>(null);
+  const diagnosticIdRef = useRef<string | null>(null);
+  const lastDiagnosticSnapshotRef = useRef<string>('');
 
   type HistoryVersion = {
     id: string;
@@ -278,6 +309,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       setDoctorFeedbackSubmitted(false);
       setDoctorFeedbackDismissed(false);
       setDoctorFeedbackError(null);
+      diagnosticIdRef.current = null;
+      lastDiagnosticSnapshotRef.current = '';
     }
   }, [recordId, historyText]);
 
@@ -544,6 +577,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           fallback_hops: metadata?.fallbackHops || 0
         }
       });
+      await syncDiagnosticSnapshot(historyText, {
+        reviewStatus: hasEdited ? 'reviewed' : 'pending',
+        doctorFeedbackText: doctorFeedbackText.trim() || undefined,
+        doctorScore: doctorFeedbackScore
+      });
       setDoctorFeedbackSubmitted(true);
     } catch (error) {
       setDoctorFeedbackError((error as Error)?.message || 'No se pudo guardar la valoración');
@@ -589,6 +627,90 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       await onPersistMedicalHistory(newText, options);
     }
   }, [mariaNotes, onContentChange, onPersistMedicalHistory]);
+
+  const syncDiagnosticSnapshot = useCallback(async (
+    doctorFinalText: string,
+    options?: {
+      reviewStatus?: 'pending' | 'reviewed' | 'audited' | 'locked';
+      doctorFeedbackText?: string;
+      doctorScore?: number | null;
+    }
+  ) => {
+    const aiDraftText = (originalHistoryRef.current || historyText || '').trim();
+    const finalText = (doctorFinalText || '').trim();
+    const transcriptionText = (transcription || '').trim();
+    const dedupeKey = `${metadata?.auditId || sessionId || recordId || patientName || 'history'}:medical_history`;
+    if (!dedupeKey || (!aiDraftText && !finalText && !transcriptionText)) return;
+
+    const snapshotSignature = JSON.stringify({
+      dedupeKey,
+      aiDraftText,
+      finalText,
+      transcriptionText,
+      reviewStatus: options?.reviewStatus || 'pending',
+      doctorFeedbackText: options?.doctorFeedbackText || '',
+      doctorScore: options?.doctorScore || null,
+      auditId: metadata?.auditId || null,
+      recordId: recordId || null,
+      sessionId: sessionId || null
+    });
+
+    if (snapshotSignature === lastDiagnosticSnapshotRef.current) return;
+
+    const diagnosticId = await upsertClinicalGenerationDiagnostic({
+      dedupe_key: dedupeKey,
+      record_id: recordId,
+      audit_id: metadata?.auditId,
+      session_id: sessionId,
+      specialty,
+      artifact_type: 'medical_history',
+      patient_name_snapshot: patientName || undefined,
+      transcription_text: transcriptionText,
+      ai_draft_text: aiDraftText,
+      doctor_final_text: finalText || aiDraftText,
+      doctor_feedback_text: options?.doctorFeedbackText || undefined,
+      doctor_score: options?.doctorScore ?? null,
+      review_status: options?.reviewStatus || 'pending',
+      model_used: metadata?.models?.generation || null,
+      provider_used: generationProviderLabel,
+      prompt_version: specialty === 'psicologia' ? 'psychology-ainhoa-v1' : 'otorrino-v1',
+      rule_pack_version: metadata?.rulePackVersion || null,
+      rule_ids_used: metadata?.ruleIdsUsed || [],
+      pipeline_status: metadata?.resultStatus || null,
+      result_status: metadata?.resultStatus || null,
+      quality_score: metadata?.qualityScore ?? null,
+      metadata: {
+        uncertainty_flags: metadata?.uncertaintyFlags?.length || 0,
+        remaining_errors: metadata?.remainingErrors || [],
+        critical_gaps: metadata?.criticalGaps || [],
+        logical_calls_used: metadata?.logicalCallsUsed || null,
+        physical_calls_used: metadata?.physicalCallsUsed || null,
+        fallback_hops: metadata?.fallbackHops || 0
+      }
+    });
+
+    if (diagnosticId) {
+      diagnosticIdRef.current = diagnosticId;
+      lastDiagnosticSnapshotRef.current = snapshotSignature;
+    }
+  }, [
+    generationProviderLabel,
+    historyText,
+    metadata,
+    patientName,
+    recordId,
+    sessionId,
+    specialty,
+    transcription
+  ]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    if (!historyText.trim()) return;
+    void syncDiagnosticSnapshot(historyText, {
+      reviewStatus: hasEdited ? 'reviewed' : 'pending'
+    });
+  }, [hasEdited, historyText, isLoading, syncDiagnosticSnapshot]);
 
   const handleSaveEdit = useCallback(async () => {
     // TRIGGER LEARNING: If content changed, analyze why
@@ -646,6 +768,27 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     }
 
     await persistContent(editValue, { autosave: false });
+    const previousSavedText = lastSavedValueRef.current || historyText;
+    await syncDiagnosticSnapshot(editValue, {
+      reviewStatus: 'reviewed'
+    });
+    if (diagnosticIdRef.current && previousSavedText.trim() !== editValue.trim()) {
+      await saveClinicalGenerationDiagnosticEdit({
+        diagnostic_id: diagnosticIdRef.current,
+        section_name: selectedSection || null,
+        edit_type: mapDoctorReasonToEditType(doctorReasonCode, previousSavedText, editValue),
+        importance: estimateEditImportance(previousSavedText, editValue),
+        edit_source: 'manual_save',
+        before_text: previousSavedText,
+        after_text: editValue,
+        edit_distance_chars: Math.abs(editValue.length - previousSavedText.length),
+        metadata: {
+          doctor_reason_code: doctorReasonCode || null,
+          record_id: recordId || null,
+          audit_id: metadata?.auditId || null
+        }
+      });
+    }
     lastSavedValueRef.current = editValue;
     setLastSavedAt(new Date());
     setHasEdited(editValue !== originalHistoryRef.current);
@@ -844,6 +987,26 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         }).catch((error) => {
           console.warn('[HistoryView] learning V2 failed on autosave:', error);
         });
+        const previousSavedText = lastSavedValueRef.current || historyText;
+        await syncDiagnosticSnapshot(editValue, {
+          reviewStatus: 'reviewed'
+        });
+        if (diagnosticIdRef.current && previousSavedText.trim() !== editValue.trim()) {
+          await saveClinicalGenerationDiagnosticEdit({
+            diagnostic_id: diagnosticIdRef.current,
+            section_name: selectedSection || null,
+            edit_type: mapDoctorReasonToEditType('', previousSavedText, editValue),
+            importance: estimateEditImportance(previousSavedText, editValue),
+            edit_source: 'autosave',
+            before_text: previousSavedText,
+            after_text: editValue,
+            edit_distance_chars: Math.abs(editValue.length - previousSavedText.length),
+            metadata: {
+              record_id: recordId || null,
+              audit_id: metadata?.auditId || null
+            }
+          });
+        }
         lastSavedValueRef.current = editValue;
         setLastSavedAt(new Date());
         setVersions((prev) => [

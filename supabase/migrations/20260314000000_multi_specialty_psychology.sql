@@ -2,9 +2,56 @@
 -- Keeps medical_records as the canonical source and adds explicit specialty/context tables.
 
 create extension if not exists unaccent;
+create extension if not exists pgcrypto;
 
 alter table if exists public.medical_records
   add column if not exists specialty text;
+
+alter table if exists public.medical_records
+  add column if not exists record_uuid uuid;
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'medical_records'
+      and column_name = 'record_uuid'
+  ) then
+    update public.medical_records
+    set record_uuid = gen_random_uuid()
+    where record_uuid is null;
+  end if;
+end $$;
+
+create unique index if not exists medical_records_record_uuid_uq
+  on public.medical_records (record_uuid);
+
+alter table if exists public.medical_records
+  add column if not exists updated_at timestamptz;
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'medical_records'
+      and column_name = 'created_at'
+  ) then
+    update public.medical_records
+    set updated_at = coalesce(updated_at, created_at, timezone('utc'::text, now()))
+    where updated_at is null;
+  else
+    update public.medical_records
+    set updated_at = coalesce(updated_at, timezone('utc'::text, now()))
+    where updated_at is null;
+  end if;
+end $$;
+
+alter table if exists public.medical_records
+  alter column updated_at set default timezone('utc'::text, now());
 
 update public.medical_records
 set specialty = case

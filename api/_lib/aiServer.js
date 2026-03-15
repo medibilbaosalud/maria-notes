@@ -22,6 +22,26 @@ const PSYCHOLOGY_STYLE_PROFILE = `ESTILO PSICOLOGIA CLINICA (OBLIGATORIO)
 - No inventes riesgos, antecedentes, pruebas ni diagnosticos no mencionados.
 - Si no consta un dato importante, dejalo explicito como "No consta".`;
 
+const PSYCHOLOGY_AINHOA_STYLE_PROFILE = `ESTILO PROFESIONAL DE AINHOA (OBLIGATORIO EN PSICOLOGIA)
+- La escritura debe sonar a nota clinica real de psicologia en consulta ambulatoria, no a texto academico ni a resumen de IA.
+- "MOTIVO DE CONSULTA" debe ser breve y directo.
+- En "ANTECEDENTES RELEVANTES" incluye primero el contexto vital funcional si aparece en la transcripcion: edad, lugar de residencia, convivencia, estudios o trabajo, red familiar y datos de contexto que ayuden a entender el caso.
+- En "SINTOMATOLOGIA ACTUAL" prioriza el problema actual, su inicio, frecuencia, duracion, intensidad, desencadenantes, factores que aumentan o disminuyen, e impacto en su funcionamiento.
+- Cuando existan frases literales del/la paciente que aporten valor clinico, pueden incluirse de forma breve entre comillas.
+- En "OBSERVACIONES CLINICAS" integra recursos, apoyos, rutina diaria, hobbies, factores protectores, areas afectadas, antecedentes relevantes y cualquier informacion clinicamente util, siempre sin inventar.
+- En "IMPRESION CLINICA" mantente prudente: formula comprensiones clinicas o focos de trabajo, pero no diagnostiques si no consta.
+- En "PLAN TERAPEUTICO" redacta con estilo de consulta real. Si en la transcripcion aparecen tareas para casa u objetivos terapeuticos, integrarlos aqui con etiquetas internas como "Tareas para casa:" y "Objetivos terapeuticos:" dentro del cuerpo de la seccion, sin crear encabezados Markdown nuevos.
+- No uses lenguaje grandilocuente, juridico ni excesivamente tecnico.
+- No conviertas toda la historia en listas; mezcla frases y parrafos breves con listados solo cuando ayuden a la claridad.
+- No moralices ni interpretes mas alla de la evidencia disponible.`;
+
+const PSYCHOLOGY_AINHOA_STYLE_EXAMPLES = `EJEMPLOS DE FORMA (NO REUTILIZAR CONTENIDO NI DATOS)
+1) Motivo de consulta breve. Despues, en situacion actual, se abre con edad, convivencia, estudios o trabajo y red de apoyo. A continuacion se describe el problema actual con cronologia, sintomas, impacto en su dia a dia, apoyos, hobbies y factores protectores.
+2) Si hay ansiedad, se especifica cuando comenzo, en que momentos ocurre, su frecuencia, duracion, sintomas fisicos, anticipacion o alerta, y como interfiere en su descanso, alimentacion, concentracion o actividad.
+3) Si hay conflicto relacional o familiar, se explica de forma clara quien interviene, que secuencia de hechos refiere la paciente y que emocion o malestar actual genera, sin convertirlo en relato literario.
+4) Si hay autolesiones, ideacion o antecedentes graves, se registra con sobriedad, literalidad clinica y foco en frecuencia, funciones de la conducta, desencadenantes, factores protectores e impacto funcional.
+5) Si aparecen objetivos terapeuticos o tareas, se recogen al final dentro del plan con frases claras, utiles y realistas para seguimiento.`;
+
 const normalizeConsultationType = (value) => {
     const normalized = String(value || '')
         .trim()
@@ -753,6 +773,7 @@ ${specialty.historyTemplate}
 - No incluyas bloques internos del sistema.
 
 ${specialty.styleProfile}
+${specialty.specialty === 'psicologia' ? `\n${PSYCHOLOGY_AINHOA_STYLE_PROFILE}\n\n${PSYCHOLOGY_AINHOA_STYLE_EXAMPLES}` : ''}
 ${formatLearningPromptContext(learningContext)}
 
 Paciente: ${patientName || 'Paciente'}
@@ -803,6 +824,9 @@ Reglas:
 - No inventes diagnosticos ni pruebas no mencionadas.
 - Si falta un dato, indica "No consta".
 - Responde en texto Markdown simple.
+${normalizeConsultationType(consultationType) === 'psicologia' ? `- Mantiene un estilo clinico humano, sobrio y parecido a una redaccion real de psicologia.
+- Incluye contexto vital, problema actual, sintomas, impacto funcional, apoyos y plan si constan.
+- Si aparecen objetivos terapeuticos o tareas, reflejalos con claridad sin sonar academico ni artificial.` : ''}
 ${formatLearningPromptContext(learningContext)}
 
 TRANSCRIPCION:

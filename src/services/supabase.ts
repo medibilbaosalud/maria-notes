@@ -138,6 +138,43 @@ export interface ConsultationTranscriptChunk {
     updated_at?: string;
 }
 
+export interface ClinicalGenerationDiagnosticEntry {
+    dedupe_key: string;
+    record_id?: string;
+    audit_id?: string;
+    session_id?: string;
+    specialty: string;
+    artifact_type: string;
+    patient_name_snapshot?: string;
+    transcription_text: string;
+    ai_draft_text: string;
+    doctor_final_text?: string;
+    doctor_score?: number | null;
+    doctor_feedback_text?: string | null;
+    review_status?: 'pending' | 'reviewed' | 'audited' | 'locked';
+    model_used?: string | null;
+    provider_used?: string | null;
+    prompt_version?: string | null;
+    rule_pack_version?: number | null;
+    rule_ids_used?: string[];
+    pipeline_status?: string | null;
+    result_status?: string | null;
+    quality_score?: number | null;
+    metadata?: Record<string, unknown>;
+}
+
+export interface ClinicalGenerationDiagnosticEditEntry {
+    diagnostic_id: string;
+    section_name?: string | null;
+    edit_type: 'added' | 'removed' | 'rewritten' | 'terminology' | 'style' | 'formatting' | 'clinical_precision' | 'omission';
+    importance?: 'low' | 'medium' | 'high';
+    edit_source?: 'generated' | 'manual_save' | 'autosave' | 'finalized';
+    before_text?: string | null;
+    after_text?: string | null;
+    edit_distance_chars?: number;
+    metadata?: Record<string, unknown>;
+}
+
 export const saveMedicalRecord = async (record: MedicalRecord) => {
     const client = getProtectedSupabase();
     if (!client) {
@@ -525,6 +562,78 @@ export const saveDoctorSatisfactionEvent = async (entry: {
         created_at: new Date().toISOString()
     }]);
     if (error) console.error('Error saving doctor satisfaction event:', error);
+};
+
+export const upsertClinicalGenerationDiagnostic = async (
+    entry: ClinicalGenerationDiagnosticEntry
+): Promise<string | null> => {
+    const client = getProtectedSupabase();
+    if (!client) return null;
+
+    const payload = {
+        dedupe_key: entry.dedupe_key,
+        record_id: entry.record_id || null,
+        audit_id: entry.audit_id || null,
+        session_id: entry.session_id || null,
+        specialty: entry.specialty,
+        artifact_type: entry.artifact_type,
+        patient_name_snapshot: entry.patient_name_snapshot || null,
+        transcription_text: entry.transcription_text || '',
+        ai_draft_text: entry.ai_draft_text || '',
+        doctor_final_text: entry.doctor_final_text || null,
+        doctor_score: typeof entry.doctor_score === 'number'
+            ? Math.max(1, Math.min(10, Math.round(entry.doctor_score)))
+            : null,
+        doctor_feedback_text: entry.doctor_feedback_text || null,
+        review_status: entry.review_status || 'pending',
+        model_used: entry.model_used || null,
+        provider_used: entry.provider_used || null,
+        prompt_version: entry.prompt_version || null,
+        rule_pack_version: typeof entry.rule_pack_version === 'number' ? entry.rule_pack_version : null,
+        rule_ids_used: Array.isArray(entry.rule_ids_used) ? entry.rule_ids_used : [],
+        pipeline_status: entry.pipeline_status || null,
+        result_status: entry.result_status || null,
+        quality_score: typeof entry.quality_score === 'number' ? entry.quality_score : null,
+        metadata: entry.metadata || {},
+        updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await client
+        .from('clinical_generation_diagnostics')
+        .upsert([payload], { onConflict: 'dedupe_key' })
+        .select('id')
+        .maybeSingle();
+
+    if (error) {
+        console.error('Error upserting clinical generation diagnostic:', error);
+        return null;
+    }
+
+    return data?.id || null;
+};
+
+export const saveClinicalGenerationDiagnosticEdit = async (
+    entry: ClinicalGenerationDiagnosticEditEntry
+): Promise<void> => {
+    const client = getProtectedSupabase();
+    if (!client) return;
+
+    const { error } = await client
+        .from('clinical_generation_diagnostic_edits')
+        .insert([{
+            diagnostic_id: entry.diagnostic_id,
+            section_name: entry.section_name || null,
+            edit_type: entry.edit_type,
+            importance: entry.importance || 'medium',
+            edit_source: entry.edit_source || 'manual_save',
+            before_text: entry.before_text || null,
+            after_text: entry.after_text || null,
+            edit_distance_chars: Math.max(0, Number(entry.edit_distance_chars || 0)),
+            metadata: entry.metadata || {},
+            created_at: new Date().toISOString()
+        }]);
+
+    if (error) console.error('Error saving clinical generation diagnostic edit:', error);
 };
 
 export const upsertConsultationQualitySummary = async (summary: {
