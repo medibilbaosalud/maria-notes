@@ -501,6 +501,12 @@ export const logQualityEvent = async (event: {
 export const saveDoctorSatisfactionEvent = async (entry: {
     score: number;
     record_id?: string;
+    audit_id?: string;
+    session_id?: string;
+    specialty?: string;
+    artifact_type?: string;
+    feedback_stage?: string;
+    feedback_text?: string;
     context?: Record<string, unknown>;
 }): Promise<void> => {
     const client = getProtectedSupabase();
@@ -509,6 +515,12 @@ export const saveDoctorSatisfactionEvent = async (entry: {
     const { error } = await client.from('doctor_satisfaction_events').insert([{
         score,
         record_id: entry.record_id || null,
+        audit_id: entry.audit_id || null,
+        session_id: entry.session_id || null,
+        specialty: entry.specialty || null,
+        artifact_type: entry.artifact_type || null,
+        feedback_stage: entry.feedback_stage || 'generated',
+        feedback_text: entry.feedback_text || null,
         context: entry.context || {},
         created_at: new Date().toISOString()
     }]);

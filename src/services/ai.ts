@@ -2,6 +2,7 @@ import type {
     ConsultationClassification,
     ExtractionMeta,
     ExtractionResult,
+    ModelInvocationRecord,
     ModelInvocationEvent,
     UncertaintyFlag,
     ValidationResult
@@ -19,6 +20,7 @@ export interface AIResultWithMetadata extends AIResult<string> {
     extraction?: ExtractionResult;
     extraction_meta?: ExtractionMeta[];
     classification?: ConsultationClassification;
+    quality_notes?: Array<{ type: string; field: string; reason: string; severity: 'low' | 'medium' | 'high' }>;
     validations?: ValidationResult[];
     corrections_applied?: number;
     remaining_errors?: { type: string; field: string; reason: string }[];
@@ -93,6 +95,10 @@ export interface AIResultWithMetadata extends AIResult<string> {
     gemini_calls_used?: number;
     one_call_policy_applied?: boolean;
     degraded_reason_code?: string;
+    audit_trace?: {
+        thought_summary?: string;
+        thought_signature?: string;
+    };
 }
 
 type TranscriptionOptions = {
@@ -168,6 +174,7 @@ const postJson = async <T>(path: string, payload: Record<string, unknown>, signa
 
 export class AIService {
     private modelInvocationListener?: (event: ModelInvocationEvent) => void;
+    private modelInvocations: ModelInvocationRecord[] = [];
 
     private invocationCounters: InvocationCounters = {
         total_invocations: 0,
@@ -180,6 +187,7 @@ export class AIService {
     }
 
     resetInvocationCounters(_sessionId?: string): void {
+        this.modelInvocations = [];
         this.invocationCounters = {
             total_invocations: 0,
             fallback_hops: 0,
@@ -199,22 +207,81 @@ export class AIService {
         this.modelInvocationListener = listener;
     }
 
-    private emitInvocation(task: string, phase: string, status: 'start' | 'success' | 'error', model: string, error?: unknown) {
+    drainModelInvocations(): ModelInvocationRecord[] {
+        const records = [...this.modelInvocations];
+        this.modelInvocations = [];
+        return records;
+    }
+
+    private estimateTokens(text?: string): number {
+        if (!text) return 0;
+        return Math.ceil(String(text).length / 4);
+    }
+
+    private emitInvocation(
+        task: string,
+        phase: string,
+        status: 'start' | 'success' | 'error',
+        model: string,
+        error?: unknown,
+        metadata?: Partial<ModelInvocationEvent>
+    ) {
+        const provider = model.startsWith('gemini:') ? 'gemini' : 'groq';
+        const normalizedModel = model.includes(':') ? model.split(':').slice(1).join(':') : model;
+        const createdAt = new Date().toISOString();
         this.invocationCounters.total_invocations += status === 'start' ? 0 : 1;
         if (status === 'success') {
             this.invocationCounters.by_task[task] = (this.invocationCounters.by_task[task] || 0) + 1;
         }
+        if (status !== 'start') {
+            this.modelInvocations.push({
+                task,
+                phase,
+                provider,
+                model: normalizedModel,
+                route_key: metadata?.route_key || model,
+                attempt_index: metadata?.attempt_index ?? 0,
+                is_fallback: Boolean(metadata?.is_fallback),
+                success: status === 'success',
+                error_type: status === 'error' ? (metadata?.error_type || ((error as Error)?.message || 'request_failed')) : metadata?.error_type,
+                error_code: metadata?.error_code,
+                latency_ms: Number.isFinite(Number(metadata?.latency_ms)) ? Number(metadata?.latency_ms) : 0,
+                estimated_tokens: Number.isFinite(Number(metadata?.estimated_tokens))
+                    ? Number(metadata?.estimated_tokens)
+                    : this.estimateTokens(metadata?.response_preview),
+                specialty: metadata?.specialty,
+                artifact_type: metadata?.artifact_type,
+                result_status: metadata?.result_status,
+                pipeline_status: metadata?.pipeline_status,
+                thought_summary: metadata?.thought_summary,
+                thought_signature: metadata?.thought_signature,
+                response_preview: metadata?.response_preview,
+                session_id: metadata?.session_id,
+                created_at: createdAt
+            });
+        }
         this.modelInvocationListener?.({
-            provider: model.startsWith('gemini:') ? 'gemini' : 'groq',
-            model: model.includes(':') ? model.split(':').slice(1).join(':') : model,
+            provider,
+            model: normalizedModel,
             task,
             phase,
             status,
-            route_key: model,
-            attempt_index: 0,
-            created_at: new Date().toISOString(),
-            is_fallback: false,
-            error_type: status === 'error' ? ((error as Error)?.message || 'request_failed') : undefined
+            route_key: metadata?.route_key || model,
+            attempt_index: metadata?.attempt_index ?? 0,
+            created_at: createdAt,
+            is_fallback: Boolean(metadata?.is_fallback),
+            latency_ms: metadata?.latency_ms,
+            error_type: status === 'error' ? (metadata?.error_type || ((error as Error)?.message || 'request_failed')) : metadata?.error_type,
+            error_code: metadata?.error_code,
+            estimated_tokens: metadata?.estimated_tokens,
+            specialty: metadata?.specialty,
+            artifact_type: metadata?.artifact_type,
+            result_status: metadata?.result_status,
+            pipeline_status: metadata?.pipeline_status,
+            thought_summary: metadata?.thought_summary,
+            thought_signature: metadata?.thought_signature,
+            response_preview: metadata?.response_preview,
+            session_id: metadata?.session_id
         });
     }
 
@@ -235,7 +302,11 @@ export class AIService {
                 mimeType: blob.type || mimeType || 'audio/wav',
                 whisperStrict: Boolean(options?.whisperStrict)
             }, options?.signal);
-            this.emitInvocation('transcription', 'transcription', 'success', result.model);
+            this.emitInvocation('transcription', 'transcription', 'success', result.model, undefined, {
+                artifact_type: 'transcription',
+                response_preview: result.text.slice(0, 240),
+                estimated_tokens: this.estimateTokens(result.text)
+            });
             return {
                 data: result.text,
                 model: result.model
@@ -259,19 +330,32 @@ export class AIService {
                 meta: ExtractionMeta[];
                 classification: ConsultationClassification;
                 model: string;
+                audit_trace?: {
+                    thought_summary?: string;
+                    thought_signature?: string;
+                };
             }>('/api/ai/extract', {
                 transcription,
                 consultationType: specialty,
                 learningContext
             });
-            this.emitInvocation('extract', 'extract', 'success', result.model);
+            this.emitInvocation('extract', 'extract', 'success', result.model, undefined, {
+                specialty,
+                artifact_type: 'medical_history',
+                thought_summary: result.audit_trace?.thought_summary,
+                thought_signature: result.audit_trace?.thought_signature,
+                response_preview: JSON.stringify(result.classification || {}).slice(0, 240)
+            });
             return {
                 data: result.data,
                 meta: result.meta || [],
                 classification: result.classification
             };
         } catch (error) {
-            this.emitInvocation('extract', 'extract', 'error', SERVER_TEXT_MODEL, error);
+            this.emitInvocation('extract', 'extract', 'error', SERVER_TEXT_MODEL, error, {
+                specialty,
+                artifact_type: 'medical_history'
+            });
             throw error;
         }
     }
@@ -290,10 +374,22 @@ export class AIService {
                 consultationType: specialty,
                 learningContext
             });
-            this.emitInvocation('single_shot_history', 'single_shot_history_generation', 'success', result.model);
+            this.emitInvocation('single_shot_history', 'single_shot_history_generation', 'success', result.model, undefined, {
+                specialty,
+                artifact_type: 'medical_history',
+                result_status: result.result_status,
+                pipeline_status: result.pipeline_status,
+                thought_summary: result.audit_trace?.thought_summary,
+                thought_signature: result.audit_trace?.thought_signature,
+                response_preview: result.data.slice(0, 240),
+                estimated_tokens: this.estimateTokens(result.data)
+            });
             return result;
         } catch (error) {
-            this.emitInvocation('single_shot_history', 'single_shot_history_generation', 'error', SERVER_TEXT_MODEL, error);
+            this.emitInvocation('single_shot_history', 'single_shot_history_generation', 'error', SERVER_TEXT_MODEL, error, {
+                specialty,
+                artifact_type: 'medical_history'
+            });
             throw error;
         }
     }
@@ -306,16 +402,33 @@ export class AIService {
         this.emitInvocation('report', 'report_generation', 'start', SERVER_TEXT_MODEL);
         try {
             const learningContext = await buildLearningPayload(specialty, 'medical_report', 'generation');
-            const result = await postJson<{ text: string; model: string }>('/api/ai/generate-report', {
+            const result = await postJson<{
+                text: string;
+                model: string;
+                audit_trace?: {
+                    thought_summary?: string;
+                    thought_signature?: string;
+                };
+            }>('/api/ai/generate-report', {
                 transcription,
                 patientName,
                 consultationType: specialty,
                 learningContext
             });
-            this.emitInvocation('report', 'report_generation', 'success', result.model);
+            this.emitInvocation('report', 'report_generation', 'success', result.model, undefined, {
+                specialty,
+                artifact_type: 'medical_report',
+                thought_summary: result.audit_trace?.thought_summary,
+                thought_signature: result.audit_trace?.thought_signature,
+                response_preview: result.text.slice(0, 240),
+                estimated_tokens: this.estimateTokens(result.text)
+            });
             return { data: result.text, model: result.model };
         } catch (error) {
-            this.emitInvocation('report', 'report_generation', 'error', SERVER_TEXT_MODEL, error);
+            this.emitInvocation('report', 'report_generation', 'error', SERVER_TEXT_MODEL, error, {
+                specialty,
+                artifact_type: 'medical_report'
+            });
             throw error;
         }
     }
@@ -330,7 +443,14 @@ export class AIService {
         this.emitInvocation('generation', 'section_regeneration', 'start', SERVER_TEXT_MODEL);
         try {
             const learningContext = await buildLearningPayload(specialty, 'medical_history', sectionTitle || 'generation');
-            const result = await postJson<{ text: string; model: string }>('/api/ai/regenerate-section', {
+            const result = await postJson<{
+                text: string;
+                model: string;
+                audit_trace?: {
+                    thought_summary?: string;
+                    thought_signature?: string;
+                };
+            }>('/api/ai/regenerate-section', {
                 transcription,
                 currentHistory,
                 sectionTitle,
@@ -338,13 +458,23 @@ export class AIService {
                 consultationType: specialty,
                 learningContext
             });
-            this.emitInvocation('generation', 'section_regeneration', 'success', result.model);
+            this.emitInvocation('generation', 'section_regeneration', 'success', result.model, undefined, {
+                specialty,
+                artifact_type: 'medical_history',
+                thought_summary: result.audit_trace?.thought_summary,
+                thought_signature: result.audit_trace?.thought_signature,
+                response_preview: result.text.slice(0, 240),
+                estimated_tokens: this.estimateTokens(result.text)
+            });
             return {
                 data: result.text,
                 model: result.model
             };
         } catch (error) {
-            this.emitInvocation('generation', 'section_regeneration', 'error', SERVER_TEXT_MODEL, error);
+            this.emitInvocation('generation', 'section_regeneration', 'error', SERVER_TEXT_MODEL, error, {
+                specialty,
+                artifact_type: 'medical_history'
+            });
             throw error;
         }
     }

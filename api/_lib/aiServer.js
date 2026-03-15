@@ -173,6 +173,9 @@ const ORL_HISTORY_SCHEMA_HINT = `{
     "urgency": "string",
     "confidence": 0.0
   },
+  "quality_notes": [
+    { "type": "missing|inconsistency|ambiguity", "field": "string", "reason": "string", "severity": "low|medium|high" }
+  ],
   "uncertainty_flags": [
     { "field_path": "string", "reason": "string", "severity": "low|medium|high", "value": "string" }
   ]
@@ -205,6 +208,9 @@ const PSYCHOLOGY_HISTORY_SCHEMA_HINT = `{
     "urgency": "string",
     "confidence": 0.0
   },
+  "quality_notes": [
+    { "type": "missing|inconsistency|ambiguity", "field": "string", "reason": "string", "severity": "low|medium|high" }
+  ],
   "uncertainty_flags": [
     { "field_path": "string", "reason": "string", "severity": "low|medium|high", "value": "string" }
   ]
@@ -312,6 +318,24 @@ const parseModelText = async (response) => {
     return { text: content, model: model.startsWith('groq:') ? model : `groq:${model}` };
 };
 
+const buildThoughtSummary = (parts) => {
+    if (!Array.isArray(parts)) return undefined;
+    const thoughtTexts = parts
+        .filter((part) => Boolean(part?.thought))
+        .map((part) => typeof part?.text === 'string' ? part.text.trim() : '')
+        .filter(Boolean);
+    if (thoughtTexts.length === 0) return undefined;
+    return thoughtTexts.join('\n').slice(0, 4000);
+};
+
+const extractThoughtSignature = (parts) => {
+    if (!Array.isArray(parts)) return undefined;
+    const partWithSignature = parts.find((part) => typeof part?.thoughtSignature === 'string' && part.thoughtSignature.trim());
+    return typeof partWithSignature?.thoughtSignature === 'string'
+        ? partWithSignature.thoughtSignature.trim()
+        : undefined;
+};
+
 const parseGeminiText = async (response, modelName) => {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -327,12 +351,21 @@ const parseGeminiText = async (response, modelName) => {
 
     const parts = body?.candidates?.[0]?.content?.parts;
     const text = Array.isArray(parts)
-        ? parts.map((part) => typeof part?.text === 'string' ? part.text : '').join('').trim()
+        ? parts
+            .filter((part) => !part?.thought)
+            .map((part) => typeof part?.text === 'string' ? part.text : '')
+            .join('')
+            .trim()
         : '';
     if (!text) {
         throw new Error('gemini_empty_response');
     }
-    return { text, model: `gemini:${normalizeGeminiModelId(body?.modelVersion || modelName)}` };
+    return {
+        text,
+        model: `gemini:${normalizeGeminiModelId(body?.modelVersion || modelName)}`,
+        thought_summary: buildThoughtSummary(parts),
+        thought_signature: extractThoughtSignature(parts)
+    };
 };
 
 const callGroqChat = async ({ prompt, jsonMode = false, temperature = 0.1, maxTokens = 2600 }) => {
@@ -364,7 +397,8 @@ const callGeminiText = async ({
     temperature = 0.1,
     maxTokens = 2600,
     modelName = GEMINI_TEXT_MODEL,
-    inlineParts
+    inlineParts,
+    includeThoughts = false
 }) => {
     const resolvedModelName = normalizeGeminiModelId(modelName);
     const contents = [{
@@ -384,7 +418,12 @@ const callGeminiText = async ({
                 generationConfig: {
                     temperature,
                     maxOutputTokens: maxTokens,
-                    responseMimeType: jsonMode ? 'application/json' : 'text/plain'
+                    responseMimeType: jsonMode ? 'application/json' : 'text/plain',
+                    thinkingConfig: includeThoughts
+                        ? {
+                            includeThoughts: true
+                        }
+                        : undefined
                 }
             })
         }
@@ -585,6 +624,20 @@ const normalizeClassification = (value) => {
     };
 };
 
+const normalizeQualityNotes = (value) => {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map((entry) => ({
+            type: String(entry?.type || 'ambiguity').trim() || 'ambiguity',
+            field: String(entry?.field || 'unknown').trim() || 'unknown',
+            reason: String(entry?.reason || 'Sin detalle').trim() || 'Sin detalle',
+            severity: entry?.severity === 'high'
+                ? 'high'
+                : (entry?.severity === 'medium' ? 'medium' : 'low')
+        }))
+        .filter((entry) => entry.reason);
+};
+
 const sanitizeClinicalHistory = (rawHistory, consultationType) => {
     if (!rawHistory) return rawHistory;
     const allowedSections = new Set(
@@ -777,20 +830,13 @@ export const generateMedicalHistoryPayload = async ({ transcription, patientName
     const specialty = normalizeConsultationType(consultationType);
     const startedAt = Date.now();
     try {
-        const [historyResponse, classificationResponse] = await Promise.all([
-            callPreferredTextModel({
-                prompt: buildGenerateHistoryPrompt(transcription, patientName, specialty, learningContext),
-                jsonMode: true,
-                temperature: 0.1,
-                maxTokens: 2600
-            }),
-            callPreferredTextModel({
-                prompt: buildClassificationPrompt(transcription, specialty),
-                jsonMode: true,
-                temperature: 0,
-                maxTokens: 300
-            })
-        ]);
+        const historyResponse = await callPreferredTextModel({
+            prompt: buildGenerateHistoryPrompt(transcription, patientName, specialty, learningContext),
+            jsonMode: true,
+            temperature: 0.1,
+            maxTokens: 2600,
+            includeThoughts: true
+        });
 
         const parsedHistory = parseJsonWithFallback(historyResponse.text, () => ({}));
         const historyMarkdown = sanitizeClinicalHistory(String(parsedHistory.history_markdown || '').trim(), specialty);
@@ -799,11 +845,8 @@ export const generateMedicalHistoryPayload = async ({ transcription, patientName
         }
 
         const extraction = normalizeExtraction(parsedHistory.extraction, specialty);
-        const classification = normalizeClassification(
-            Object.keys(parsedHistory.classification || {}).length > 0
-                ? parsedHistory.classification
-                : parseJsonWithFallback(classificationResponse.text, () => ({}))
-        );
+        const classification = normalizeClassification(parsedHistory.classification);
+        const qualityNotes = normalizeQualityNotes(parsedHistory.quality_notes);
 
         const uncertaintyFlags = Array.isArray(parsedHistory.uncertainty_flags)
             ? parsedHistory.uncertainty_flags
@@ -832,8 +875,8 @@ export const generateMedicalHistoryPayload = async ({ transcription, patientName
         const resultStatus = provisionalReason ? 'provisional' : 'completed';
         const pipelineStatus = issues.length > 0 ? 'degraded' : 'completed';
         const durationMs = Date.now() - startedAt;
-        const geminiCallsUsed = [historyResponse, classificationResponse].filter((response) => response.gemini_success).length;
-        const fallbackHops = historyResponse.fallback_hops + classificationResponse.fallback_hops;
+        const geminiCallsUsed = historyResponse.gemini_success ? 1 : 0;
+        const fallbackHops = historyResponse.fallback_hops;
         const validations = [{
             validator: 'server_guard',
             is_valid: issues.length === 0,
@@ -848,6 +891,7 @@ export const generateMedicalHistoryPayload = async ({ transcription, patientName
             extraction,
             extraction_meta: [],
             classification,
+            quality_notes: qualityNotes,
             validations,
             corrections_applied: 0,
             remaining_errors: issues.length > 0 ? issues : undefined,
@@ -870,8 +914,8 @@ export const generateMedicalHistoryPayload = async ({ transcription, patientName
             early_stop_reason: issues.length === 0 ? 'clean_consensus' : 'low_risk_remaining',
             risk_level: riskLevel,
             call_budget_mode: 'single_shot',
-            logical_calls_used: 2,
-            physical_calls_used: 2 + fallbackHops,
+            logical_calls_used: 1,
+            physical_calls_used: 1 + fallbackHops,
             provisional_reason: provisionalReason,
             fallback_hops: fallbackHops,
             sanitization_applied: historyMarkdown !== String(parsedHistory.history_markdown || '').trim(),
@@ -904,14 +948,24 @@ export const generateMedicalHistoryPayload = async ({ transcription, patientName
             gemini_calls_used: geminiCallsUsed,
             rule_pack_version: Number(learningContext?.rulePackVersion || 0) || undefined,
             rule_ids_used: Array.isArray(learningContext?.ruleIdsUsed) ? learningContext.ruleIdsUsed : undefined,
-            one_call_policy_applied: false,
-            degraded_reason_code: provisionalReason || historyResponse.fallback_reason || classificationResponse.fallback_reason
+            one_call_policy_applied: true,
+            degraded_reason_code: provisionalReason || historyResponse.fallback_reason,
+            audit_trace: {
+                thought_summary: historyResponse.thought_summary,
+                thought_signature: historyResponse.thought_signature
+            }
         };
     } catch (error) {
         const reason = error?.message || 'server_generation_failed';
         return {
             data: buildProvisionalHistory(reason, specialty),
             model: `gemini:${GEMINI_TEXT_MODEL}`,
+            quality_notes: [{
+                type: 'pipeline',
+                field: 'pipeline',
+                reason,
+                severity: 'high'
+            }],
             remaining_errors: [{ type: 'error', field: 'pipeline', reason }],
             pipeline_status: 'degraded',
             result_status: 'failed_recoverable',
@@ -935,10 +989,14 @@ export const generateMedicalHistoryPayload = async ({ transcription, patientName
             followup_status: 'failed',
             output_tier: 'final',
             gemini_calls_used: 0,
-            one_call_policy_applied: false,
+            one_call_policy_applied: true,
             degraded_reason_code: reason,
             audit_id: randomUUID(),
-            session_id: randomUUID()
+            session_id: randomUUID(),
+            audit_trace: {
+                thought_summary: undefined,
+                thought_signature: undefined
+            }
         };
     }
 };
@@ -950,20 +1008,26 @@ export const extractMedicalDataPayload = async ({ transcription, consultationTyp
             prompt: buildExtractionPrompt(transcription, specialty, learningContext),
             jsonMode: true,
             temperature: 0,
-            maxTokens: 1200
+            maxTokens: 1200,
+            includeThoughts: true
         }),
         callPreferredTextModel({
             prompt: buildClassificationPrompt(transcription, specialty),
             jsonMode: true,
             temperature: 0,
-            maxTokens: 300
+            maxTokens: 300,
+            includeThoughts: true
         })
     ]);
     return {
         data: normalizeExtraction(parseJsonWithFallback(extractionResponse.text, () => ({})), specialty),
         meta: [],
         classification: normalizeClassification(parseJsonWithFallback(classificationResponse.text, () => ({}))),
-        model: extractionResponse.model
+        model: extractionResponse.model,
+        audit_trace: {
+            thought_summary: [extractionResponse.thought_summary, classificationResponse.thought_summary].filter(Boolean).join('\n\n') || undefined,
+            thought_signature: extractionResponse.thought_signature || classificationResponse.thought_signature
+        }
     };
 };
 
@@ -972,11 +1036,16 @@ export const generateMedicalReportPayload = async ({ transcription, patientName,
         prompt: buildReportPrompt(transcription, patientName, consultationType, learningContext),
         jsonMode: false,
         temperature: 0.2,
-        maxTokens: 1800
+        maxTokens: 1800,
+        includeThoughts: true
     });
     return {
         text: response.text.trim(),
-        model: response.model
+        model: response.model,
+        audit_trace: {
+            thought_summary: response.thought_summary,
+            thought_signature: response.thought_signature
+        }
     };
 };
 
@@ -985,11 +1054,16 @@ export const regenerateHistorySectionPayload = async (params) => {
         prompt: buildSectionPrompt(params),
         jsonMode: false,
         temperature: 0.1,
-        maxTokens: 900
+        maxTokens: 900,
+        includeThoughts: true
     });
     return {
         text: response.text.trim(),
-        model: response.model
+        model: response.model,
+        audit_trace: {
+            thought_summary: response.thought_summary,
+            thought_signature: response.thought_signature
+        }
     };
 };
 

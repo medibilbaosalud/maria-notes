@@ -210,6 +210,12 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
     }
     const generationVersions = Array.isArray(auditData.generation_versions) ? auditData.generation_versions as Record<string, unknown>[] : [];
     const modelInvocations = Array.isArray(payload.model_invocations) ? payload.model_invocations as Record<string, unknown>[] : [];
+    const consultationHistoryInvocations = modelInvocations.map((entry) => {
+        const sanitized = { ...entry };
+        delete sanitized.thought_summary;
+        delete sanitized.thought_signature;
+        return sanitized;
+    });
     const modelsUsed = (auditData.models_used && typeof auditData.models_used === 'object')
         ? auditData.models_used as Record<string, unknown>
         : {};
@@ -244,7 +250,7 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
             medical_history: historyOutput || '',
             primary_model: typeof modelsUsed.generation === 'string' ? String(modelsUsed.generation) : null,
             models_used: modelsUsed,
-            model_invocations: modelInvocations,
+            model_invocations: consultationHistoryInvocations,
             successful: auditData.successful !== false,
             pipeline_version: auditData.pipeline_version || null,
             created_at: auditData.created_at || nowIso()
@@ -316,6 +322,13 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
             error_code: entry.error_code ? String(entry.error_code) : null,
             latency_ms: Number.isFinite(Number(entry.latency_ms)) ? Number(entry.latency_ms) : null,
             estimated_tokens: Number.isFinite(Number(entry.estimated_tokens)) ? Number(entry.estimated_tokens) : null,
+            specialty: entry.specialty ? String(entry.specialty) : null,
+            artifact_type: entry.artifact_type ? String(entry.artifact_type) : null,
+            result_status: entry.result_status ? String(entry.result_status) : null,
+            pipeline_status: entry.pipeline_status ? String(entry.pipeline_status) : null,
+            thought_summary: entry.thought_summary ? String(entry.thought_summary) : null,
+            thought_signature: entry.thought_signature ? String(entry.thought_signature) : null,
+            response_preview: entry.response_preview ? String(entry.response_preview) : null,
             created_at: entry.created_at || nowIso()
         }));
         await chunkInsert('ai_model_invocations', rows, 200);
@@ -464,6 +477,12 @@ const processPipelineAttempt = async (payload: Record<string, unknown>) => {
         stage,
         attempt_index: attemptIndex,
         status,
+        model_used: payload.model_used || null,
+        provider_used: payload.provider_used || null,
+        specialty: payload.specialty || null,
+        artifact_type: payload.artifact_type || null,
+        result_status: payload.result_status || null,
+        pipeline_status: payload.pipeline_status || null,
         started_at: payload.started_at || nowIso(),
         finished_at: payload.finished_at || nowIso(),
         duration_ms: durationMs,
@@ -495,6 +514,12 @@ const processPipelineMarker = async (eventType: string, payload: Record<string, 
         stage: eventType,
         attempt_index: 0,
         status: 'completed',
+        model_used: payload.model_used || null,
+        provider_used: payload.provider_used || null,
+        specialty: payload.specialty || null,
+        artifact_type: payload.artifact_type || null,
+        result_status: payload.result_status || null,
+        pipeline_status: payload.pipeline_status || null,
         started_at: nowIso(),
         finished_at: nowIso(),
         duration_ms: 0,

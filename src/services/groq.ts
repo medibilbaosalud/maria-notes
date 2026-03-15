@@ -511,6 +511,14 @@ export interface ModelInvocationRecord {
     error_code?: string;
     latency_ms: number;
     estimated_tokens: number;
+    specialty?: string;
+    artifact_type?: string;
+    result_status?: string;
+    pipeline_status?: string;
+    thought_summary?: string;
+    thought_signature?: string;
+    response_preview?: string;
+    session_id?: string;
     created_at: string;
 }
 
@@ -526,6 +534,15 @@ export interface ModelInvocationEvent {
     latency_ms?: number;
     error_type?: string;
     error_code?: string;
+    estimated_tokens?: number;
+    specialty?: string;
+    artifact_type?: string;
+    result_status?: string;
+    pipeline_status?: string;
+    thought_summary?: string;
+    thought_signature?: string;
+    response_preview?: string;
+    session_id?: string;
     created_at: string;
 }
 

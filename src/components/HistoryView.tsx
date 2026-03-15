@@ -55,6 +55,7 @@ interface HistoryViewProps {
     fallbackHops?: number;
   };
   recordId?: string;
+  sessionId?: string;
   onPersistMedicalHistory?: (newContent: string, options?: { autosave?: boolean }) => Promise<void> | void;
   onRegenerateSection?: (sectionTitle: string, currentContent: string) => Promise<string>;
 }
@@ -176,6 +177,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   processingError,
   metadata,
   recordId,
+  sessionId,
   onPersistMedicalHistory,
   onRegenerateSection
 }) => {
@@ -204,6 +206,12 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isRegeneratingSection, setIsRegeneratingSection] = useState(false);
+  const [doctorFeedbackScore, setDoctorFeedbackScore] = useState<number | null>(null);
+  const [doctorFeedbackText, setDoctorFeedbackText] = useState('');
+  const [doctorFeedbackSubmitting, setDoctorFeedbackSubmitting] = useState(false);
+  const [doctorFeedbackSubmitted, setDoctorFeedbackSubmitted] = useState(false);
+  const [doctorFeedbackDismissed, setDoctorFeedbackDismissed] = useState(false);
+  const [doctorFeedbackError, setDoctorFeedbackError] = useState<string | null>(null);
   const [selectedSection, setSelectedSection] = useState<string>('ENFERMEDAD ACTUAL');
   const [doctorReasonCode, setDoctorReasonCode] = useState<'terminologia' | 'omision' | 'error_clinico' | 'redaccion' | 'formato' | 'otro' | ''>('');
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -235,6 +243,12 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     const sectionDelta = detectSectionDeltaCount(baseline, current);
     return delta >= 24 || sectionDelta >= 2;
   }, [editValue, historyText, isEditing]);
+  const feedbackAnchorId = `${metadata?.auditId || 'no-audit'}:${recordId || 'no-record'}:${specialty}`;
+  const showDoctorFeedbackWidget = doctorScoreEnabled
+    && !isLoading
+    && Boolean(metadata?.auditId || recordId)
+    && !doctorFeedbackSubmitted
+    && !doctorFeedbackDismissed;
 
   useEffect(() => {
     if (recordId !== lastRecordIdRef.current) {
@@ -259,8 +273,21 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       setHasExported(false);
       setLastSavedAt(null);
       setFlagDecisions({});
+      setDoctorFeedbackScore(null);
+      setDoctorFeedbackText('');
+      setDoctorFeedbackSubmitted(false);
+      setDoctorFeedbackDismissed(false);
+      setDoctorFeedbackError(null);
     }
   }, [recordId, historyText]);
+
+  useEffect(() => {
+    setDoctorFeedbackScore(null);
+    setDoctorFeedbackText('');
+    setDoctorFeedbackSubmitted(false);
+    setDoctorFeedbackDismissed(false);
+    setDoctorFeedbackError(null);
+  }, [feedbackAnchorId]);
 
   useEffect(() => {
     if (!originalHistoryRef.current && (originalContent || historyText)) {
@@ -494,15 +521,35 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     }
   };
 
-  const handleDoctorScore = async (score: number) => {
-    await saveDoctorSatisfactionEvent({
-      score,
-      record_id: recordId,
-      context: {
-        quality_score: metadata?.qualityScore || null,
-        uncertainty_flags: metadata?.uncertaintyFlags?.length || 0
-      }
-    });
+  const handleDoctorFeedbackSubmit = async () => {
+    if (!doctorFeedbackScore || doctorFeedbackSubmitting) return;
+    setDoctorFeedbackSubmitting(true);
+    setDoctorFeedbackError(null);
+    try {
+      await saveDoctorSatisfactionEvent({
+        score: doctorFeedbackScore,
+        record_id: recordId,
+        audit_id: metadata?.auditId,
+        session_id: sessionId,
+        specialty,
+        artifact_type: 'medical_history',
+        feedback_stage: 'generated',
+        feedback_text: doctorFeedbackText.trim() || undefined,
+        context: {
+          quality_score: metadata?.qualityScore || null,
+          uncertainty_flags: metadata?.uncertaintyFlags?.length || 0,
+          result_status: metadata?.resultStatus || null,
+          logical_calls_used: metadata?.logicalCallsUsed || null,
+          physical_calls_used: metadata?.physicalCallsUsed || null,
+          fallback_hops: metadata?.fallbackHops || 0
+        }
+      });
+      setDoctorFeedbackSubmitted(true);
+    } catch (error) {
+      setDoctorFeedbackError((error as Error)?.message || 'No se pudo guardar la valoración');
+    } finally {
+      setDoctorFeedbackSubmitting(false);
+    }
   };
 
   const handleEditClick = () => {
@@ -1043,10 +1090,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         className={`action-button primary ${hasFinalized ? 'success' : ''}`}
                         onClick={() => {
                           setHasFinalized(true);
-                          if (doctorScoreEnabled && metadata?.qualityScore) {
-                            const score10 = Math.max(1, Math.min(10, Math.round(metadata.qualityScore / 10)));
-                            void handleDoctorScore(score10);
-                          }
                         }}
                         title="Finalizar historia"
                         id="finalize-btn"
@@ -1269,6 +1312,74 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 </ReactMarkdown>
               )}
             </div>
+
+            {showDoctorFeedbackWidget && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="doctor-feedback-card"
+              >
+                <div className="feedback-header">
+                  <div className="brain-icon-wrapper">
+                    <Brain size={18} />
+                  </div>
+                  <div className="feedback-title">
+                    <h4>Valora esta historia</h4>
+                    <p>Tu feedback se guarda como señal interna para {specialty === 'psicologia' ? 'Psicología' : 'Otorrino'}.</p>
+                  </div>
+                </div>
+                <div className="feedback-content">
+                  <div className="improvement-preview">
+                    <Wand2 size={18} className="improvement-icon" />
+                    <span>Puntúa el borrador del 1 al 10 y añade un comentario solo si aporta contexto clínico o de redacción.</span>
+                  </div>
+                  <div className="feedback-score-row">
+                    {Array.from({ length: 10 }, (_, index) => index + 1).map((score) => (
+                      <button
+                        key={score}
+                        type="button"
+                        className={`feedback-score-chip ${doctorFeedbackScore === score ? 'active' : ''}`}
+                        onClick={() => setDoctorFeedbackScore(score)}
+                      >
+                        {score}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    className="doctor-feedback-textarea"
+                    placeholder="Feedback opcional: omisiones, terminología, tono, errores clínicos, etc."
+                    value={doctorFeedbackText}
+                    onChange={(event) => setDoctorFeedbackText(event.target.value)}
+                  />
+                  {doctorFeedbackError && (
+                    <div className="doctor-feedback-error">{doctorFeedbackError}</div>
+                  )}
+                </div>
+                <div className="feedback-actions">
+                  <button
+                    type="button"
+                    className="action-button secondary"
+                    onClick={() => setDoctorFeedbackDismissed(true)}
+                  >
+                    Omitir
+                  </button>
+                  <button
+                    type="button"
+                    className={`action-button primary ${doctorFeedbackSubmitted ? 'success' : ''}`}
+                    onClick={() => void handleDoctorFeedbackSubmit()}
+                    disabled={!doctorFeedbackScore || doctorFeedbackSubmitting}
+                  >
+                    {doctorFeedbackSubmitting ? 'Enviando...' : 'Enviar valoración'}
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+            {doctorFeedbackSubmitted && (
+              <div className="doctor-feedback-toast">
+                Valoración guardada. Gracias, esto solo se utilizará para aprendizaje interno.
+              </div>
+            )}
 
             {/* Remaining Errors Warning */}
             {metadata?.remainingErrors && metadata.remainingErrors.length > 0 && (
@@ -2411,6 +2522,123 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         .command-chip:hover {
           transform: translateY(-1px);
           box-shadow: 0 3px 8px rgba(15, 118, 110, 0.2);
+        }
+
+        .ai-feedback-widget {
+          display: none;
+        }
+
+        .doctor-feedback-card {
+          margin-top: 1rem;
+          padding: 1rem 1.1rem;
+          border-radius: 16px;
+          border: 1px solid #bfdbfe;
+          background: linear-gradient(135deg, #f8fbff 0%, #f0fdfa 100%);
+          box-shadow: 0 14px 32px rgba(15, 118, 110, 0.08);
+        }
+
+        .feedback-header {
+          display: flex;
+          align-items: flex-start;
+          gap: 0.85rem;
+        }
+
+        .brain-icon-wrapper {
+          width: 2.5rem;
+          height: 2.5rem;
+          border-radius: 14px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(14, 165, 164, 0.12);
+          color: #0f766e;
+          flex-shrink: 0;
+        }
+
+        .feedback-title h4 {
+          margin: 0;
+          font-size: 1rem;
+          color: #0f172a;
+        }
+
+        .feedback-title p {
+          margin: 0.25rem 0 0;
+          color: #475569;
+          font-size: 0.9rem;
+          line-height: 1.5;
+        }
+
+        .feedback-content {
+          margin-top: 0.9rem;
+          display: grid;
+          gap: 0.85rem;
+        }
+
+        .improvement-preview {
+          display: flex;
+          gap: 0.65rem;
+          align-items: flex-start;
+          color: #334155;
+          font-size: 0.9rem;
+          line-height: 1.55;
+        }
+
+        .improvement-icon {
+          color: #0f766e;
+          flex-shrink: 0;
+          margin-top: 0.1rem;
+        }
+
+        .feedback-score-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.45rem;
+        }
+
+        .feedback-score-chip {
+          min-width: 2.2rem;
+          height: 2.2rem;
+          border-radius: 999px;
+          border: 1px solid #cbd5e1;
+          background: #fff;
+          color: #0f172a;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .feedback-score-chip.active {
+          background: #0f766e;
+          border-color: #0f766e;
+          color: #fff;
+          box-shadow: 0 6px 18px rgba(15, 118, 110, 0.22);
+        }
+
+        .doctor-feedback-textarea {
+          width: 100%;
+          min-height: 96px;
+          border-radius: 14px;
+          border: 1px solid #cbd5e1;
+          padding: 0.85rem 1rem;
+          font: inherit;
+          resize: vertical;
+          background: rgba(255, 255, 255, 0.88);
+        }
+
+        .doctor-feedback-error {
+          color: #b91c1c;
+          font-size: 0.85rem;
+        }
+
+        .doctor-feedback-toast {
+          margin-top: 0.9rem;
+          padding: 0.75rem 0.95rem;
+          border-radius: 12px;
+          border: 1px solid #86efac;
+          background: #f0fdf4;
+          color: #166534;
+          font-size: 0.9rem;
+          font-weight: 600;
         }
 
         .workflow-bar {

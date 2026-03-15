@@ -4,6 +4,8 @@ import type { ClinicalSpecialtyId } from '../../clinical/specialties';
 
 type SimulationStepId =
     | 'intro'
+    | 'move_to_input'
+    | 'move_to_record'
     | 'processing_1'
     | 'processing_2'
     | 'wait_for_highlight'
@@ -145,20 +147,32 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     // Phase 0 — Welcome
     {
         id: 'intro',
-        duration: 5000,
+        duration: 3000,
         caption: "Bienvenida, Jone. Vamos a recorrer juntas una sesión completa de Psicología con Maria Notes."
+    },
+    {
+        id: 'move_to_input',
+        targetId: 'patient-name-input',
+        duration: 2500,
+        caption: "Primero, identificamos al paciente que ha venido a terapia."
+    },
+    {
+        id: 'move_to_record',
+        targetId: 'main-record-btn',
+        duration: 2500,
+        caption: "Pulsamos en Iniciar Consulta y Maria Notes empezará a escuchar discretamente."
     },
 
     // Phase 1 — Recording & Transcription
     {
         id: 'processing_1',
         duration: 6000,
-        caption: "📍 Fase 1 · Grabación: Pulsas «Grabar» y hablas con tu paciente con normalidad. El audio se procesa en bloques, sin interrumpir la sesión."
+        caption: "📍 Fase 1 · Grabación: El audio se procesa en bloques mientras tú te centras 100% en el paciente."
     },
     {
         id: 'processing_2',
         duration: 6000,
-        caption: "📍 Fase 2 · Transcripción y estructura: Whisper convierte la conversación en texto. Llama-3 lo organiza en secciones clínicas de Psicología: motivo, antecedentes, observaciones, impresión y plan."
+        caption: "📍 Fase 2 · Estructura: Los motores Llama y Gemini organizan la sesión en: motivo, sintomatología, observaciones e impresión."
     },
 
     // Phase 2 — AI Validation

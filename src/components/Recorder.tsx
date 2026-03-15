@@ -246,6 +246,7 @@ export const Recorder: React.FC<RecorderProps> = ({
               <Stethoscope size={24} className="input-icon-large" />
               <input
                 ref={inputRef}
+                id="patient-name-input"
                 type="text"
                 placeholder="Nombre del paciente..."
                 value={patientName}

@@ -3,7 +3,7 @@ import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react'
 import { Layout } from './components/Layout';
 import { Recorder } from './components/Recorder';
 import { AIService } from './services/ai';
-import type { ExtractionResult, ExtractionMeta, ConsultationClassification, UncertaintyFlag, ModelInvocationEvent } from './services/groq';
+import type { ExtractionResult, ExtractionMeta, ConsultationClassification, UncertaintyFlag, ModelInvocationEvent, ModelInvocationRecord } from './services/groq';
 import { saveLabTestLog } from './services/storage';
 import {
     saveMedicalRecord,
@@ -319,27 +319,40 @@ const AppContent = () => {
         contextSpecialtyRef.current = contextSpecialty;
     }, [contextSpecialty]);
 
-    const { isPlaying, demoData, startSimulation } = useSimulation();
+    const { isPlaying, demoData, startSimulation, currentStep } = useSimulation();
 
     // Effect to handle Simulation Mode Data Injection
     useEffect(() => {
-        if (isPlaying && demoData) {
-            setCurrentView('result');
-            setHistory(demoData.history);
-            setOriginalHistory(demoData.history);
-            setCurrentPatientName(demoData.patientName);
-            setPipelineMetadata(demoData.pipelineMetadata);
-            setProcessingError(null);
-        } else if (!isPlaying && currentPatientName === "Paciente Demo (Simulación)") {
-            // Reset when stopping demo
-            setCurrentView('record');
-            setHistory('');
-            setOriginalHistory('');
-            setCurrentPatientName('');
-            setPipelineMetadata(undefined);
-            setProcessingError(null);
+        if (!isPlaying) {
+            if (currentPatientName === "Paciente Demo (Simulación)") {
+                // Reset when stopping demo
+                setCurrentView('record');
+                setHistory('');
+                setOriginalHistory('');
+                setCurrentPatientName('');
+                setPipelineMetadata(undefined);
+                setProcessingError(null);
+            }
+            return;
         }
-    }, [isPlaying, demoData, currentPatientName]);
+
+        if (!demoData) return;
+
+        // Skip view switch for prep steps
+        const prepSteps = ['intro', 'move_to_input', 'move_to_record'];
+        if (currentStep && prepSteps.includes(currentStep.id)) {
+            setCurrentView('record');
+            return;
+        }
+
+        // Apply demo data and switch to result view
+        setCurrentView('result');
+        setHistory(demoData.history);
+        setOriginalHistory(demoData.history);
+        setCurrentPatientName(demoData.patientName);
+        setPipelineMetadata(demoData.pipelineMetadata);
+        setProcessingError(null);
+    }, [isPlaying, demoData, currentStep?.id]);
 
     // DEBUG: Monitor currentView changes
     useEffect(() => {
@@ -1402,6 +1415,77 @@ const AppContent = () => {
         return saved;
     };
 
+    const enqueueHistoryAuditBundle = (params: {
+        aiService: AIService;
+        result: Awaited<ReturnType<AIService['generateMedicalHistory']>>;
+        sessionId?: string;
+        patientName: string;
+        specialty: ClinicalSpecialtyId;
+        transcription: string;
+        outputTier: 'draft' | 'final';
+        recordId?: string | null;
+    }) => {
+        const auditId = params.result.audit_id;
+        if (!auditId) {
+            params.aiService.drainModelInvocations();
+            return;
+        }
+
+        const modelInvocations = params.aiService
+            .drainModelInvocations()
+            .map((entry: ModelInvocationRecord) => ({
+                ...entry,
+                session_id: entry.session_id || params.sessionId || params.result.session_id,
+                specialty: entry.specialty || params.specialty,
+                artifact_type: entry.artifact_type || 'medical_history',
+                result_status: entry.result_status || params.result.result_status,
+                pipeline_status: entry.pipeline_status || params.result.pipeline_status
+            }));
+
+        void enqueueAuditEvent('pipeline_audit_bundle', {
+            audit_id: auditId,
+            session_id: params.sessionId || params.result.session_id || null,
+            extraction_meta: params.result.extraction_meta || [],
+            model_invocations: modelInvocations,
+            audit_data: {
+                patient_name: params.patientName,
+                specialty: params.specialty,
+                artifact_type: 'medical_history',
+                pipeline_version: 'gemini_first_observability_v1',
+                models_used: {
+                    generation: params.result.model,
+                    validation: buildValidationLabel(params.result.validations),
+                    logical_calls_used: params.result.logical_calls_used || 0,
+                    physical_calls_used: params.result.physical_calls_used || 0,
+                    gemini_calls_used: params.result.gemini_calls_used || 0,
+                    fallback_hops: params.result.fallback_hops || 0,
+                    one_call_policy_applied: Boolean(params.result.one_call_policy_applied),
+                    invocation_count: modelInvocations.length
+                },
+                extraction_data: params.result.extraction || null,
+                generation_versions: [{
+                    stage: 'final_history',
+                    model: params.result.model,
+                    output_tier: params.outputTier,
+                    result_status: params.result.result_status || null,
+                    pipeline_status: params.result.pipeline_status || null,
+                    quality_notes: params.result.quality_notes || [],
+                    thought_summary: params.result.audit_trace?.thought_summary || null,
+                    thought_signature: params.result.audit_trace?.thought_signature || null,
+                    content: params.result.data
+                }],
+                validation_logs: params.result.validations || [],
+                corrections_applied: params.result.corrections_applied || 0,
+                successful: params.result.result_status !== 'failed_final',
+                duration_ms: params.result.phase_timings_ms?.total || 0,
+                history_output: params.result.data,
+                created_at: new Date().toISOString(),
+                record_uuid: params.recordId || null,
+                transcription_length: params.transcription.length
+            }
+        });
+    };
+
     const processPartialBatch = async (
         aiService: AIService,
         blob: Blob,
@@ -1752,7 +1836,6 @@ const AppContent = () => {
             });
         }
 
-        aiService.resetInvocationCounters(sessionId || undefined);
         const sanitizedTranscription = sanitizeTranscriptForExtraction(fullTranscription);
         if (sanitizedTranscription.length < 24) {
             throw new Error('transcripcion_insuficiente_para_generacion');
@@ -1960,6 +2043,12 @@ const AppContent = () => {
                 stage: 'finalize',
                 attempt_index: batchIndex,
                 status: runStatus,
+                model_used: result.model,
+                provider_used: result.model.startsWith('gemini:') ? 'gemini' : 'groq',
+                specialty: contextSpecialtyRef.current,
+                artifact_type: 'medical_history',
+                result_status: resultStatus,
+                pipeline_status: runStatus,
                 started_at: new Date(finalizeStartedAt).toISOString(),
                 finished_at: new Date().toISOString(),
                 duration_ms: Date.now() - finalizeStartedAt,
@@ -1992,6 +2081,16 @@ const AppContent = () => {
                 outputTier,
                 sourceSessionId: sessionId || undefined,
                 criticalPathMs: Date.now() - finalizeStartedAt
+            });
+            enqueueHistoryAuditBundle({
+                aiService,
+                result,
+                sessionId,
+                patientName,
+                specialty: contextSpecialtyRef.current,
+                transcription: fullTranscription,
+                outputTier,
+                recordId: savedRecord?.record_uuid
             });
             if (QUALITY_TRIAGE_ENABLED && savedRecord?.record_uuid) {
                 void upsertConsultationQualitySummary({
@@ -2045,6 +2144,16 @@ const AppContent = () => {
                             sourceSessionId: sessionId,
                             criticalPathMs: Date.now() - finalizeStartedAt,
                             hardeningMs: Date.now() - hardeningStartedAt
+                        });
+                        enqueueHistoryAuditBundle({
+                            aiService,
+                            result: hardenedResult,
+                            sessionId,
+                            patientName,
+                            specialty: hardenedSpecialty,
+                            transcription: fullTranscription,
+                            outputTier: hardenedOutputTier,
+                            recordId: promotedRecord?.record_uuid
                         });
 
                         setHistory(hardenedResult.data);
@@ -2342,7 +2451,8 @@ const AppContent = () => {
         if (!PIPELINE_V4_ENABLED) return;
         const keys = getApiKeys(apiKey);
         if (keys.length === 0) return;
-        ensureAiService(keys);
+        const aiService = ensureAiService(keys);
+        aiService.resetInvocationCounters(sessionId);
         activeSessionIdRef.current = sessionId;
         setActiveSpecialty(specialty);
         lockContextSpecialty(specialty);
@@ -2851,6 +2961,16 @@ const AppContent = () => {
                 aiModel: result.model,
                 idempotencyKey: textSessionId
             });
+            enqueueHistoryAuditBundle({
+                aiService,
+                result,
+                sessionId: textSessionId,
+                patientName,
+                specialty,
+                transcription: text,
+                outputTier: result.output_tier || 'final',
+                recordId: savedRecord?.record_uuid
+            });
             if (QUALITY_TRIAGE_ENABLED && savedRecord?.record_uuid) {
                 void upsertConsultationQualitySummary({
                     record_id: savedRecord.record_uuid,
@@ -2880,6 +3000,12 @@ const AppContent = () => {
                 stage: 'text_pipeline',
                 attempt_index: 0,
                 status: runStatus,
+                model_used: result.model,
+                provider_used: result.model.startsWith('gemini:') ? 'gemini' : 'groq',
+                specialty,
+                artifact_type: 'medical_history',
+                result_status: resultStatus,
+                pipeline_status: runStatus,
                 started_at: new Date(startedAt).toISOString(),
                 finished_at: new Date().toISOString(),
                 duration_ms: Date.now() - startedAt,
@@ -3131,6 +3257,8 @@ const AppContent = () => {
                             setTranscription(record.transcription || '');
                             setCurrentPatientName(record.patient_name);
                             setCurrentRecordId(record.record_uuid || null);
+                            activeSessionIdRef.current = null;
+                            setPipelineMetadata(undefined);
                             lockContextSpecialty(normalizeClinicalSpecialty(record.specialty || record.consultation_type));
                             setCurrentView('result');
                         }}
@@ -3212,6 +3340,7 @@ const AppContent = () => {
                         }}
                         metadata={pipelineMetadata}
                         recordId={currentRecordId || undefined}
+                        sessionId={activeSessionIdRef.current || undefined}
                         onPersistMedicalHistory={persistMedicalHistory}
                         onRegenerateSection={SECTION_REGEN_ENABLED ? handleRegenerateSection : undefined}
                         onGenerateReport={async () => {
