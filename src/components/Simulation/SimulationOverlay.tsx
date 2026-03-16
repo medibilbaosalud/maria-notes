@@ -58,27 +58,39 @@ export const SimulationOverlay: React.FC = () => {
                 {currentStep?.caption && (
                     <motion.div
                         key={currentStep.id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -20 }}
-                        transition={{ duration: 0.3 }}
+                        initial={{ opacity: 0, y: 20, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -20, scale: 0.96 }}
+                        transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
                         style={{
                             position: 'absolute',
-                            bottom: '100px',
+                            bottom: '80px',
                             left: '50%',
                             transform: 'translateX(-50%)',
-                            background: 'rgba(15, 23, 42, 0.9)', // Dark slate
+                            background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.95) 100%)',
                             color: 'white',
-                            padding: '16px 24px',
-                            borderRadius: '16px',
-                            backdropFilter: 'blur(8px)',
-                            boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
-                            maxWidth: '400px',
+                            padding: '20px 32px',
+                            borderRadius: '20px',
+                            backdropFilter: 'blur(16px)',
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.25), 0 0 0 1px rgba(255,255,255,0.08)',
+                            maxWidth: '520px',
                             textAlign: 'center',
-                            fontSize: '1.1rem',
-                            border: '1px solid rgba(255,255,255,0.1)'
+                            fontSize: '1.15rem',
+                            lineHeight: 1.6,
+                            fontWeight: 400,
+                            letterSpacing: '-0.01em',
+                            border: '1px solid rgba(255,255,255,0.08)'
                         }}
                     >
+                        <div style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: '20%',
+                            right: '20%',
+                            height: '2px',
+                            background: 'linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.6), transparent)',
+                            borderRadius: '2px'
+                        }} />
                         {currentStep.caption}
                     </motion.div>
                 )}

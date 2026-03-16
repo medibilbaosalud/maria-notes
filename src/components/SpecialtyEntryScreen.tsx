@@ -48,8 +48,8 @@ export const SpecialtyEntryScreen: React.FC<SpecialtyEntryScreenProps> = ({
         </div>
 
         <p className="specialty-entry-copy">
-          Elige la especialidad con la que vas a trabajar en esta sesion. La estructura clinica,
-          los prompts y la documentacion se adaptaran desde el inicio.
+          Elige la especialidad con la que vas a trabajar en esta sesion. La estructura clinica
+          y la documentacion se adaptaran desde el inicio.
         </p>
 
         <div className="specialty-entry-grid" role="radiogroup" aria-label="Seleccionar especialidad">

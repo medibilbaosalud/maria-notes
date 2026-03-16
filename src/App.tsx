@@ -3443,22 +3443,16 @@ const AppContent = () => {
         );
     };
 
-    // End of demo: force a clean reload to return to the entry screen
-    useEffect(() => {
-        if (!isPlaying && hasChosenWorkspaceMode) { // hasChosenWorkspaceMode implies we started
-            // We only want to reload if we were previously playing a demo
-            // Since we don't have a reliable 'wasPlaying' without extra state,
-            // we'll check if URL has a generic param or just let `SimulationOverlay` handle it if we want.
-            // A more robust way: track the previous 'isPlaying' value.
-        }
-    }, [isPlaying, hasChosenWorkspaceMode]);
-
-    // More robust previous value tracking for isPlaying
+    // End of demo: show a friendly "todo listo" message instead of reloading
+    const [showDemoCompleteToast, setShowDemoCompleteToast] = useState(false);
     const prevIsPlaying = useRef(isPlaying);
     useEffect(() => {
         if (prevIsPlaying.current && !isPlaying) {
-            // Demo just stopped. Clean reload to reset everything.
-            window.location.reload();
+            // Demo just stopped. Show friendly toast, stay on recording screen.
+            setCurrentView('record');
+            setShowDemoCompleteToast(true);
+            const timer = setTimeout(() => setShowDemoCompleteToast(false), 6000);
+            return () => clearTimeout(timer);
         }
         prevIsPlaying.current = isPlaying;
     }, [isPlaying]);
@@ -3466,6 +3460,37 @@ const AppContent = () => {
     return (
         <div className="app-container">
             <SimulationOverlay />
+
+            <AnimatePresence>
+                {showDemoCompleteToast && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -30, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -20, scale: 0.95 }}
+                        transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+                        style={{
+                            position: 'fixed',
+                            top: '32px',
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            zIndex: 10000,
+                            background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 100%)',
+                            color: 'white',
+                            padding: '16px 32px',
+                            borderRadius: '16px',
+                            boxShadow: '0 12px 32px rgba(13, 148, 136, 0.3)',
+                            textAlign: 'center',
+                            maxWidth: '440px',
+                            fontSize: '1.05rem',
+                            fontWeight: 500,
+                            lineHeight: 1.5
+                        }}
+                    >
+                        <span style={{ fontSize: '1.3rem', marginRight: '8px' }}>✨</span>
+                        ¡Todo listo! Ya puedes empezar a grabar tu primera consulta real.
+                    </motion.div>
+                )}
+            </AnimatePresence>
             {!hasChosenWorkspaceMode ? (
                 <SpecialtyEntryScreen
                     selectedSpecialty={activeSpecialty}

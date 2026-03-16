@@ -74,8 +74,13 @@ const OTORRINO_SCRIPT: SimulationStep[] = [
             if (el) {
                 const name = "Paciente Demo (Simulación)";
                 let i = 0;
+                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
                 const interval = setInterval(() => {
-                    el.value = name.slice(0, i + 1);
+                    if (nativeSetter) {
+                        nativeSetter.call(el, name.slice(0, i + 1));
+                    } else {
+                        el.value = name.slice(0, i + 1);
+                    }
                     el.dispatchEvent(new Event('input', { bubbles: true }));
                     i++;
                     if (i >= name.length) clearInterval(interval);
@@ -221,8 +226,13 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
             if (el) {
                 const name = "Paciente Demo Psicología (Simulación)";
                 let i = 0;
+                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
                 const interval = setInterval(() => {
-                    el.value = name.slice(0, i + 1);
+                    if (nativeSetter) {
+                        nativeSetter.call(el, name.slice(0, i + 1));
+                    } else {
+                        el.value = name.slice(0, i + 1);
+                    }
                     el.dispatchEvent(new Event('input', { bubbles: true }));
                     i++;
                     if (i >= name.length) clearInterval(interval);
