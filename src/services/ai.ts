@@ -15,6 +15,7 @@ import { upload as uploadToBlob } from '@vercel/blob/client';
 export interface AIResult<T> {
     data: T;
     model: string;
+    debug_trace?: TranscriptionDebugTrace;
 }
 
 export interface AIResultWithMetadata extends AIResult<string> {
@@ -109,6 +110,25 @@ type TranscriptionOptions = {
     clinicianName?: string;
 };
 
+type TranscriptionDebugStep = {
+    name: string;
+    started_at: string;
+    ended_at?: string;
+    duration_ms?: number;
+    status: 'started' | 'passed' | 'failed';
+    detail?: string;
+};
+
+export type TranscriptionDebugTrace = {
+    trace_id: string;
+    transport: 'blob' | 'inline';
+    started_at: string;
+    completed_at?: string;
+    total_duration_ms?: number;
+    upload_url?: string;
+    steps: TranscriptionDebugStep[];
+};
+
 type InvocationCounters = {
     total_invocations: number;
     fallback_hops: number;
@@ -118,6 +138,67 @@ type InvocationCounters = {
 const SERVER_TEXT_MODEL = 'gemini:gemini-3-flash-preview';
 const SERVER_TRANSCRIPTION_MODEL = 'groq:whisper-large-v3-turbo';
 const AUDIO_BLOB_UPLOAD_ENABLED = String(import.meta.env.VITE_AUDIO_BLOB_UPLOAD_ENABLED || 'true').toLowerCase() === 'true';
+const BLOB_UPLOAD_TIMEOUT_MS = 45_000;
+const TRANSCRIBE_REQUEST_TIMEOUT_MS = 120_000;
+
+const buildTraceId = () => {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+    return `trace_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+};
+
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, errorFactory: () => Error): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<T>((_, reject) => {
+                timer = setTimeout(() => reject(errorFactory()), timeoutMs);
+            })
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+};
+
+const recordTraceStart = (trace: TranscriptionDebugTrace, name: string, detail?: string): number => {
+    const index = trace.steps.push({
+        name,
+        started_at: new Date().toISOString(),
+        status: 'started',
+        detail
+    }) - 1;
+    return index;
+};
+
+const recordTraceEnd = (
+    trace: TranscriptionDebugTrace,
+    index: number,
+    status: 'passed' | 'failed',
+    detail?: string
+) => {
+    const step = trace.steps[index];
+    if (!step) return;
+    const endedAt = new Date();
+    step.ended_at = endedAt.toISOString();
+    step.duration_ms = Math.max(0, endedAt.getTime() - new Date(step.started_at).getTime());
+    step.status = status;
+    if (detail) step.detail = detail;
+};
+
+const finalizeTrace = (trace: TranscriptionDebugTrace) => {
+    const endedAt = new Date();
+    trace.completed_at = endedAt.toISOString();
+    trace.total_duration_ms = Math.max(0, endedAt.getTime() - new Date(trace.started_at).getTime());
+};
+
+const persistClientTrace = (trace: TranscriptionDebugTrace) => {
+    try {
+        sessionStorage.setItem('maria_notes_last_transcription_trace', JSON.stringify(trace));
+    } catch {
+        // Ignore quota/privacy errors; console output remains available.
+    }
+    console.info('[AIService] transcription trace', trace);
+};
 
 const getAudioExtensionFromMimeType = (mimeType: string): string => {
     const normalized = String(mimeType || '').toLowerCase();
@@ -142,23 +223,37 @@ const buildAudioBlobPathname = (mimeType: string): string => {
 
 const maybeUploadAudioToBlob = async (
     blob: Blob,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    trace?: TranscriptionDebugTrace
 ): Promise<{ audioUrl: string; mimeType: string } | null> => {
     if (!AUDIO_BLOB_UPLOAD_ENABLED || blob.size <= 0) return null;
     const resolvedMimeType = blob.type || 'audio/wav';
+    const stepIndex = trace ? recordTraceStart(trace, 'blob_upload', `bytes=${blob.size}`) : -1;
     try {
-        const uploaded = await uploadToBlob(buildAudioBlobPathname(resolvedMimeType), blob, {
-            access: 'private',
-            contentType: resolvedMimeType,
-            handleUploadUrl: '/api/blob/upload',
-            multipart: blob.size >= 5 * 1024 * 1024,
-            abortSignal: signal
-        });
+        const uploaded = await withTimeout(
+            uploadToBlob(buildAudioBlobPathname(resolvedMimeType), blob, {
+                access: 'private',
+                contentType: resolvedMimeType,
+                handleUploadUrl: '/api/blob/upload',
+                multipart: blob.size >= 5 * 1024 * 1024,
+                abortSignal: signal
+            }),
+            BLOB_UPLOAD_TIMEOUT_MS,
+            () => new Error(`blob_upload_timeout:${BLOB_UPLOAD_TIMEOUT_MS}`)
+        );
+        if (trace) {
+            trace.transport = 'blob';
+            trace.upload_url = uploaded.url;
+            recordTraceEnd(trace, stepIndex, 'passed');
+        }
         return {
             audioUrl: uploaded.url,
             mimeType: resolvedMimeType
         };
     } catch (error) {
+        if (trace) {
+            recordTraceEnd(trace, stepIndex, 'failed', error instanceof Error ? error.message : 'blob_upload_failed');
+        }
         console.warn('[AIService] Blob audio upload failed, falling back to inline payload:', error);
         return null;
     }
@@ -346,18 +441,39 @@ export class AIService {
         const blob = audioInput instanceof Blob
             ? audioInput
             : (legacyAudioBlob || new Blob([Uint8Array.from(atob(audioInput), (char) => char.charCodeAt(0))], { type: mimeType || 'audio/wav' }));
+        const debugTrace: TranscriptionDebugTrace = {
+            trace_id: buildTraceId(),
+            transport: 'inline',
+            started_at: new Date().toISOString(),
+            steps: []
+        };
 
         this.emitInvocation('transcription', 'transcription', 'start', SERVER_TRANSCRIPTION_MODEL);
         try {
-            const uploadedAudio = await maybeUploadAudioToBlob(blob, options?.signal);
-            const result = await postJson<{ text: string; model: string }>('/api/ai/transcribe', {
-                audioBase64: uploadedAudio ? undefined : await blobToBase64(blob),
-                audioUrl: uploadedAudio?.audioUrl,
-                mimeType: uploadedAudio?.mimeType || blob.type || mimeType || 'audio/wav',
-                whisperStrict: Boolean(options?.whisperStrict),
-                consultationType: options?.specialty,
-                clinicianName: options?.clinicianName
-            }, options?.signal);
+            const uploadedAudio = await maybeUploadAudioToBlob(blob, options?.signal, debugTrace);
+            const encodeStepIndex = !uploadedAudio ? recordTraceStart(debugTrace, 'inline_encode', `bytes=${blob.size}`) : -1;
+            const encodedAudio = uploadedAudio ? undefined : await blobToBase64(blob);
+            if (!uploadedAudio) {
+                recordTraceEnd(debugTrace, encodeStepIndex, 'passed');
+            }
+
+            const requestStepIndex = recordTraceStart(debugTrace, 'transcribe_request', uploadedAudio ? 'mode=blob' : 'mode=inline');
+            const result = await withTimeout(
+                postJson<{ text: string; model: string; debug_trace?: TranscriptionDebugTrace }>('/api/ai/transcribe', {
+                    audioBase64: encodedAudio,
+                    audioUrl: uploadedAudio?.audioUrl,
+                    mimeType: uploadedAudio?.mimeType || blob.type || mimeType || 'audio/wav',
+                    whisperStrict: Boolean(options?.whisperStrict),
+                    consultationType: options?.specialty,
+                    clinicianName: options?.clinicianName,
+                    clientTrace: debugTrace
+                }, options?.signal),
+                TRANSCRIBE_REQUEST_TIMEOUT_MS,
+                () => new Error(`transcribe_request_timeout:${TRANSCRIBE_REQUEST_TIMEOUT_MS}`)
+            );
+            recordTraceEnd(debugTrace, requestStepIndex, 'passed', result.model);
+            finalizeTrace(debugTrace);
+            persistClientTrace(result.debug_trace || debugTrace);
             this.emitInvocation('transcription', 'transcription', 'success', result.model, undefined, {
                 artifact_type: 'transcription',
                 response_preview: result.text.slice(0, 240),
@@ -365,9 +481,15 @@ export class AIService {
             });
             return {
                 data: result.text,
-                model: result.model
+                model: result.model,
+                debug_trace: result.debug_trace || debugTrace
             };
         } catch (error) {
+            if (error && typeof error === 'object') {
+                (error as Error & { debug_trace?: TranscriptionDebugTrace }).debug_trace = debugTrace;
+            }
+            finalizeTrace(debugTrace);
+            persistClientTrace(debugTrace);
             this.emitInvocation('transcription', 'transcription', 'error', SERVER_TRANSCRIPTION_MODEL, error);
             throw error;
         }

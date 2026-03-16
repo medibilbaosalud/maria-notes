@@ -1151,6 +1151,18 @@ const AppContent = () => {
                     });
                     const latencyMs = Date.now() - chunkStartedAt;
                     recordSttLatency(latencyMs);
+                    if (runId && transcriptResult.debug_trace?.steps?.length) {
+                        transcriptResult.debug_trace.steps.forEach((step, stepIdx) => {
+                            if (typeof step.duration_ms !== 'number') return;
+                            recordDiagnosticEvent(runId, {
+                                type: 'stage_end',
+                                stage: `${stage}:chunk_${partBatchIndex}:${stepIdx}:${step.name}`,
+                                status: step.status === 'failed' ? 'failed' : 'passed',
+                                duration_ms: step.duration_ms,
+                                error_message: step.status === 'failed' ? step.detail : undefined
+                            });
+                        });
+                    }
                     outputs.push({
                         partBatchIndex,
                         text: transcriptResult.data,
@@ -1191,6 +1203,28 @@ const AppContent = () => {
                 } catch (error) {
                     const latencyMs = Date.now() - chunkStartedAt;
                     adjustSttConcurrencyFromError((error as Error)?.message || '');
+                    const debugTrace = (error as Error & {
+                        debug_trace?: {
+                            steps?: Array<{
+                                name: string;
+                                duration_ms?: number;
+                                status?: 'started' | 'passed' | 'failed';
+                                detail?: string;
+                            }>;
+                        };
+                    })?.debug_trace;
+                    if (runId && debugTrace?.steps?.length) {
+                        debugTrace.steps.forEach((step, stepIdx) => {
+                            if (typeof step.duration_ms !== 'number') return;
+                            recordDiagnosticEvent(runId, {
+                                type: 'stage_end',
+                                stage: `${stage}:chunk_${partBatchIndex}:${stepIdx}:${step.name}`,
+                                status: step.status === 'failed' ? 'failed' : 'passed',
+                                duration_ms: step.duration_ms,
+                                error_message: step.status === 'failed' ? step.detail : undefined
+                            });
+                        });
+                    }
                     const errorDetail = buildDiagnosticErrorDetail(error, {
                         stage,
                         batchIndex: partBatchIndex,

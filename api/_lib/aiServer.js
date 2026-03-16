@@ -423,6 +423,43 @@ const writeJson = (res, statusCode, payload) => {
     res.send(JSON.stringify(payload));
 };
 
+const startDebugStep = (trace, name, detail) => {
+    if (!trace) return -1;
+    const index = trace.steps.push({
+        name,
+        started_at: new Date().toISOString(),
+        status: 'started',
+        detail
+    }) - 1;
+    return index;
+};
+
+const endDebugStep = (trace, index, status, detail) => {
+    if (!trace || index < 0 || !trace.steps[index]) return;
+    const step = trace.steps[index];
+    const endedAt = new Date();
+    step.ended_at = endedAt.toISOString();
+    step.duration_ms = Math.max(0, endedAt.getTime() - new Date(step.started_at).getTime());
+    step.status = status;
+    if (detail) step.detail = detail;
+};
+
+const createServerDebugTrace = (clientTrace) => ({
+    trace_id: String(clientTrace?.trace_id || randomUUID()),
+    transport: clientTrace?.transport || 'inline',
+    started_at: new Date().toISOString(),
+    client_trace: clientTrace || null,
+    steps: []
+});
+
+const finalizeServerDebugTrace = (trace) => {
+    if (!trace) return trace;
+    const endedAt = new Date();
+    trace.completed_at = endedAt.toISOString();
+    trace.total_duration_ms = Math.max(0, endedAt.getTime() - new Date(trace.started_at).getTime());
+    return trace;
+};
+
 const parseModelText = async (response) => {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -574,22 +611,25 @@ const callPreferredTextModel = async (options) => {
     };
 };
 
-const getAudioBytesFromBlobUrl = async (audioUrl) => {
+const getAudioBytesFromBlobUrl = async (audioUrl, debugTrace) => {
+    const stepIndex = startDebugStep(debugTrace, 'blob_fetch', String(audioUrl || ''));
     const result = await get(String(audioUrl || ''), { access: 'private' });
     if (!result || result.statusCode !== 200 || !result.stream) {
+        endDebugStep(debugTrace, stepIndex, 'failed', 'blob_audio_not_found');
         throw new Error('blob_audio_not_found');
     }
 
     const arrayBuffer = await new Response(result.stream).arrayBuffer();
+    endDebugStep(debugTrace, stepIndex, 'passed', result.blob?.contentType || 'audio/wav');
     return {
         bytes: Buffer.from(arrayBuffer),
         mimeType: result.blob.contentType || 'audio/wav'
     };
 };
 
-const resolveTranscriptionInput = async ({ audioBase64, audioUrl, mimeType }) => {
+const resolveTranscriptionInput = async ({ audioBase64, audioUrl, mimeType }, debugTrace) => {
     if (audioUrl) {
-        return getAudioBytesFromBlobUrl(audioUrl);
+        return getAudioBytesFromBlobUrl(audioUrl, debugTrace);
     }
 
     return {
@@ -598,7 +638,8 @@ const resolveTranscriptionInput = async ({ audioBase64, audioUrl, mimeType }) =>
     };
 };
 
-const callGroqTranscriptionModel = async ({ bytes, mimeType, model, prompt }) => {
+const callGroqTranscriptionModel = async ({ bytes, mimeType, model, prompt, debugTrace }) => {
+    const stepIndex = startDebugStep(debugTrace, `groq_transcribe:${model}`, mimeType);
     const file = new Blob([bytes], { type: mimeType });
     const formData = new FormData();
     formData.append('file', file, buildAudioUploadFileName(file));
@@ -618,8 +659,10 @@ const callGroqTranscriptionModel = async ({ bytes, mimeType, model, prompt }) =>
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
         const message = body?.error?.message || body?.message || `transcription_failed_${response.status}`;
+        endDebugStep(debugTrace, stepIndex, 'failed', message);
         throw new Error(message);
     }
+    endDebugStep(debugTrace, stepIndex, 'passed', String(body?.model || model));
     return {
         text: String(body?.text || ''),
         model: `groq:${body?.model || model}`,
@@ -627,9 +670,9 @@ const callGroqTranscriptionModel = async ({ bytes, mimeType, model, prompt }) =>
     };
 };
 
-const callPreferredTranscriptionModel = async ({ audioBase64, audioUrl, mimeType, consultationType, clinicianName }) => {
+const callPreferredTranscriptionModel = async ({ audioBase64, audioUrl, mimeType, consultationType, clinicianName, debugTrace }) => {
     const transcriptionPrompt = buildTranscriptionPrompt(consultationType, clinicianName);
-    const { bytes, mimeType: resolvedMimeType } = await resolveTranscriptionInput({ audioBase64, audioUrl, mimeType });
+    const { bytes, mimeType: resolvedMimeType } = await resolveTranscriptionInput({ audioBase64, audioUrl, mimeType }, debugTrace);
     let whisperTurboError;
     let whisperV3Error;
 
@@ -638,7 +681,8 @@ const callPreferredTranscriptionModel = async ({ audioBase64, audioUrl, mimeType
             bytes,
             mimeType: resolvedMimeType,
             model: GROQ_TRANSCRIBE_MODEL,
-            prompt: transcriptionPrompt
+            prompt: transcriptionPrompt,
+            debugTrace
         });
         return {
             ...turboResult,
@@ -655,7 +699,8 @@ const callPreferredTranscriptionModel = async ({ audioBase64, audioUrl, mimeType
             bytes,
             mimeType: resolvedMimeType,
             model: GROQ_TRANSCRIBE_FALLBACK_MODEL,
-            prompt: transcriptionPrompt
+            prompt: transcriptionPrompt,
+            debugTrace
         });
         return {
             ...whisperV3Result,
@@ -668,6 +713,7 @@ const callPreferredTranscriptionModel = async ({ audioBase64, audioUrl, mimeType
         whisperV3Error = error;
     }
 
+    const geminiStepIndex = startDebugStep(debugTrace, `gemini_transcribe:${GEMINI_TRANSCRIBE_MODEL}`, resolvedMimeType);
     try {
         const result = await callGeminiText({
             prompt: '',
@@ -687,6 +733,7 @@ const callPreferredTranscriptionModel = async ({ audioBase64, audioUrl, mimeType
                 }
             ]
         });
+        endDebugStep(debugTrace, geminiStepIndex, 'passed', result.model);
         return {
             text: result.text.trim(),
             model: result.model,
@@ -699,6 +746,8 @@ const callPreferredTranscriptionModel = async ({ audioBase64, audioUrl, mimeType
                 : (whisperTurboError instanceof Error ? whisperTurboError.message : 'whisper_failed')
         };
     } catch (geminiError) {
+        const geminiMessage = geminiError instanceof Error ? geminiError.message : 'unknown';
+        endDebugStep(debugTrace, geminiStepIndex, 'failed', geminiMessage);
         const baseReason = whisperV3Error instanceof Error
             ? whisperV3Error.message
             : (whisperTurboError instanceof Error ? whisperTurboError.message : 'whisper_failed');
@@ -1265,20 +1314,46 @@ export const regenerateHistorySectionPayload = async (params) => {
     };
 };
 
-export const transcribeAudioPayload = async ({ audioBase64, audioUrl, mimeType, consultationType, clinicianName }) => {
+export const transcribeAudioPayload = async ({ audioBase64, audioUrl, mimeType, consultationType, clinicianName, clientTrace }) => {
+    const debugTrace = createServerDebugTrace(clientTrace);
     try {
+        console.info('[aiServer] transcribeAudioPayload:start', {
+            trace_id: debugTrace.trace_id,
+            mode: audioUrl ? 'blob' : 'inline',
+            mimeType: mimeType || null,
+            consultationType: consultationType || null,
+            clinicianName: clinicianName || null
+        });
         const response = await callPreferredTranscriptionModel({
             audioBase64,
             audioUrl,
             mimeType,
             consultationType,
-            clinicianName
+            clinicianName,
+            debugTrace
+        });
+        finalizeServerDebugTrace(debugTrace);
+        console.info('[aiServer] transcribeAudioPayload:success', {
+            trace_id: debugTrace.trace_id,
+            model: response.model,
+            duration_ms: debugTrace.total_duration_ms,
+            steps: debugTrace.steps
         });
         return {
             text: response.text,
             model: response.model,
-            segments: response.segments
+            segments: response.segments,
+            debug_trace: debugTrace
         };
+    } catch (error) {
+        finalizeServerDebugTrace(debugTrace);
+        console.error('[aiServer] transcribeAudioPayload:failed', {
+            trace_id: debugTrace.trace_id,
+            error: error instanceof Error ? error.message : 'transcribe_failed',
+            duration_ms: debugTrace.total_duration_ms,
+            steps: debugTrace.steps
+        });
+        throw error;
     } finally {
         await safeDeleteBlob(audioUrl);
     }
