@@ -8,14 +8,13 @@
  * - Interactive demo/simulation controls
  */
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Save, Download, Upload, Check, AlertCircle, Cloud, CloudOff, Play, Mail, LogOut, Key } from 'lucide-react';
+import { X, Save, Download, Upload, Check, AlertCircle, Cloud, CloudOff, Play, ShieldCheck, Key } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { downloadBackup, importRecords } from '../services/backup';
 import { useCloudSync } from '../hooks/useCloudSync';
 import { syncFromCloud } from '../services/storage';
 import { useSimulation } from './Simulation/SimulationContext';
 import { motionTransitions } from '../features/ui/motion-tokens';
-import { signInWithMagicLink, signOutSupabase } from '../services/supabase';
 
 interface SettingsProps {
   apiKey: string;
@@ -31,9 +30,6 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
   const { isCloudEnabled, isCloudAuthenticated, cloudUserEmail } = useCloudSync();
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [cloudSyncMessage, setCloudSyncMessage] = useState('');
-  const [authEmail, setAuthEmail] = useState('');
-  const [authStatus, setAuthStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
-  const [authMessage, setAuthMessage] = useState('');
   const { startSimulation } = useSimulation();
 
   useEffect(() => {
@@ -44,32 +40,6 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
     e.preventDefault();
     onSave(key);
     onClose();
-  };
-
-  const handleSendMagicLink = async () => {
-    setAuthStatus('sending');
-    setAuthMessage('Enviando enlace de acceso...');
-    try {
-      await signInWithMagicLink(authEmail);
-      setAuthStatus('success');
-      setAuthMessage('Revisa tu email para completar el acceso.');
-    } catch (error) {
-      setAuthStatus('error');
-      setAuthMessage(error instanceof Error ? error.message : 'No se pudo enviar el magic link');
-    }
-  };
-
-  const handleSignOut = async () => {
-    setAuthStatus('sending');
-    setAuthMessage('Cerrando sesion...');
-    try {
-      await signOutSupabase();
-      setAuthStatus('success');
-      setAuthMessage('Sesion cerrada. La app sigue en modo local.');
-    } catch (error) {
-      setAuthStatus('error');
-      setAuthMessage(error instanceof Error ? error.message : 'No se pudo cerrar sesion');
-    }
   };
 
   const handleExport = async () => {
@@ -245,14 +215,14 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
                   <div className="settings-cloud-text">
                     <span className="settings-cloud-status" data-ui-state={isCloudEnabled && isCloudAuthenticated ? 'success' : 'warning'}>
                       {isCloudEnabled
-                        ? (isCloudAuthenticated ? 'Configurado y autenticado' : 'Configurado, pendiente de login')
+                        ? (isCloudAuthenticated ? 'Configurado y autenticado' : 'Configurado')
                         : 'No configurado'}
                     </span>
                     <span className="settings-cloud-desc">
                       {isCloudEnabled
                         ? (isCloudAuthenticated
                           ? `Los datos se guardan localmente y en Supabase como ${cloudUserEmail || 'usuario autenticado'}`
-                          : 'Sin sesion activa: la app funciona en modo local hasta iniciar sesion')
+                          : 'La app esta protegida por contrasena de acceso. Si no hay sesion cloud, el modo autenticado de Supabase no esta activo.')
                         : 'Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY para activar sync'}
                     </span>
                   </div>
@@ -276,43 +246,13 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
               {isCloudEnabled && (
                 <div className="settings-auth-card">
                   <div className="settings-auth-header">
-                    <Mail size={18} />
-                    <span>{isCloudAuthenticated ? 'Sesion cloud activa' : 'Acceso cloud por magic link'}</span>
+                    <ShieldCheck size={18} />
+                    <span>Acceso a la app protegido por contrasena</span>
                   </div>
-                  {!isCloudAuthenticated && (
-                    <>
-                      <input
-                        type="email"
-                        value={authEmail}
-                        onChange={(e) => setAuthEmail(e.target.value)}
-                        placeholder="tu@email.com"
-                        className="settings-text-input"
-                      />
-                      <button
-                        type="button"
-                        className="settings-btn-backup settings-btn-full"
-                        onClick={() => void handleSendMagicLink()}
-                        disabled={authStatus === 'sending' || !authEmail.trim()}
-                      >
-                        <Mail size={16} />
-                        Enviar Magic Link
-                      </button>
-                    </>
-                  )}
-                  {isCloudAuthenticated && (
-                    <button
-                      type="button"
-                      className="settings-btn-backup settings-btn-full"
-                      onClick={() => void handleSignOut()}
-                      disabled={authStatus === 'sending'}
-                    >
-                      <LogOut size={16} />
-                      Cerrar Sesion Cloud
-                    </button>
-                  )}
-                  {authStatus !== 'idle' && (
-                    <p className="settings-help-text settings-help-tight">{authMessage}</p>
-                  )}
+                  <p className="settings-help-text settings-help-tight">
+                    La puerta principal de la aplicacion ya se valida con la contrasena definida en Vercel.
+                    La autenticacion propia de Supabase sigue siendo un mecanismo aparte.
+                  </p>
                 </div>
               )}
             </div>
