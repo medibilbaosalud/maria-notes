@@ -44,6 +44,14 @@ export const Recorder: React.FC<RecorderProps> = ({
   const blurTimeoutRef = useRef<number | null>(null);
   const suggestionRequestRef = useRef(0);
   const isInputFocusedRef = useRef(false);
+  const previewStreamRef = useRef<MediaStream | null>(null);
+  const previewAudioContextRef = useRef<AudioContext | null>(null);
+  const previewAnalyserRef = useRef<AnalyserNode | null>(null);
+  const previewFrameRef = useRef<number | null>(null);
+  const previewSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const [micLevel, setMicLevel] = useState(0);
+  const [micState, setMicState] = useState<'requesting' | 'ready' | 'detecting' | 'error'>('requesting');
+  const [micErrorMessage, setMicErrorMessage] = useState('');
 
   useEffect(() => {
     patientNameRef.current = patientName;
@@ -81,6 +89,115 @@ export const Recorder: React.FC<RecorderProps> = ({
   });
 
   useEffect(() => {
+    let cancelled = false;
+
+    const stopPreview = async () => {
+      if (previewFrameRef.current !== null) {
+        window.cancelAnimationFrame(previewFrameRef.current);
+        previewFrameRef.current = null;
+      }
+      previewSourceRef.current?.disconnect();
+      previewSourceRef.current = null;
+      previewAnalyserRef.current?.disconnect();
+      previewAnalyserRef.current = null;
+      previewStreamRef.current?.getTracks().forEach((track) => track.stop());
+      previewStreamRef.current = null;
+      if (previewAudioContextRef.current) {
+        try {
+          await previewAudioContextRef.current.close();
+        } catch (error) {
+          console.warn('[RecorderUI] Failed to close microphone preview context:', error);
+        }
+        previewAudioContextRef.current = null;
+      }
+      if (!cancelled) {
+        setMicLevel(0);
+      }
+    };
+
+    const startPreview = async () => {
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+        setMicState('error');
+        setMicErrorMessage('No se puede acceder al microfono desde este navegador.');
+        return;
+      }
+
+      setMicState('requesting');
+      setMicErrorMessage('');
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1
+          }
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!AudioContextCtor) {
+          stream.getTracks().forEach((track) => track.stop());
+          setMicState('error');
+          setMicErrorMessage('No se pudo crear el monitor del microfono.');
+          return;
+        }
+
+        const context = new AudioContextCtor();
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.85;
+
+        const source = context.createMediaStreamSource(stream);
+        source.connect(analyser);
+
+        previewStreamRef.current = stream;
+        previewAudioContextRef.current = context;
+        previewAnalyserRef.current = analyser;
+        previewSourceRef.current = source;
+
+        const samples = new Uint8Array(analyser.frequencyBinCount);
+        let smoothedLevel = 0;
+        const tick = () => {
+          if (cancelled || !previewAnalyserRef.current) return;
+          previewAnalyserRef.current.getByteFrequencyData(samples);
+          const avg = samples.reduce((acc, value) => acc + value, 0) / Math.max(1, samples.length);
+          const normalized = Math.min(1, avg / 96);
+          smoothedLevel = smoothedLevel * 0.78 + normalized * 0.22;
+          setMicLevel(smoothedLevel);
+          setMicState(smoothedLevel >= 0.16 ? 'detecting' : 'ready');
+          previewFrameRef.current = window.requestAnimationFrame(tick);
+        };
+
+        if (context.state === 'suspended') {
+          await context.resume();
+        }
+        tick();
+      } catch (error) {
+        if (cancelled) return;
+        console.error('[RecorderUI] Microphone preview failed:', error);
+        setMicState('error');
+        setMicErrorMessage('No se pudo activar el microfono. Revisa el permiso del navegador.');
+      }
+    };
+
+    if (isRecording || isFinalizing) {
+      void stopPreview();
+    } else {
+      void startPreview();
+    }
+
+    return () => {
+      cancelled = true;
+      void stopPreview();
+    };
+  }, [isFinalizing, isRecording]);
+
+  useEffect(() => {
     const currentRequest = ++suggestionRequestRef.current;
     const timer = window.setTimeout(() => {
       void (async () => {
@@ -112,6 +229,8 @@ export const Recorder: React.FC<RecorderProps> = ({
     if (!canStartRecording) return;
     setIsFinalizing(false);
     setIsSuggestionsOpen(false);
+    previewStreamRef.current?.getTracks().forEach((track) => track.stop());
+    previewStreamRef.current = null;
     const sessionId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
       ? crypto.randomUUID()
       : `session_${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -150,6 +269,14 @@ export const Recorder: React.FC<RecorderProps> = ({
   const suggestionTitle = patientName.trim().length > 0
     ? 'Sugerencias de pacientes'
     : 'Pacientes recientes';
+  const micBars = Array.from({ length: 12 }, (_, index) => index);
+  const micStatusMessage = micState === 'detecting'
+    ? 'Microfono funcionando. Voz detectada correctamente.'
+    : micState === 'ready'
+      ? 'Microfono preparado. Habla para comprobar el nivel.'
+      : micState === 'error'
+        ? micErrorMessage || 'No se pudo acceder al microfono.'
+        : 'Activando comprobacion del microfono...';
 
   const selectSuggestion = (suggestion: PatientNameSuggestion) => {
     setPatientName(suggestion.name);
@@ -305,6 +432,40 @@ export const Recorder: React.FC<RecorderProps> = ({
             </div>
           </div>
         </div>
+
+        {!isRecording && (
+          <motion.div
+            className="microphone-health-card"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={motionTransitions.normal}
+            data-mic-state={micState}
+          >
+            <div className="microphone-health-header">
+              <span className="microphone-health-title">Comprobacion del microfono</span>
+              <span className={`microphone-health-badge ${micState}`}>
+                {micState === 'detecting' ? 'OK' : micState === 'ready' ? 'Listo' : micState === 'error' ? 'Revisar' : 'Activando'}
+              </span>
+            </div>
+            <div className="microphone-visualizer" aria-hidden="true">
+              {micBars.map((bar) => {
+                const threshold = (bar + 1) / micBars.length;
+                const active = micLevel >= threshold * 0.92;
+                const scaledHeight = 12 + Math.max(0, micLevel * 48 - bar * 2.4);
+                return (
+                  <span
+                    key={bar}
+                    className={`microphone-bar ${active ? 'active' : ''}`}
+                    style={{ height: `${Math.max(10, Math.min(54, scaledHeight))}px` }}
+                  />
+                );
+              })}
+            </div>
+            <p className={`microphone-health-message ${micState === 'detecting' ? 'success' : micState === 'error' ? 'error' : ''}`}>
+              {micStatusMessage}
+            </p>
+          </motion.div>
+        )}
 
         <div className="recorder-actions-area">
           <AnimatePresence mode="wait">
