@@ -97,7 +97,6 @@ export const SpecialtyEntryScreen: React.FC<SpecialtyEntryScreenProps> = ({
                     </div>
                     <div className="specialty-entry-option-body">
                       <strong>{clinicianName}</strong>
-                      <span>{clinicianName === 'Ainhoa' ? 'Psicologia estructurada' : 'Psicologia narrativa'}</span>
                     </div>
                   </button>
                 );
