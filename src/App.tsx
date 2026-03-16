@@ -3462,7 +3462,7 @@ const AppContent = () => {
                                 specialty={activeSpecialty}
                                 clinicianName={activeSpecialty === 'psicologia' ? psychologyClinicianName : undefined}
                                 onClose={handleCloseWelcomeModal}
-                                onStartDemo={() => startSimulation(activeSpecialty)}
+                                onStartDemo={() => startSimulation(activeSpecialty, activeSpecialty === 'psicologia' ? psychologyClinicianName : undefined)}
                             />
                         )}
                     </AnimatePresence>

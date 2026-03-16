@@ -34,7 +34,7 @@ type SimulationStep = {
 interface SimulationContextType {
     isPlaying: boolean;
     currentStep: SimulationStep | null;
-    startSimulation: (specialty?: ClinicalSpecialtyId) => void;
+    startSimulation: (specialty?: ClinicalSpecialtyId, clinicianName?: string) => void;
     stopSimulation: () => void;
     cursorPosition: { x: number; y: number } | null;
     demoData: typeof simulationData | null;
@@ -57,7 +57,7 @@ const OTORRINO_SCRIPT: SimulationStep[] = [
     {
         id: 'intro',
         duration: 4000,
-        caption: "Bienvenida, Dra. Gotxi. Vamos a ver una consulta completa desde cero."
+        caption: "Bienvenida, {{clinicianName}}. Vamos a ver una consulta completa desde cero."
     },
     {
         id: 'move_to_input',
@@ -102,12 +102,12 @@ const OTORRINO_SCRIPT: SimulationStep[] = [
     {
         id: 'processing_1',
         duration: 5000,
-        caption: "1. Procesando Audio: Whisper v3 transcribe... Llama-3 estructura los datos médicos...",
+        caption: "1. Procesando Audio: Nuestra IA transcribe y estructura los datos médicos al instante...",
     },
     {
         id: 'processing_2',
         duration: 5000,
-        caption: "2. Validación Clínica: Qwen-2.5-Med audita el resultado buscando alucinaciones o errores."
+        caption: "2. Validación Clínica: El sistema audita el resultado buscando alucinaciones o errores."
     },
     {
         id: 'wait_for_highlight',
@@ -204,7 +204,7 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     {
         id: 'intro',
         duration: 3000,
-        caption: "Bienvenida, Ainhoa. Vamos a recorrer juntas una sesión completa de Psicología con Maria Notes."
+        caption: "Bienvenida, {{clinicianName}}. Vamos a recorrer juntas una sesión completa de Psicología con Maria Notes."
     },
     {
         id: 'move_to_input',
@@ -256,7 +256,7 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     {
         id: 'processing_2',
         duration: 6000,
-        caption: "📍 Fase 2 · Estructura: Los motores Llama y Gemini organizan la sesión en: motivo, sintomatología, observaciones e impresión."
+        caption: "📍 Fase 2 · Estructura: Nuestros motores inteligentes organizan la sesión en: motivo, sintomatología, observaciones e impresión."
     },
 
     // Phase 2 — AI Validation
@@ -264,7 +264,7 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
         id: 'wait_for_highlight',
         targetId: 'uncertainty-highlight-0',
         duration: 6000,
-        caption: "📍 Fase 3 · Validación clínica: Qwen-Med revisa el resultado buscando errores o datos ambiguos. ¡Mira! Ha marcado en amarillo la dosis de sertralina porque no estaba claro en el audio."
+        caption: "📍 Fase 3 · Validación clínica: El sistema revisa el resultado buscando errores o datos ambiguos. ¡Mira! Ha marcado en amarillo la dosis de sertralina porque no estaba claro en el audio."
     },
     {
         id: 'click_highlight',
@@ -358,15 +358,17 @@ const getScriptForSpecialty = (specialty: ClinicalSpecialtyId): SimulationStep[]
 export const SimulationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [isPlaying, setIsPlaying] = useState(false);
     const [stepIndex, setStepIndex] = useState(-1);
+    const [activeClinicianName, setActiveClinicianName] = useState<string>('');
     const [cursorPosition, setCursorPosition] = useState<{ x: number; y: number } | null>(null);
     const activeScriptRef = useRef<SimulationStep[]>(OTORRINO_SCRIPT);
     const activeDemoDataRef = useRef(simulationData);
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-    const startSimulation = (specialty?: ClinicalSpecialtyId) => {
+    const startSimulation = (specialty?: ClinicalSpecialtyId, clinicianName?: string) => {
         const resolved = specialty || 'otorrino';
         activeScriptRef.current = getScriptForSpecialty(resolved);
         activeDemoDataRef.current = getSimulationDataForSpecialty(resolved);
+        setActiveClinicianName(clinicianName || (resolved === 'otorrino' ? 'Dra. Gotxi' : 'Ainhoa'));
         setIsPlaying(true);
         setStepIndex(0);
         setCursorPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
@@ -420,10 +422,21 @@ export const SimulationProvider: React.FC<{ children: ReactNode }> = ({ children
         };
     }, [isPlaying, stepIndex]);
 
+    const getCurrentStep = () => {
+        if (!isPlaying || stepIndex < 0 || stepIndex >= activeScriptRef.current.length) return null;
+        const step = activeScriptRef.current[stepIndex];
+        if (!step.caption) return step;
+
+        return {
+            ...step,
+            caption: step.caption.replace('{{clinicianName}}', activeClinicianName)
+        };
+    };
+
     return (
         <SimulationContext.Provider value={{
             isPlaying,
-            currentStep: isPlaying && stepIndex >= 0 ? activeScriptRef.current[stepIndex] : null,
+            currentStep: getCurrentStep(),
             startSimulation,
             stopSimulation,
             cursorPosition,
