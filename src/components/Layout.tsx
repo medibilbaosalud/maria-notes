@@ -17,6 +17,8 @@ interface LayoutProps {
   onNavigate: (view: 'record' | 'history' | 'reports' | 'test-lab' | 'result') => void;
   activeSpecialty: ClinicalSpecialtyId;
   onSpecialtyChange: (specialty: ClinicalSpecialtyId) => void;
+  psychologyClinicianName?: 'Ainhoa' | 'June';
+  onPsychologyClinicianChange?: (clinicianName: 'Ainhoa' | 'June') => void;
 }
 
 export const Layout: React.FC<LayoutProps> = ({
@@ -27,7 +29,9 @@ export const Layout: React.FC<LayoutProps> = ({
   currentView,
   onNavigate,
   activeSpecialty,
-  onSpecialtyChange
+  onSpecialtyChange,
+  psychologyClinicianName = 'Ainhoa',
+  onPsychologyClinicianChange
 }) => {
   return (
     <div className="app-layout">
@@ -48,6 +52,25 @@ export const Layout: React.FC<LayoutProps> = ({
               </div>
             </div>
           </div>
+          {activeSpecialty === 'psicologia' && onPsychologyClinicianChange && (
+            <div className="workspace-specialty-switcher" role="radiogroup" aria-label="Profesional de psicologia activo">
+              {(['Ainhoa', 'June'] as const).map((clinicianName) => {
+                const active = clinicianName === psychologyClinicianName;
+                return (
+                  <button
+                    key={clinicianName}
+                    type="button"
+                    className={`workspace-specialty-pill ${active ? 'active' : ''}`}
+                    onClick={() => onPsychologyClinicianChange(clinicianName)}
+                    aria-pressed={active}
+                    title={`Cambiar perfil a ${clinicianName}`}
+                  >
+                    {clinicianName}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <nav className="nav-menu" aria-label="Navegacion principal">
@@ -79,9 +102,9 @@ export const Layout: React.FC<LayoutProps> = ({
 
         <div className="sidebar-footer">
           {onOpenGuide && activeSpecialty === 'psicologia' && (
-            <button className="settings-btn guide-btn" onClick={onOpenGuide} aria-label="Abrir guia de Ainhoa">
+            <button className="settings-btn guide-btn" onClick={onOpenGuide} aria-label={`Abrir guia de ${psychologyClinicianName}`}>
               <BookOpen size={20} />
-              <span>Guia Ainhoa</span>
+              <span>{`Guia ${psychologyClinicianName}`}</span>
             </button>
           )}
           {onOpenLessons && (

@@ -136,6 +136,7 @@ export const OnboardingModal = ({
     const ActiveStepIcon = activeStep.icon;
     const specialtyConfig = getClinicalSpecialtyConfig(specialty);
     const isPsychology = specialty === 'psicologia';
+    const clinicianLabel = clinicianName || specialtyConfig.professionalLabel;
 
     return (
         <div className="onboarding-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
@@ -148,11 +149,11 @@ export const OnboardingModal = ({
                 <div className="onboarding-hero">
                     <div className="onboarding-hero-copy">
                         <p className="onboarding-modal-kicker">
-                            {isPsychology ? 'Onboarding de bienvenida para Ainhoa' : 'Guia de inicio'}
+                            {isPsychology ? `Onboarding de bienvenida para ${clinicianLabel}` : 'Guia de inicio'}
                         </p>
                         <h2 id="onboarding-title">
                             {isPsychology
-                                ? `Ainhoa, esta es la mejor forma de trabajar Psicologia con Maria Notes`
+                                ? `${clinicianLabel}, esta es la mejor forma de trabajar Psicologia con Maria Notes`
                                 : `Asi se utiliza Maria Notes en ${specialtyConfig.displayName}`}
                         </h2>
                         <p className="onboarding-modal-subtitle">
@@ -171,7 +172,7 @@ export const OnboardingModal = ({
                     <div className="onboarding-hero-panel">
                         <div className="onboarding-hero-badge">
                             <span>{specialtyConfig.shortLabel}</span>
-                            <strong>{clinicianName || specialtyConfig.professionalLabel}</strong>
+                            <strong>{clinicianLabel}</strong>
                         </div>
                         <div className="onboarding-hero-stat">
                             <span className="label">Tu ruta recomendada</span>

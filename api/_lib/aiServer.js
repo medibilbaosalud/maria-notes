@@ -27,10 +27,14 @@ const PSYCHOLOGY_AINHOA_STYLE_PROFILE = `ESTILO PROFESIONAL DE AINHOA (OBLIGATOR
 - "MOTIVO DE CONSULTA" debe ser breve y directo.
 - En "ANTECEDENTES RELEVANTES" incluye primero el contexto vital funcional si aparece en la transcripcion: edad, lugar de residencia, convivencia, estudios o trabajo, red familiar y datos de contexto que ayuden a entender el caso.
 - En "SINTOMATOLOGIA ACTUAL" prioriza el problema actual, su inicio, frecuencia, duracion, intensidad, desencadenantes, factores que aumentan o disminuyen, e impacto en su funcionamiento.
+- Si la transcripcion lo permite, concreta mucho frecuencia, duracion, intensidad, sintomas fisicos, pensamientos asociados y conductas de alivio o evitacion.
+- Introduce con naturalidad formulas tipo "Respecto a la familia", "Respecto a las amistades", "En un dia normal", "Por ultimo" o "En cuanto a..." cuando ayuden a ordenar la informacion sin volverla demasiado esquematica.
 - Cuando existan frases literales del/la paciente que aporten valor clinico, pueden incluirse de forma breve entre comillas.
 - En "OBSERVACIONES CLINICAS" integra recursos, apoyos, rutina diaria, hobbies, factores protectores, areas afectadas, antecedentes relevantes y cualquier informacion clinicamente util, siempre sin inventar.
+- Da bastante peso a red de apoyo, rutina, hobbies, sueño, alimentacion, concentracion y actividad fisica cuando aparezcan, porque forman parte de su forma habitual de registrar.
 - En "IMPRESION CLINICA" mantente prudente: formula comprensiones clinicas o focos de trabajo, pero no diagnostiques si no consta.
 - En "PLAN TERAPEUTICO" redacta con estilo de consulta real. Si en la transcripcion aparecen tareas para casa u objetivos terapeuticos, integrarlos aqui con etiquetas internas como "Tareas para casa:" y "Objetivos terapeuticos:" dentro del cuerpo de la seccion, sin crear encabezados Markdown nuevos.
+- Si aparecen objetivos muy concretos, mantenlos con formulacion simple, orientada a consulta y sin convertirlos en jerga tecnica.
 - No uses lenguaje grandilocuente, juridico ni excesivamente tecnico.
 - No conviertas toda la historia en listas; mezcla frases y parrafos breves con listados solo cuando ayuden a la claridad.
 - No moralices ni interpretes mas alla de la evidencia disponible.`;
@@ -40,7 +44,67 @@ const PSYCHOLOGY_AINHOA_STYLE_EXAMPLES = `EJEMPLOS DE FORMA (NO REUTILIZAR CONTE
 2) Si hay ansiedad, se especifica cuando comenzo, en que momentos ocurre, su frecuencia, duracion, sintomas fisicos, anticipacion o alerta, y como interfiere en su descanso, alimentacion, concentracion o actividad.
 3) Si hay conflicto relacional o familiar, se explica de forma clara quien interviene, que secuencia de hechos refiere la paciente y que emocion o malestar actual genera, sin convertirlo en relato literario.
 4) Si hay autolesiones, ideacion o antecedentes graves, se registra con sobriedad, literalidad clinica y foco en frecuencia, funciones de la conducta, desencadenantes, factores protectores e impacto funcional.
-5) Si aparecen objetivos terapeuticos o tareas, se recogen al final dentro del plan con frases claras, utiles y realistas para seguimiento.`;
+5) Si aparecen objetivos terapeuticos o tareas, se recogen al final dentro del plan con frases claras, utiles y realistas para seguimiento.
+6) Es habitual que primero situe a la persona y despues vaya desplegando el caso con conectores sencillos, sin tecnificarlo demasiado.
+7) Cuando el caso tiene varias areas afectadas, las integra dentro del relato, pero manteniendo una sensacion de orden y utilidad clinica.`;
+
+const PSYCHOLOGY_JUNE_STYLE_PROFILE = `ESTILO PROFESIONAL DE JUNE (OBLIGATORIO EN PSICOLOGIA CUANDO EL PERFIL ACTIVO SEA JUNE)
+- La escritura debe sonar a nota clinica real, cercana a consulta privada, con mas narrativa integrada y menos estructura de frases telegráficas.
+- Puedes abrir con una frase de contexto global antes de bajar a las areas concretas, siempre sin perder claridad clinica.
+- Integra con naturalidad apartados internos como "Familia:", "Socialmente:", "Relaciones:", "Antecedentes:", "Medicación:", "Dia normal:", "OT:" u "Observaciones:" cuando esos bloques ayuden a ordenar la informacion aportada.
+- Prioriza conflicto nuclear, cambios vitales, antecedentes relacionales y areas afectadas, conectando mejor las piezas de la historia entre si.
+- Si la consulta es de pareja, redacta de manera relacional y sistémica: deja claro quien aporta cada dificultad y cuales son las necesidades no cubiertas o los patrones de interacción.
+- Si hay trayectorias complejas o varios episodios previos, se pueden resumir en un bloque tipo "CUADRO MEDICO" o "Antecedentes" si eso refleja mejor la informacion de la transcripcion.
+- Mantente clinica y prudente: no diagnostiques si no consta, pero si puedes nombrar focos como trauma, abandono, autoestima, impulsividad, confianza o regulacion emocional cuando la transcripcion lo sostenga.
+- En el plan terapeutico, permite integrar objetivos con estilo de trabajo real, incluso usando "OT:" o "Objetivos terapeuticos:" si aparece coherente con la informacion disponible.
+- No conviertas todo en bullets; alterna bloques breves y subapartados en mayusculas solo cuando aporten orden real.
+- Conserva un tono humano y directo, no academico, no juridico y no generico de IA.`;
+
+const PSYCHOLOGY_JUNE_STYLE_EXAMPLES = `EJEMPLOS DE FORMA (NO REUTILIZAR CONTENIDO NI DATOS)
+1) Puede abrir con un parrafo compacto que sitúe edad, ocupacion, estudios, ritmo de vida y motivo de consulta, y despues desplegar areas como Familia, Socialmente o Relaciones.
+2) Cuando hay varios frentes abiertos, ordena la historia por areas de vida afectadas y no solo por sintomas aislados.
+3) Si se trata de pareja, combina informacion de ambos y explicita patron de comunicacion, necesidades no cubiertas, antecedentes y objetivo comun.
+4) Si hay un historial clinico largo, sintetiza cronologia y medicacion en bloques claros antes de volver al malestar actual.
+5) Los objetivos pueden aparecer como "OT:" con foco terapeutico concreto, manteniendo un lenguaje profesional pero muy natural.`;
+
+const PSYCHOLOGY_JUNE_STYLE_PROFILE_SUPPLEMENT = `REFUERZO DE ESTILO DE JUNE
+- Si existen varias subareas relevantes, puedes usar formulas como "Familia:", "Area social:", "Sueno:", "Alimentacion:" o "Relaciones:" dentro de una misma seccion, siempre que ayuden a leer mejor el caso.
+- Si el caso gira en torno a limites, abandono, traicion, autoconcepto, control, impulsividad o confianza, puedes nombrar esos focos de trabajo de forma natural cuando la informacion los sostenga.
+- En terapia de pareja, deja claro el objetivo comun y, si procede, los objetivos individuales o los siguientes pasos acordados.`;
+
+const PSYCHOLOGY_JUNE_STYLE_EXAMPLES_SUPPLEMENT = `EJEMPLOS ADICIONALES DE JUNE
+6) Puede usar frases de enlace que den sensacion de continuidad, para conectar familia, trabajo, pareja y antecedentes en un mismo caso.
+7) En casos complejos, el texto puede sonar mas integrado y humano, pero siempre debe seguir siendo util, claro y clinicamente prudente.`;
+
+const normalizePsychologyClinicianName = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'june') return 'June';
+    return 'Ainhoa';
+};
+
+const getPsychologyClinicianStyle = (clinicianName) => {
+    const normalized = normalizePsychologyClinicianName(clinicianName);
+    if (normalized === 'June') {
+        return {
+            name: normalized,
+            historyProfile: `${PSYCHOLOGY_JUNE_STYLE_PROFILE}\n${PSYCHOLOGY_JUNE_STYLE_PROFILE_SUPPLEMENT}`,
+            historyExamples: `${PSYCHOLOGY_JUNE_STYLE_EXAMPLES}\n${PSYCHOLOGY_JUNE_STYLE_EXAMPLES_SUPPLEMENT}`,
+            reportProfile: `- Mantiene un estilo clinico humano y algo mas narrativo, parecido a una redaccion real de June.
+- Si la complejidad del caso lo pide, puede agrupar informacion por areas o bloques internos utiles como Familia, Relaciones, Antecedentes u OT.
+- Si es terapia de pareja, debe explicitar mejor el patron relacional, las necesidades no cubiertas y el objetivo comun.
+- Conserva una voz sobria, profesional y con foco terapeutico claro.`
+        };
+    }
+    return {
+        name: normalized,
+        historyProfile: PSYCHOLOGY_AINHOA_STYLE_PROFILE,
+        historyExamples: PSYCHOLOGY_AINHOA_STYLE_EXAMPLES,
+        reportProfile: `- Mantiene un estilo clinico humano, sobrio y parecido a una redaccion real de Ainhoa.
+- Incluye contexto vital, problema actual, sintomas, impacto funcional, apoyos y plan si constan.
+- Tiende a concretar frecuencia, intensidad, impacto funcional y factores protectores cuando aparecen.
+- Si aparecen objetivos terapeuticos o tareas, reflejalos con claridad sin sonar academico ni artificial.`
+    };
+};
 
 const normalizeConsultationType = (value) => {
     const normalized = String(value || '')
@@ -759,9 +823,10 @@ ${String(learningContext.promptContext).slice(0, 4000)}
 No cites estas reglas en la salida. No inventes datos para cumplirlas.`;
 };
 
-const buildGenerateHistoryPrompt = (transcription, patientName, consultationType, learningContext) => {
+const buildGenerateHistoryPrompt = (transcription, patientName, consultationType, learningContext, clinicianName) => {
     const specialty = getSpecialtyConfig(consultationType);
     const specialtyRole = specialty.specialty === 'psicologia' ? 'psicologia clinica' : 'otorrinolaringologia';
+    const psychologyClinicianStyle = specialty.specialty === 'psicologia' ? getPsychologyClinicianStyle(clinicianName) : null;
     return `Eres un asistente clinico experto en ${specialtyRole}. Responde SOLO JSON valido.
 Objetivo: generar historia clinica final y extraccion estructurada en una sola respuesta.
 Reglas:
@@ -773,7 +838,7 @@ ${specialty.historyTemplate}
 - No incluyas bloques internos del sistema.
 
 ${specialty.styleProfile}
-${specialty.specialty === 'psicologia' ? `\n${PSYCHOLOGY_AINHOA_STYLE_PROFILE}\n\n${PSYCHOLOGY_AINHOA_STYLE_EXAMPLES}` : ''}
+${psychologyClinicianStyle ? `\n${psychologyClinicianStyle.historyProfile}\n\n${psychologyClinicianStyle.historyExamples}` : ''}
 ${formatLearningPromptContext(learningContext)}
 
 Paciente: ${patientName || 'Paciente'}
@@ -818,21 +883,19 @@ Schema:
 ${specialty.classificationHint}`;
 };
 
-const buildReportPrompt = (transcription, patientName, consultationType, learningContext) => `Genera un informe ${getSpecialtyConfig(consultationType).reportLabel} profesional en espanol para ${patientName || 'Paciente'}.
+const buildReportPrompt = (transcription, patientName, consultationType, learningContext, clinicianName) => `Genera un informe ${getSpecialtyConfig(consultationType).reportLabel} profesional en espanol para ${patientName || 'Paciente'}.
 Reglas:
 - Basate solo en la transcripcion.
 - No inventes diagnosticos ni pruebas no mencionadas.
 - Si falta un dato, indica "No consta".
 - Responde en texto Markdown simple.
-${normalizeConsultationType(consultationType) === 'psicologia' ? `- Mantiene un estilo clinico humano, sobrio y parecido a una redaccion real de psicologia.
-- Incluye contexto vital, problema actual, sintomas, impacto funcional, apoyos y plan si constan.
-- Si aparecen objetivos terapeuticos o tareas, reflejalos con claridad sin sonar academico ni artificial.` : ''}
+${normalizeConsultationType(consultationType) === 'psicologia' ? getPsychologyClinicianStyle(clinicianName).reportProfile : ''}
 ${formatLearningPromptContext(learningContext)}
 
 TRANSCRIPCION:
 ${String(transcription || '').slice(0, 18000)}`;
 
-const buildSectionPrompt = ({ transcription, currentHistory, sectionTitle, patientName, consultationType, learningContext }) => `Eres un asistente medico experto en ${normalizeConsultationType(consultationType) === 'psicologia' ? 'psicologia clinica' : 'otorrinolaringologia'}. Reescribe SOLO la seccion solicitada.
+const buildSectionPrompt = ({ transcription, currentHistory, sectionTitle, patientName, consultationType, learningContext, clinicianName }) => `Eres un asistente medico experto en ${normalizeConsultationType(consultationType) === 'psicologia' ? 'psicologia clinica' : 'otorrinolaringologia'}. Reescribe SOLO la seccion solicitada.
 Paciente: ${patientName || 'Paciente'}
 Seccion objetivo: ${sectionTitle}
 Reglas:
@@ -840,6 +903,7 @@ Reglas:
 - Usa solo datos de la transcripcion.
 - Mantiene estilo clinico breve.
 - Si falta dato, escribe "No consta".
+${normalizeConsultationType(consultationType) === 'psicologia' ? getPsychologyClinicianStyle(clinicianName).historyProfile : ''}
 ${formatLearningPromptContext(learningContext)}
 
 TRANSCRIPCION:
@@ -850,12 +914,12 @@ ${String(currentHistory || '').slice(0, 12000)}`;
 
 const buildProvisionalHistory = (reason, consultationType) => getSpecialtyConfig(consultationType).provisionalHistory(reason);
 
-export const generateMedicalHistoryPayload = async ({ transcription, patientName, consultationType, learningContext }) => {
+export const generateMedicalHistoryPayload = async ({ transcription, patientName, consultationType, learningContext, clinicianName }) => {
     const specialty = normalizeConsultationType(consultationType);
     const startedAt = Date.now();
     try {
         const historyResponse = await callPreferredTextModel({
-            prompt: buildGenerateHistoryPrompt(transcription, patientName, specialty, learningContext),
+            prompt: buildGenerateHistoryPrompt(transcription, patientName, specialty, learningContext, clinicianName),
             jsonMode: true,
             temperature: 0.1,
             maxTokens: 2600,
@@ -1055,9 +1119,9 @@ export const extractMedicalDataPayload = async ({ transcription, consultationTyp
     };
 };
 
-export const generateMedicalReportPayload = async ({ transcription, patientName, consultationType, learningContext }) => {
+export const generateMedicalReportPayload = async ({ transcription, patientName, consultationType, learningContext, clinicianName }) => {
     const response = await callPreferredTextModel({
-        prompt: buildReportPrompt(transcription, patientName, consultationType, learningContext),
+        prompt: buildReportPrompt(transcription, patientName, consultationType, learningContext, clinicianName),
         jsonMode: false,
         temperature: 0.2,
         maxTokens: 1800,

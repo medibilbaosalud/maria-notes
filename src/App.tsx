@@ -68,10 +68,20 @@ const LessonsPanel = lazy(() => import('./components/LessonsPanel'));
 
 const INTERNAL_AI_ROUTE_KEY = 'server-routed';
 const SPECIALTY_PREFERENCE_STORAGE_KEY = 'maria_notes_specialty_preference';
+const PSYCHOLOGY_CLINICIAN_STORAGE_KEY = 'maria_notes_psychology_clinician';
 const ONBOARDING_STORAGE_KEY = 'maria_notes_onboarding_state';
-const ONBOARDING_VERSION_BY_SPECIALTY: Record<ClinicalSpecialtyId, string> = {
-    otorrino: 'otorrino_core_v1',
-    psicologia: 'ainhoa_psicologia_v1'
+type PsychologyClinicianName = 'Ainhoa' | 'June';
+const normalizePsychologyClinician = (value: string | null | undefined): PsychologyClinicianName => {
+    return value === 'June' ? 'June' : 'Ainhoa';
+};
+const getOnboardingVersion = (
+    specialty: ClinicalSpecialtyId,
+    clinicianName?: PsychologyClinicianName
+): string => {
+    if (specialty === 'psicologia') {
+        return clinicianName === 'June' ? 'june_psicologia_v1' : 'ainhoa_psicologia_v1';
+    }
+    return 'otorrino_core_v1';
 };
 const PIPELINE_V4_ENABLED = String(import.meta.env.VITE_PIPELINE_V4_ENABLED || 'true').toLowerCase() === 'true';
 const MAX_SAFE_AUDIO_BLOB_BYTES = 20 * 1024 * 1024;
@@ -171,15 +181,21 @@ const readOnboardingState = (): Partial<Record<ClinicalSpecialtyId, string>> => 
     }
 };
 
-const hasSeenOnboardingFor = (specialty: ClinicalSpecialtyId): boolean => {
+const hasSeenOnboardingFor = (
+    specialty: ClinicalSpecialtyId,
+    clinicianName?: PsychologyClinicianName
+): boolean => {
     const state = readOnboardingState();
-    return state[specialty] === ONBOARDING_VERSION_BY_SPECIALTY[specialty];
+    return state[specialty] === getOnboardingVersion(specialty, clinicianName);
 };
 
-const markOnboardingSeen = (specialty: ClinicalSpecialtyId): void => {
+const markOnboardingSeen = (
+    specialty: ClinicalSpecialtyId,
+    clinicianName?: PsychologyClinicianName
+): void => {
     const nextState = {
         ...readOnboardingState(),
-        [specialty]: ONBOARDING_VERSION_BY_SPECIALTY[specialty]
+        [specialty]: getOnboardingVersion(specialty, clinicianName)
     };
     safeSetLocalStorage(ONBOARDING_STORAGE_KEY, JSON.stringify(nextState));
 };
@@ -230,6 +246,9 @@ const AppContent = () => {
     );
     const [contextSpecialty, setContextSpecialty] = useState<ClinicalSpecialtyId>(() =>
         normalizeClinicalSpecialty(safeGetLocalStorage(SPECIALTY_PREFERENCE_STORAGE_KEY, 'otorrino'))
+    );
+    const [psychologyClinicianName, setPsychologyClinicianName] = useState<PsychologyClinicianName>(() =>
+        normalizePsychologyClinician(safeGetLocalStorage(PSYCHOLOGY_CLINICIAN_STORAGE_KEY, 'Ainhoa'))
     );
     const [hasChosenWorkspaceMode, setHasChosenWorkspaceMode] = useState(false);
     const [processingLabel, setProcessingStatus] = useState<string>('Listo para grabar');
@@ -315,9 +334,22 @@ const AppContent = () => {
         setHasChosenWorkspaceMode(true);
     }, [activeSpecialty]);
 
+    const handlePsychologyClinicianChange = useCallback((clinicianName: PsychologyClinicianName) => {
+        setPsychologyClinicianName(clinicianName);
+        safeSetLocalStorage(PSYCHOLOGY_CLINICIAN_STORAGE_KEY, clinicianName);
+    }, []);
+
+    const resolveClinicianNameForSpecialty = useCallback((specialty: ClinicalSpecialtyId): string | undefined => {
+        return specialty === 'psicologia' ? psychologyClinicianName : undefined;
+    }, [psychologyClinicianName]);
+
     useEffect(() => {
         contextSpecialtyRef.current = contextSpecialty;
     }, [contextSpecialty]);
+
+    useEffect(() => {
+        safeSetLocalStorage(PSYCHOLOGY_CLINICIAN_STORAGE_KEY, psychologyClinicianName);
+    }, [psychologyClinicianName]);
 
     const { isPlaying, demoData, startSimulation, currentStep } = useSimulation();
 
@@ -367,14 +399,14 @@ const AppContent = () => {
     useEffect(() => {
         if (!hasChosenWorkspaceMode) return;
         if (activeSpecialty !== 'psicologia') return;
-        if (hasSeenOnboardingFor(activeSpecialty)) return;
+        if (hasSeenOnboardingFor(activeSpecialty, psychologyClinicianName)) return;
         setShowWelcomeModal(true);
-    }, [activeSpecialty, hasChosenWorkspaceMode]);
+    }, [activeSpecialty, hasChosenWorkspaceMode, psychologyClinicianName]);
 
     const handleCloseWelcomeModal = useCallback(() => {
-        markOnboardingSeen(activeSpecialty);
+        markOnboardingSeen(activeSpecialty, psychologyClinicianName);
         setShowWelcomeModal(false);
-    }, [activeSpecialty]);
+    }, [activeSpecialty, psychologyClinicianName]);
 
     const handleOpenWelcomeModal = useCallback(() => {
         setShowWelcomeModal(true);
@@ -1860,7 +1892,12 @@ const AppContent = () => {
         if (runId) {
             recordDiagnosticEvent(runId, { type: 'stage_start', stage: draftStageName });
         }
-        const result = await aiService.generateMedicalHistory(extractionInput, patientName, contextSpecialtyRef.current);
+        const result = await aiService.generateMedicalHistory(
+            extractionInput,
+            patientName,
+            contextSpecialtyRef.current,
+            resolveClinicianNameForSpecialty(contextSpecialtyRef.current)
+        );
         if (runId) {
             recordDiagnosticEvent(runId, {
                 type: 'stage_end',
@@ -2127,7 +2164,12 @@ const AppContent = () => {
                             idempotency_key: sessionId
                         });
                         const hardenedSpecialty = contextSpecialtyRef.current;
-                        const hardenedResult = await aiService.generateMedicalHistory(sanitizedTranscription, patientName, hardenedSpecialty);
+                        const hardenedResult = await aiService.generateMedicalHistory(
+                            sanitizedTranscription,
+                            patientName,
+                            hardenedSpecialty,
+                            resolveClinicianNameForSpecialty(hardenedSpecialty)
+                        );
                         if (!isSessionVersionCurrent(sessionId, sessionVersion)) return;
                         const hardenedOutputTier: 'draft' | 'final' = 'final';
                         const promotedRecord = await persistPipelineRecord({
@@ -2873,7 +2915,12 @@ const AppContent = () => {
         try {
             aiService.resetInvocationCounters(textSessionId);
             recordDiagnosticEvent(diagnosticRunId, { type: 'stage_start', stage: 'single_shot_text_history' });
-            const result = await aiService.generateMedicalHistory(text, patientName, specialty);
+            const result = await aiService.generateMedicalHistory(
+                text,
+                patientName,
+                specialty,
+                resolveClinicianNameForSpecialty(specialty)
+            );
             let runStatus = result.pipeline_status || 'completed';
             let resultStatus = result.result_status || (runStatus === 'completed' ? 'completed' : 'provisional');
             let textRemainingErrors = [...(result.remaining_errors || [])];
@@ -3202,7 +3249,8 @@ const AppContent = () => {
                 currentContent,
                 sectionTitle,
                 currentPatientName,
-                activeSpecialty
+                activeSpecialty,
+                resolveClinicianNameForSpecialty(activeSpecialty)
             );
             return replaceHistorySection(currentContent, sectionTitle, regenerated.data);
         } catch (error) {
@@ -3345,7 +3393,12 @@ const AppContent = () => {
                         onRegenerateSection={SECTION_REGEN_ENABLED ? handleRegenerateSection : undefined}
                         onGenerateReport={async () => {
                             const aiService = ensureAiService(getApiKeys(apiKey));
-                            const res = await aiService.generateMedicalReport(transcription, currentPatientName, contextSpecialtyRef.current);
+                            const res = await aiService.generateMedicalReport(
+                                transcription,
+                                currentPatientName,
+                                contextSpecialtyRef.current,
+                                resolveClinicianNameForSpecialty(contextSpecialtyRef.current)
+                            );
                             return res.data;
                         }}
                     />
@@ -3381,7 +3434,7 @@ const AppContent = () => {
                         {showWelcomeModal && (
                             <OnboardingModal
                                 specialty={activeSpecialty}
-                                clinicianName={activeSpecialty === 'psicologia' ? 'Ainhoa' : undefined}
+                                clinicianName={activeSpecialty === 'psicologia' ? psychologyClinicianName : undefined}
                                 onClose={handleCloseWelcomeModal}
                                 onOpenSettings={() => setShowSettings(true)}
                                 onNavigate={setCurrentView}
@@ -3403,6 +3456,8 @@ const AppContent = () => {
                         onOpenGuide={handleOpenWelcomeModal}
                         activeSpecialty={activeSpecialty}
                         onSpecialtyChange={handleSpecialtyChange}
+                        psychologyClinicianName={psychologyClinicianName}
+                        onPsychologyClinicianChange={handlePsychologyClinicianChange}
                     >
                         <AnimatePresence mode="wait" initial={false}>
                             <motion.div

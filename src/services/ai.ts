@@ -363,7 +363,8 @@ export class AIService {
     async generateMedicalHistory(
         transcription: string,
         patientName: string = '',
-        specialty: ClinicalSpecialtyId = 'otorrino'
+        specialty: ClinicalSpecialtyId = 'otorrino',
+        clinicianName?: string
     ): Promise<AIResultWithMetadata> {
         this.emitInvocation('single_shot_history', 'single_shot_history_generation', 'start', SERVER_TEXT_MODEL);
         try {
@@ -372,7 +373,8 @@ export class AIService {
                 transcription,
                 patientName,
                 consultationType: specialty,
-                learningContext
+                learningContext,
+                clinicianName
             });
             this.emitInvocation('single_shot_history', 'single_shot_history_generation', 'success', result.model, undefined, {
                 specialty,
@@ -397,7 +399,8 @@ export class AIService {
     async generateMedicalReport(
         transcription: string,
         patientName: string = '',
-        specialty: ClinicalSpecialtyId = 'otorrino'
+        specialty: ClinicalSpecialtyId = 'otorrino',
+        clinicianName?: string
     ): Promise<AIResult<string>> {
         this.emitInvocation('report', 'report_generation', 'start', SERVER_TEXT_MODEL);
         try {
@@ -413,7 +416,8 @@ export class AIService {
                 transcription,
                 patientName,
                 consultationType: specialty,
-                learningContext
+                learningContext,
+                clinicianName
             });
             this.emitInvocation('report', 'report_generation', 'success', result.model, undefined, {
                 specialty,
@@ -438,7 +442,8 @@ export class AIService {
         currentHistory: string,
         sectionTitle: string,
         patientName: string = '',
-        specialty: ClinicalSpecialtyId = 'otorrino'
+        specialty: ClinicalSpecialtyId = 'otorrino',
+        clinicianName?: string
     ): Promise<AIResult<string>> {
         this.emitInvocation('generation', 'section_regeneration', 'start', SERVER_TEXT_MODEL);
         try {
@@ -456,7 +461,8 @@ export class AIService {
                 sectionTitle,
                 patientName,
                 consultationType: specialty,
-                learningContext
+                learningContext,
+                clinicianName
             });
             this.emitInvocation('generation', 'section_regeneration', 'success', result.model, undefined, {
                 specialty,
