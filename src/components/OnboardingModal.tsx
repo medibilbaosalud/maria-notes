@@ -148,11 +148,11 @@ export const OnboardingModal = ({
                 <div className="onboarding-hero">
                     <div className="onboarding-hero-copy">
                         <p className="onboarding-modal-kicker">
-                            {isPsychology ? 'Onboarding de bienvenida para Jone' : 'Guia de inicio'}
+                            {isPsychology ? 'Onboarding de bienvenida para Ainhoa' : 'Guia de inicio'}
                         </p>
                         <h2 id="onboarding-title">
                             {isPsychology
-                                ? `Jone, esta es la mejor forma de trabajar Psicologia con Maria Notes`
+                                ? `Ainhoa, esta es la mejor forma de trabajar Psicologia con Maria Notes`
                                 : `Asi se utiliza Maria Notes en ${specialtyConfig.displayName}`}
                         </h2>
                         <p className="onboarding-modal-subtitle">

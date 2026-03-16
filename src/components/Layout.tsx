@@ -79,9 +79,9 @@ export const Layout: React.FC<LayoutProps> = ({
 
         <div className="sidebar-footer">
           {onOpenGuide && activeSpecialty === 'psicologia' && (
-            <button className="settings-btn guide-btn" onClick={onOpenGuide} aria-label="Abrir guia de Jone">
+            <button className="settings-btn guide-btn" onClick={onOpenGuide} aria-label="Abrir guia de Ainhoa">
               <BookOpen size={20} />
-              <span>Guia Jone</span>
+              <span>Guia Ainhoa</span>
             </button>
           )}
           {onOpenLessons && (

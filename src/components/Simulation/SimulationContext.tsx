@@ -204,7 +204,7 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     {
         id: 'intro',
         duration: 3000,
-        caption: "Bienvenida, Jone. Vamos a recorrer juntas una sesión completa de Psicología con Maria Notes."
+        caption: "Bienvenida, Ainhoa. Vamos a recorrer juntas una sesión completa de Psicología con Maria Notes."
     },
     {
         id: 'move_to_input',

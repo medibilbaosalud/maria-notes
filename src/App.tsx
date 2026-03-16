@@ -71,7 +71,7 @@ const SPECIALTY_PREFERENCE_STORAGE_KEY = 'maria_notes_specialty_preference';
 const ONBOARDING_STORAGE_KEY = 'maria_notes_onboarding_state';
 const ONBOARDING_VERSION_BY_SPECIALTY: Record<ClinicalSpecialtyId, string> = {
     otorrino: 'otorrino_core_v1',
-    psicologia: 'jone_psicologia_v1'
+    psicologia: 'ainhoa_psicologia_v1'
 };
 const PIPELINE_V4_ENABLED = String(import.meta.env.VITE_PIPELINE_V4_ENABLED || 'true').toLowerCase() === 'true';
 const MAX_SAFE_AUDIO_BLOB_BYTES = 20 * 1024 * 1024;
@@ -3381,7 +3381,7 @@ const AppContent = () => {
                         {showWelcomeModal && (
                             <OnboardingModal
                                 specialty={activeSpecialty}
-                                clinicianName={activeSpecialty === 'psicologia' ? 'Jone' : undefined}
+                                clinicianName={activeSpecialty === 'psicologia' ? 'Ainhoa' : undefined}
                                 onClose={handleCloseWelcomeModal}
                                 onOpenSettings={() => setShowSettings(true)}
                                 onNavigate={setCurrentView}
