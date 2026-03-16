@@ -44,7 +44,7 @@ export const SimulationOverlay: React.FC = () => {
                 }}
             >
                 <X size={16} />
-                <span>Salir de la Demo</span>
+                <span>Saltar demo</span>
             </button>
 
 

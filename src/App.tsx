@@ -3462,8 +3462,6 @@ const AppContent = () => {
                                 specialty={activeSpecialty}
                                 clinicianName={activeSpecialty === 'psicologia' ? psychologyClinicianName : undefined}
                                 onClose={handleCloseWelcomeModal}
-                                onOpenSettings={() => setShowSettings(true)}
-                                onNavigate={setCurrentView}
                                 onStartDemo={() => startSimulation(activeSpecialty)}
                             />
                         )}
