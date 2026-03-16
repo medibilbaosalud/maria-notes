@@ -296,6 +296,36 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
                 }
 
                 const waitedMs = Date.now() - finalizeReq.requestedAt;
+                const noMorePartialWork = this.pending.size === 0 && this.runningPartials.size === 0;
+                const allUnresolvedAlreadyFailed =
+                    unresolved.length > 0
+                    && noMorePartialWork
+                    && unresolved.every((idx) => this.failed.has(idx));
+
+                if (allUnresolvedAlreadyFailed) {
+                    try {
+                        const result = await this.handlers.finalize({
+                            sessionId: context.sessionId,
+                            patientName: context.patientName,
+                            lastBatchIndex: finalizeReq.lastBatchIndex,
+                            finalBlob: finalizeReq.finalBlob,
+                            missingBatches: [],
+                            failedBatches: failed,
+                            processedBatches: Array.from(this.processed).sort((a, b) => a - b)
+                        });
+                        this.finalizeRequest = null;
+                        this.state = 'provisional';
+                        this.touch(`Known failed partial batches: ${failed.join(', ')}`);
+                        finalizeReq.resolve(result);
+                        this.resetInternal(false);
+                        break;
+                    } catch (error) {
+                        this.state = 'failed';
+                        this.touch((error as Error)?.message || 'finalize_failed');
+                        throw error;
+                    }
+                }
+
                 if (waitedMs >= this.finalizeWaitMs) {
                     unresolved.forEach((idx) => this.missingBatches.add(idx));
                     try {

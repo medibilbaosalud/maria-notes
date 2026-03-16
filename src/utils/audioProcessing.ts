@@ -6,12 +6,15 @@
  *
  * - Resamples to 16kHz (Whisper optimal)
  * - Converts to Mono
- * - Splits into safe chunks to avoid 25MB API limit
+ * - Splits into safe chunks to avoid both provider limits and Vercel request-size limits
  * - Yields to main thread during heavy processing to prevent UI freezes
  */
 
-const MAX_CHUNK_BYTES = 20 * 1024 * 1024; // Hard guard below API limits
-const CHUNK_DURATION_SEC = 180; // 3 minutes per chunk
+// Requests go through Vercel serverless functions, so the practical request limit is
+// much lower than the downstream STT provider limit once the blob is base64-encoded.
+// Keep chunks comfortably below the 4.5MB Vercel ceiling after base64 + JSON overhead.
+const MAX_CHUNK_BYTES = Math.floor(2.5 * 1024 * 1024);
+const CHUNK_DURATION_SEC = 75;
 const YIELD_EVERY_SAMPLES = 500_000; // Yield to main thread every ~500K samples
 
 /**

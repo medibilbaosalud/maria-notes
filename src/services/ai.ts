@@ -10,6 +10,7 @@ import type {
 import type { ClinicalSpecialtyId } from '../clinical/specialties';
 import { MemoryService } from './memory';
 import type { LearningArtifactType } from './learning/types';
+import { upload as uploadToBlob } from '@vercel/blob/client';
 
 export interface AIResult<T> {
     data: T;
@@ -104,6 +105,8 @@ export interface AIResultWithMetadata extends AIResult<string> {
 type TranscriptionOptions = {
     whisperStrict?: boolean;
     signal?: AbortSignal;
+    specialty?: ClinicalSpecialtyId;
+    clinicianName?: string;
 };
 
 type InvocationCounters = {
@@ -113,7 +116,53 @@ type InvocationCounters = {
 };
 
 const SERVER_TEXT_MODEL = 'gemini:gemini-3-flash-preview';
-const SERVER_TRANSCRIPTION_MODEL = 'gemini:gemini-3-flash-preview';
+const SERVER_TRANSCRIPTION_MODEL = 'groq:whisper-large-v3-turbo';
+const AUDIO_BLOB_UPLOAD_ENABLED = String(import.meta.env.VITE_AUDIO_BLOB_UPLOAD_ENABLED || 'true').toLowerCase() === 'true';
+
+const getAudioExtensionFromMimeType = (mimeType: string): string => {
+    const normalized = String(mimeType || '').toLowerCase();
+    if (normalized.includes('wav')) return 'wav';
+    if (normalized.includes('webm')) return 'webm';
+    if (normalized.includes('ogg')) return 'ogg';
+    if (normalized.includes('flac')) return 'flac';
+    if (normalized.includes('m4a')) return 'm4a';
+    if (normalized.includes('mp4')) return 'mp4';
+    if (normalized.includes('mpeg') || normalized.includes('mp3') || normalized.includes('mpga')) return 'mp3';
+    return 'wav';
+};
+
+const buildAudioBlobPathname = (mimeType: string): string => {
+    const extension = getAudioExtensionFromMimeType(mimeType);
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
+    const randomId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `audio_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    return `clinical-audio/${stamp}/${randomId}.${extension}`;
+};
+
+const maybeUploadAudioToBlob = async (
+    blob: Blob,
+    signal?: AbortSignal
+): Promise<{ audioUrl: string; mimeType: string } | null> => {
+    if (!AUDIO_BLOB_UPLOAD_ENABLED || blob.size <= 0) return null;
+    const resolvedMimeType = blob.type || 'audio/wav';
+    try {
+        const uploaded = await uploadToBlob(buildAudioBlobPathname(resolvedMimeType), blob, {
+            access: 'private',
+            contentType: resolvedMimeType,
+            handleUploadUrl: '/api/blob/upload',
+            multipart: blob.size >= 5 * 1024 * 1024,
+            abortSignal: signal
+        });
+        return {
+            audioUrl: uploaded.url,
+            mimeType: resolvedMimeType
+        };
+    } catch (error) {
+        console.warn('[AIService] Blob audio upload failed, falling back to inline payload:', error);
+        return null;
+    }
+};
 
 const buildLearningPayload = async (
     specialty: ClinicalSpecialtyId,
@@ -152,6 +201,9 @@ const blobToBase64 = async (blob: Blob): Promise<string> => {
 const parseJsonResponse = async <T>(response: Response): Promise<T> => {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
+        if (response.status === 413) {
+            throw new Error('function_payload_too_large');
+        }
         const message = typeof body?.error === 'string'
             ? body.error
             : (typeof body?.message === 'string' ? body.message : `request_failed_${response.status}`);
@@ -297,10 +349,14 @@ export class AIService {
 
         this.emitInvocation('transcription', 'transcription', 'start', SERVER_TRANSCRIPTION_MODEL);
         try {
+            const uploadedAudio = await maybeUploadAudioToBlob(blob, options?.signal);
             const result = await postJson<{ text: string; model: string }>('/api/ai/transcribe', {
-                audioBase64: await blobToBase64(blob),
-                mimeType: blob.type || mimeType || 'audio/wav',
-                whisperStrict: Boolean(options?.whisperStrict)
+                audioBase64: uploadedAudio ? undefined : await blobToBase64(blob),
+                audioUrl: uploadedAudio?.audioUrl,
+                mimeType: uploadedAudio?.mimeType || blob.type || mimeType || 'audio/wav',
+                whisperStrict: Boolean(options?.whisperStrict),
+                consultationType: options?.specialty,
+                clinicianName: options?.clinicianName
             }, options?.signal);
             this.emitInvocation('transcription', 'transcription', 'success', result.model, undefined, {
                 artifact_type: 'transcription',

@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { del, get } from '@vercel/blob';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || 'llama-3.3-70b-versatile';
 const GROQ_TRANSCRIBE_MODEL = process.env.GROQ_TRANSCRIBE_MODEL || 'whisper-large-v3-turbo';
+const GROQ_TRANSCRIBE_FALLBACK_MODEL = process.env.GROQ_TRANSCRIBE_FALLBACK_MODEL || 'whisper-large-v3';
 const GEMINI_TEXT_MODEL = normalizeGeminiModelId(process.env.GEMINI_TEXT_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview');
 const GEMINI_TRANSCRIBE_MODEL = normalizeGeminiModelId(process.env.GEMINI_TRANSCRIBE_MODEL || process.env.GEMINI_MODEL || GEMINI_TEXT_MODEL);
 
@@ -114,6 +116,36 @@ const normalizeConsultationType = (value) => {
         .replace(/[\u0300-\u036f]/g, '');
     if (normalized.includes('psic')) return 'psicologia';
     return 'otorrino';
+};
+
+const buildAudioUploadFileName = (blobLike) => {
+    const mime = String(blobLike?.type || '').toLowerCase();
+    if (mime.includes('wav')) return 'audio.wav';
+    if (mime.includes('flac')) return 'audio.flac';
+    if (mime.includes('ogg')) return 'audio.ogg';
+    if (mime.includes('m4a')) return 'audio.m4a';
+    if (mime.includes('mp4')) return 'audio.mp4';
+    if (mime.includes('mpeg') || mime.includes('mp3') || mime.includes('mpga')) return 'audio.mp3';
+    if (mime.includes('webm')) return 'audio.webm';
+    return 'audio.wav';
+};
+
+const buildTranscriptionPrompt = (consultationType, clinicianName) => {
+    const specialty = normalizeConsultationType(consultationType);
+    const psychologyClinician = specialty === 'psicologia'
+        ? normalizePsychologyClinicianName(clinicianName)
+        : null;
+    const domainHint = specialty === 'psicologia'
+        ? `Consulta de psicologia clinica${psychologyClinician ? ` (${psychologyClinician})` : ''}.`
+        : 'Consulta medica de otorrinolaringologia.';
+
+    return [
+        domainHint,
+        'Transcribe el audio de forma literal y util para documentacion clinica.',
+        'Manten el idioma original de cada hablante; no traduzcas.',
+        'Respeta nombres propios, medicacion, sintomas y terminos clinicos.',
+        'Puntuacion clara, sin markdown, sin resumen y sin comentarios extra.'
+    ].join(' ');
 };
 
 const getSpecialtyConfig = (value) => {
@@ -542,46 +574,39 @@ const callPreferredTextModel = async (options) => {
     };
 };
 
-const callPreferredTranscriptionModel = async ({ audioBase64, mimeType }) => {
-    const normalizedMimeType = String(mimeType || 'audio/wav').trim() || 'audio/wav';
-    let geminiError;
-
-    try {
-        const result = await callGeminiText({
-            prompt: '',
-            jsonMode: false,
-            temperature: 0,
-            maxTokens: 8192,
-            modelName: GEMINI_TRANSCRIBE_MODEL,
-            inlineParts: [
-                {
-                    text: 'Transcribe este audio medico en espanol. Devuelve solo la transcripcion literal, sin resumen, sin markdown y sin comentarios adicionales.'
-                },
-                {
-                    inlineData: {
-                        mimeType: normalizedMimeType,
-                        data: String(audioBase64 || '')
-                    }
-                }
-            ]
-        });
-
-        return {
-            text: result.text.trim(),
-            model: result.model,
-            gemini_attempted: true,
-            gemini_success: true,
-            fallback_hops: 0
-        };
-    } catch (error) {
-        geminiError = error;
+const getAudioBytesFromBlobUrl = async (audioUrl) => {
+    const result = await get(String(audioUrl || ''), { access: 'private' });
+    if (!result || result.statusCode !== 200 || !result.stream) {
+        throw new Error('blob_audio_not_found');
     }
 
-    const bytes = Buffer.from(String(audioBase64 || ''), 'base64');
-    const file = new Blob([bytes], { type: normalizedMimeType });
+    const arrayBuffer = await new Response(result.stream).arrayBuffer();
+    return {
+        bytes: Buffer.from(arrayBuffer),
+        mimeType: result.blob.contentType || 'audio/wav'
+    };
+};
+
+const resolveTranscriptionInput = async ({ audioBase64, audioUrl, mimeType }) => {
+    if (audioUrl) {
+        return getAudioBytesFromBlobUrl(audioUrl);
+    }
+
+    return {
+        bytes: Buffer.from(String(audioBase64 || ''), 'base64'),
+        mimeType: String(mimeType || 'audio/wav').trim() || 'audio/wav'
+    };
+};
+
+const callGroqTranscriptionModel = async ({ bytes, mimeType, model, prompt }) => {
+    const file = new Blob([bytes], { type: mimeType });
     const formData = new FormData();
-    formData.append('file', file, 'audio.wav');
-    formData.append('model', GROQ_TRANSCRIBE_MODEL);
+    formData.append('file', file, buildAudioUploadFileName(file));
+    formData.append('model', model);
+    formData.append('prompt', prompt);
+    formData.append('response_format', 'verbose_json');
+    formData.append('timestamp_granularities[]', 'segment');
+    formData.append('temperature', '0');
 
     const response = await fetch(`${GROQ_API_URL}/audio/transcriptions`, {
         method: 'POST',
@@ -597,12 +622,97 @@ const callPreferredTranscriptionModel = async ({ audioBase64, mimeType }) => {
     }
     return {
         text: String(body?.text || ''),
-        model: `groq:${body?.model || GROQ_TRANSCRIBE_MODEL}`,
-        gemini_attempted: true,
-        gemini_success: false,
-        fallback_hops: 1,
-        fallback_reason: geminiError instanceof Error ? geminiError.message : 'gemini_transcription_failed'
+        model: `groq:${body?.model || model}`,
+        segments: Array.isArray(body?.segments) ? body.segments : []
     };
+};
+
+const callPreferredTranscriptionModel = async ({ audioBase64, audioUrl, mimeType, consultationType, clinicianName }) => {
+    const transcriptionPrompt = buildTranscriptionPrompt(consultationType, clinicianName);
+    const { bytes, mimeType: resolvedMimeType } = await resolveTranscriptionInput({ audioBase64, audioUrl, mimeType });
+    let whisperTurboError;
+    let whisperV3Error;
+
+    try {
+        const turboResult = await callGroqTranscriptionModel({
+            bytes,
+            mimeType: resolvedMimeType,
+            model: GROQ_TRANSCRIBE_MODEL,
+            prompt: transcriptionPrompt
+        });
+        return {
+            ...turboResult,
+            gemini_attempted: false,
+            gemini_success: false,
+            fallback_hops: 0
+        };
+    } catch (error) {
+        whisperTurboError = error;
+    }
+
+    try {
+        const whisperV3Result = await callGroqTranscriptionModel({
+            bytes,
+            mimeType: resolvedMimeType,
+            model: GROQ_TRANSCRIBE_FALLBACK_MODEL,
+            prompt: transcriptionPrompt
+        });
+        return {
+            ...whisperV3Result,
+            gemini_attempted: false,
+            gemini_success: false,
+            fallback_hops: 1,
+            fallback_reason: whisperTurboError instanceof Error ? whisperTurboError.message : 'whisper_turbo_failed'
+        };
+    } catch (error) {
+        whisperV3Error = error;
+    }
+
+    try {
+        const result = await callGeminiText({
+            prompt: '',
+            jsonMode: false,
+            temperature: 0,
+            maxTokens: 8192,
+            modelName: GEMINI_TRANSCRIBE_MODEL,
+            inlineParts: [
+                {
+                    text: transcriptionPrompt
+                },
+                {
+                    inlineData: {
+                        mimeType: resolvedMimeType,
+                        data: bytes.toString('base64')
+                    }
+                }
+            ]
+        });
+        return {
+            text: result.text.trim(),
+            model: result.model,
+            segments: [],
+            gemini_attempted: true,
+            gemini_success: true,
+            fallback_hops: 2,
+            fallback_reason: whisperV3Error instanceof Error
+                ? whisperV3Error.message
+                : (whisperTurboError instanceof Error ? whisperTurboError.message : 'whisper_failed')
+        };
+    } catch (geminiError) {
+        const baseReason = whisperV3Error instanceof Error
+            ? whisperV3Error.message
+            : (whisperTurboError instanceof Error ? whisperTurboError.message : 'whisper_failed');
+        throw new Error(`gemini_transcription_failed:${(geminiError instanceof Error ? geminiError.message : 'unknown')}|fallback_reason:${baseReason}`);
+    }
+};
+
+const safeDeleteBlob = async (audioUrl) => {
+    if (!audioUrl) return;
+    try {
+        await del(String(audioUrl));
+    } catch (error) {
+        console.warn('[aiServer] failed to delete temporary audio blob:', error);
+    }
 };
 
 const parseJsonWithFallback = (text, fallbackFactory) => {
@@ -1155,12 +1265,23 @@ export const regenerateHistorySectionPayload = async (params) => {
     };
 };
 
-export const transcribeAudioPayload = async ({ audioBase64, mimeType }) => {
-    const response = await callPreferredTranscriptionModel({ audioBase64, mimeType });
-    return {
-        text: response.text,
-        model: response.model
-    };
+export const transcribeAudioPayload = async ({ audioBase64, audioUrl, mimeType, consultationType, clinicianName }) => {
+    try {
+        const response = await callPreferredTranscriptionModel({
+            audioBase64,
+            audioUrl,
+            mimeType,
+            consultationType,
+            clinicianName
+        });
+        return {
+            text: response.text,
+            model: response.model,
+            segments: response.segments
+        };
+    } finally {
+        await safeDeleteBlob(audioUrl);
+    }
 };
 
 export {

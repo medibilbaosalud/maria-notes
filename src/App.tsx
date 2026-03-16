@@ -85,7 +85,9 @@ const getOnboardingVersion = (
     return 'otorrino_core_v1';
 };
 const PIPELINE_V4_ENABLED = String(import.meta.env.VITE_PIPELINE_V4_ENABLED || 'true').toLowerCase() === 'true';
-const MAX_SAFE_AUDIO_BLOB_BYTES = 20 * 1024 * 1024;
+// Raw/base64 uploads travel through Vercel functions, so keep fallback blobs below a
+// request-safe size instead of the larger upstream model limit.
+const MAX_SAFE_AUDIO_BLOB_BYTES = Math.floor(2.5 * 1024 * 1024);
 
 const LEARNING_V2_ENABLED = String(import.meta.env.VITE_LEARNING_V2_ENABLED || 'true').toLowerCase() === 'true';
 const RULEPACK_APPLY_ENABLED = String(import.meta.env.VITE_RULEPACK_APPLY_ENABLED || 'true').toLowerCase() === 'true';
@@ -1062,7 +1064,7 @@ const AppContent = () => {
     const transcribeWithOptionalHedge = async (
         aiService: AIService,
         blob: Blob,
-        options: { whisperStrict: boolean }
+        options: { whisperStrict: boolean; specialty: ClinicalSpecialtyId; clinicianName?: string }
     ) => {
         const primaryController = new AbortController();
         const hedgeController = new AbortController();
@@ -1142,7 +1144,11 @@ const AppContent = () => {
                 const partBatchIndex = blobs.length > 1 ? (batchIndex * 1000) + idx : batchIndex;
                 const chunkStartedAt = Date.now();
                 try {
-                    const transcriptResult = await transcribeWithOptionalHedge(aiService, partBlob, { whisperStrict });
+                    const transcriptResult = await transcribeWithOptionalHedge(aiService, partBlob, {
+                        whisperStrict,
+                        specialty: contextSpecialtyRef.current,
+                        clinicianName: resolveClinicianNameForSpecialty(contextSpecialtyRef.current)
+                    });
                     const latencyMs = Date.now() - chunkStartedAt;
                     recordSttLatency(latencyMs);
                     outputs.push({
