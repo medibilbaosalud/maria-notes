@@ -78,7 +78,7 @@ export const SpecialtyEntryScreen: React.FC<SpecialtyEntryScreenProps> = ({
             <div className="specialty-entry-clinician-copy">
               <p className="specialty-entry-clinician-eyebrow">Perfil profesional</p>
               <h2>Elige con quien vas a trabajar</h2>
-              <span>La escritura y la guia se adaptaran a Ainhoa o June desde este acceso inicial.</span>
+              <span>La estructura clinica y la documentacion se adaptaran desde el inicio.</span>
             </div>
 
             <div className="specialty-entry-grid specialty-entry-grid-clinicians" role="radiogroup" aria-label="Seleccionar profesional de psicologia">
