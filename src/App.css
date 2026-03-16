@@ -307,3 +307,57 @@
         gap: 1rem;
     }
 }
+/* Flag Actions (History View Validation) */
+.flag-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.flag-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.flag-action.ghost {
+  border: 1px solid #cbd5e1;
+  background: white;
+  color: #334155;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+.flag-action.ghost:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.flag-action.confirm {
+  border: 1px solid #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.flag-action.confirm:hover:not(:disabled) {
+  background: #dcfce7;
+  border-color: #4ade80;
+}
+
+.flag-action.reject {
+  border: 1px solid #e2e8f0;
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.flag-action.reject:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #475569;
+}
+

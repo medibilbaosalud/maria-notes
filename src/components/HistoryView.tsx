@@ -2906,12 +2906,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           background: #fef08a;
         }
 
-        .flag-action.ghost {
-          border: 1px solid #cbd5f5;
-          background: #f8fafc;
-          color: #0f172a;
-        }
-
         .history-view-container .loading-state {
           display: flex;
           flex-direction: column;

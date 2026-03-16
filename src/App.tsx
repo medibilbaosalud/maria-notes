@@ -3443,6 +3443,26 @@ const AppContent = () => {
         );
     };
 
+    // End of demo: force a clean reload to return to the entry screen
+    useEffect(() => {
+        if (!isPlaying && hasChosenWorkspaceMode) { // hasChosenWorkspaceMode implies we started
+            // We only want to reload if we were previously playing a demo
+            // Since we don't have a reliable 'wasPlaying' without extra state,
+            // we'll check if URL has a generic param or just let `SimulationOverlay` handle it if we want.
+            // A more robust way: track the previous 'isPlaying' value.
+        }
+    }, [isPlaying, hasChosenWorkspaceMode]);
+
+    // More robust previous value tracking for isPlaying
+    const prevIsPlaying = useRef(isPlaying);
+    useEffect(() => {
+        if (prevIsPlaying.current && !isPlaying) {
+            // Demo just stopped. Clean reload to reset everything.
+            window.location.reload();
+        }
+        prevIsPlaying.current = isPlaying;
+    }, [isPlaying]);
+
     return (
         <div className="app-container">
             <SimulationOverlay />
