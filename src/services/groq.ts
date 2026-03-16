@@ -512,6 +512,7 @@ export interface ModelInvocationRecord {
     latency_ms: number;
     estimated_tokens: number;
     specialty?: string;
+    clinician_profile?: string;
     artifact_type?: string;
     result_status?: string;
     pipeline_status?: string;
@@ -536,6 +537,7 @@ export interface ModelInvocationEvent {
     error_code?: string;
     estimated_tokens?: number;
     specialty?: string;
+    clinician_profile?: string;
     artifact_type?: string;
     result_status?: string;
     pipeline_status?: string;

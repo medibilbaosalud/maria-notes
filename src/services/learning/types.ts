@@ -52,6 +52,7 @@ export interface LearningEventMetadata extends Record<string, unknown> {
     sections_changed?: number;
     record_uuid?: string;
     specialty?: string;
+    clinician_profile?: string;
     target_section?: string;
     scope_level?: LearningScopeLevel;
     edit_scope?: LearningEditScope;
@@ -79,6 +80,7 @@ export interface StructuredLearningEvent {
     normalized_after: string;
     signature_hash: string;
     specialty?: string;
+    clinician_profile?: string;
     artifact_type?: LearningArtifactType;
     target_section?: string;
     scope_level?: LearningScopeLevel;
@@ -104,6 +106,7 @@ export interface RuleCandidateRecord {
     blocked_reason?: string;
     metrics_snapshot?: Record<string, unknown>;
     specialty?: string;
+    clinician_profile?: string;
     artifact_type?: LearningArtifactType;
     target_section?: string;
     scope_level?: LearningScopeLevel;
@@ -135,6 +138,7 @@ export interface RulePackRule {
     priority: number;
     confidence: number;
     specialty?: string;
+    clinician_profile?: string;
     artifact_type?: LearningArtifactType;
     target_section?: string;
     scope_level?: LearningScopeLevel;
@@ -169,6 +173,7 @@ export interface RuleEvaluationInput {
     inconsistency_delta: number;
     score: number;
     specialty?: string;
+    clinician_profile?: string;
     artifact_type?: LearningArtifactType;
     target_section?: string;
     scope_level?: LearningScopeLevel;

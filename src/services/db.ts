@@ -7,6 +7,7 @@ export interface MedicalRecord {
     patient_name: string;
     consultation_type: string;
     specialty?: string;
+    clinician_profile?: string;
     transcription: string;
     medical_history: string;
     original_medical_history?: string; // Preserves the raw AI output before user edits
@@ -295,6 +296,7 @@ export interface AiLearningEvent {
     normalized_after: string;
     signature_hash: string;
     specialty?: string;
+    clinician_profile?: string;
     artifact_type?: string;
     target_section?: string;
     scope_level?: string;

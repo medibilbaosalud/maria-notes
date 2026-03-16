@@ -343,6 +343,11 @@ const AppContent = () => {
         return specialty === 'psicologia' ? psychologyClinicianName : undefined;
     }, [psychologyClinicianName]);
 
+    const resolveClinicianProfileForSpecialty = useCallback((specialty: ClinicalSpecialtyId): string | undefined => {
+        if (specialty !== 'psicologia') return undefined;
+        return normalizePsychologyClinician(psychologyClinicianName).toLowerCase();
+    }, [psychologyClinicianName]);
+
     useEffect(() => {
         contextSpecialtyRef.current = contextSpecialty;
     }, [contextSpecialty]);
@@ -1413,6 +1418,7 @@ const AppContent = () => {
         patientName: string;
         consultationType: string;
         specialty: ClinicalSpecialtyId;
+        clinicianProfile?: string;
         transcription: string;
         medicalHistory: string;
         auditId?: string;
@@ -1428,6 +1434,7 @@ const AppContent = () => {
             patient_name: params.patientName,
             consultation_type: params.consultationType,
             specialty: params.specialty,
+            clinician_profile: params.clinicianProfile,
             transcription: params.transcription,
             medical_history: params.medicalHistory,
             original_medical_history: params.medicalHistory,
@@ -1469,6 +1476,7 @@ const AppContent = () => {
                 ...entry,
                 session_id: entry.session_id || params.sessionId || params.result.session_id,
                 specialty: entry.specialty || params.specialty,
+                clinician_profile: entry.clinician_profile || resolveClinicianProfileForSpecialty(params.specialty),
                 artifact_type: entry.artifact_type || 'medical_history',
                 result_status: entry.result_status || params.result.result_status,
                 pipeline_status: entry.pipeline_status || params.result.pipeline_status
@@ -1482,6 +1490,7 @@ const AppContent = () => {
             audit_data: {
                 patient_name: params.patientName,
                 specialty: params.specialty,
+                clinician_profile: resolveClinicianProfileForSpecialty(params.specialty) || null,
                 artifact_type: 'medical_history',
                 pipeline_version: 'gemini_first_observability_v1',
                 models_used: {
@@ -2048,6 +2057,7 @@ const AppContent = () => {
             void enqueueAuditEvent('pipeline_run_update', {
                 session_id: sessionId,
                 patient_name: patientName,
+                clinician_profile: resolveClinicianProfileForSpecialty(contextSpecialtyRef.current) || null,
                 status: requiresHardening ? 'draft_ready' : runStatus,
                 outcome: requiresHardening ? 'draft_ready' : runStatus,
                 metadata: {
@@ -2083,6 +2093,7 @@ const AppContent = () => {
                 model_used: result.model,
                 provider_used: result.model.startsWith('gemini:') ? 'gemini' : 'groq',
                 specialty: contextSpecialtyRef.current,
+                clinician_profile: resolveClinicianProfileForSpecialty(contextSpecialtyRef.current) || null,
                 artifact_type: 'medical_history',
                 result_status: resultStatus,
                 pipeline_status: runStatus,
@@ -2110,6 +2121,7 @@ const AppContent = () => {
                 patientName,
                 consultationType: contextSpecialtyRef.current,
                 specialty: contextSpecialtyRef.current,
+                clinicianProfile: resolveClinicianProfileForSpecialty(contextSpecialtyRef.current),
                 transcription: fullTranscription,
                 medicalHistory: result.data,
                 auditId: result.audit_id,
@@ -2176,6 +2188,7 @@ const AppContent = () => {
                             patientName,
                             consultationType: hardenedSpecialty,
                             specialty: hardenedSpecialty,
+                            clinicianProfile: resolveClinicianProfileForSpecialty(hardenedSpecialty),
                             transcription: fullTranscription,
                             medicalHistory: hardenedResult.data,
                             auditId: hardenedResult.audit_id,
@@ -2233,6 +2246,7 @@ const AppContent = () => {
                         void enqueueAuditEvent('pipeline_final_promoted', {
                             session_id: sessionId,
                             patient_name: patientName,
+                            clinician_profile: resolveClinicianProfileForSpecialty(hardenedSpecialty) || null,
                             supersedes_record_uuid: draftRecordUuid || null,
                             promoted_record_uuid: promotedRecord?.record_uuid || null,
                             hardening_ms: Date.now() - hardeningStartedAt
@@ -2255,6 +2269,7 @@ const AppContent = () => {
                         });
                         void enqueueAuditEvent('pipeline_hardening_failed', {
                             session_id: sessionId,
+                            clinician_profile: resolveClinicianProfileForSpecialty(contextSpecialtyRef.current) || null,
                             patient_name: patientName,
                             error_message: (hardeningError as Error)?.message || 'hardening_failed'
                         });
@@ -3002,6 +3017,7 @@ const AppContent = () => {
                 patientName,
                 consultationType: specialty,
                 specialty,
+                clinicianProfile: resolveClinicianProfileForSpecialty(specialty),
                 transcription: text,
                 medicalHistory: result.data,
                 auditId: result.audit_id,
@@ -3023,13 +3039,15 @@ const AppContent = () => {
                     record_id: savedRecord.record_uuid,
                     quality_score: result.quality_score || 0,
                     critical_gaps_count: result.critical_gaps?.length || 0,
-                    corrected_count: result.corrections_applied || 0
+                    corrected_count: result.corrections_applied || 0,
+                    clinician_profile: resolveClinicianProfileForSpecialty(specialty) || undefined
                 });
             }
 
             void enqueueAuditEvent('pipeline_run_update', {
                 session_id: textSessionId,
                 patient_name: patientName,
+                clinician_profile: resolveClinicianProfileForSpecialty(specialty) || null,
                 status: runStatus,
                 outcome: runStatus,
                 metadata: {
@@ -3050,6 +3068,7 @@ const AppContent = () => {
                 model_used: result.model,
                 provider_used: result.model.startsWith('gemini:') ? 'gemini' : 'groq',
                 specialty,
+                clinician_profile: resolveClinicianProfileForSpecialty(specialty) || null,
                 artifact_type: 'medical_history',
                 result_status: resultStatus,
                 pipeline_status: runStatus,
@@ -3305,6 +3324,9 @@ const AppContent = () => {
                             setTranscription(record.transcription || '');
                             setCurrentPatientName(record.patient_name);
                             setCurrentRecordId(record.record_uuid || null);
+                            if (normalizeClinicalSpecialty(record.specialty || record.consultation_type) === 'psicologia' && record.clinician_profile) {
+                                setPsychologyClinicianName(normalizePsychologyClinician(record.clinician_profile));
+                            }
                             activeSessionIdRef.current = null;
                             setPipelineMetadata(undefined);
                             lockContextSpecialty(normalizeClinicalSpecialty(record.specialty || record.consultation_type));
@@ -3331,6 +3353,8 @@ const AppContent = () => {
                         isLoading={isLoading}
                         patientName={currentPatientName}
                         specialty={contextSpecialty}
+                        clinicianProfile={resolveClinicianProfileForSpecialty(contextSpecialty)}
+                        clinicianName={resolveClinicianNameForSpecialty(contextSpecialty)}
                         originalContent={originalHistory}
                         transcription={transcription}
                         apiKey={apiKey}
@@ -3426,6 +3450,8 @@ const AppContent = () => {
                 <SpecialtyEntryScreen
                     selectedSpecialty={activeSpecialty}
                     onSelectSpecialty={handleSpecialtyChange}
+                    psychologyClinicianName={psychologyClinicianName}
+                    onSelectPsychologyClinician={handlePsychologyClinicianChange}
                     onContinue={handleWorkspaceEntry}
                 />
             ) : (

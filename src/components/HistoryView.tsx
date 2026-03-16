@@ -28,6 +28,8 @@ interface HistoryViewProps {
   isLoading: boolean;
   patientName?: string;
   specialty?: ClinicalSpecialtyId;
+  clinicianProfile?: string;
+  clinicianName?: string;
   originalContent?: string; // Raw AI output (baseline) if available
   transcription?: string; // Needed for learning context
   apiKey?: string; // Needed for Qwen3 analysis call
@@ -196,6 +198,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   isLoading,
   patientName,
   specialty = 'otorrino',
+  clinicianProfile,
+  clinicianName,
   originalContent,
   transcription,
   apiKey,
@@ -274,7 +278,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     const sectionDelta = detectSectionDeltaCount(baseline, current);
     return delta >= 24 || sectionDelta >= 2;
   }, [editValue, historyText, isEditing]);
-  const feedbackAnchorId = `${metadata?.auditId || 'no-audit'}:${recordId || 'no-record'}:${specialty}`;
+  const feedbackAnchorId = `${metadata?.auditId || 'no-audit'}:${recordId || 'no-record'}:${specialty}:${clinicianProfile || 'default'}`;
   const showDoctorFeedbackWidget = doctorScoreEnabled
     && !isLoading
     && Boolean(metadata?.auditId || recordId)
@@ -565,6 +569,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         audit_id: metadata?.auditId,
         session_id: sessionId,
         specialty,
+        clinician_profile: clinicianProfile || undefined,
         artifact_type: 'medical_history',
         feedback_stage: 'generated',
         feedback_text: doctorFeedbackText.trim() || undefined,
@@ -639,7 +644,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     const aiDraftText = (originalHistoryRef.current || historyText || '').trim();
     const finalText = (doctorFinalText || '').trim();
     const transcriptionText = (transcription || '').trim();
-    const dedupeKey = `${metadata?.auditId || sessionId || recordId || patientName || 'history'}:medical_history`;
+    const dedupeKey = `${metadata?.auditId || sessionId || recordId || patientName || 'history'}:medical_history:${clinicianProfile || 'default'}`;
     if (!dedupeKey || (!aiDraftText && !finalText && !transcriptionText)) return;
 
     const snapshotSignature = JSON.stringify({
@@ -663,6 +668,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       audit_id: metadata?.auditId,
       session_id: sessionId,
       specialty,
+      clinician_profile: clinicianProfile || undefined,
       artifact_type: 'medical_history',
       patient_name_snapshot: patientName || undefined,
       transcription_text: transcriptionText,
@@ -673,7 +679,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       review_status: options?.reviewStatus || 'pending',
       model_used: metadata?.models?.generation || null,
       provider_used: generationProviderLabel,
-      prompt_version: specialty === 'psicologia' ? 'psychology-ainhoa-v1' : 'otorrino-v1',
+      prompt_version: specialty === 'psicologia'
+        ? `psychology-${String(clinicianProfile || 'ainhoa')}-v1`
+        : 'otorrino-v1',
       rule_pack_version: metadata?.rulePackVersion || null,
       rule_ids_used: metadata?.ruleIdsUsed || [],
       pipeline_status: metadata?.resultStatus || null,
@@ -694,6 +702,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       lastDiagnosticSnapshotRef.current = snapshotSignature;
     }
   }, [
+    clinicianProfile,
     generationProviderLabel,
     historyText,
     metadata,
@@ -728,6 +737,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           artifactType: 'medical_history',
           allowAutosaveLearn: true,
           specialty,
+          clinicianProfile,
           doctorReasonCode: doctorReasonCode || undefined
         }).then((learningResult) => {
           if (learningResult?.candidate_ids?.length) {
@@ -742,6 +752,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               source: 'history_save',
               artifactType: 'medical_history',
               specialty,
+              clinicianProfile,
               targetSection: selectedSection,
               doctorReasonCode: doctorReasonCode || undefined,
               hallucinationDelta: hallucinationCount > 0 ? 0.005 : 0,
@@ -775,6 +786,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     if (diagnosticIdRef.current && previousSavedText.trim() !== editValue.trim()) {
       await saveClinicalGenerationDiagnosticEdit({
         diagnostic_id: diagnosticIdRef.current,
+        clinician_profile: clinicianProfile || undefined,
         section_name: selectedSection || null,
         edit_type: mapDoctorReasonToEditType(doctorReasonCode, previousSavedText, editValue),
         importance: estimateEditImportance(previousSavedText, editValue),
@@ -785,7 +797,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         metadata: {
           doctor_reason_code: doctorReasonCode || null,
           record_id: recordId || null,
-          audit_id: metadata?.auditId || null
+          audit_id: metadata?.auditId || null,
+          clinician_profile: clinicianProfile || null,
+          clinician_name: clinicianName || null
         }
       });
     }
@@ -804,7 +818,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     ]);
     setDoctorReasonCode('');
     setIsEditing(false);
-  }, [apiKey, doctorReasonCode, editValue, historyText, metadata, persistContent, recordId, selectedSection, specialty, transcription]);
+  }, [apiKey, clinicianName, clinicianProfile, doctorReasonCode, editValue, historyText, metadata, persistContent, recordId, selectedSection, specialty, transcription]);
 
   const handleCancelEdit = () => {
     setIsEditing(false);
@@ -963,7 +977,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           source: 'history_autosave',
           artifactType: 'medical_history',
           allowAutosaveLearn: true,
-          specialty
+          specialty,
+          clinicianProfile
         }).then((learningResult) => {
           if (!learningResult?.candidate_ids?.length) return;
           const hallucinationCount = (metadata?.remainingErrors || []).filter((err) => err.type === 'hallucination').length;
@@ -975,6 +990,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             source: 'history_autosave',
             artifactType: 'medical_history',
             specialty,
+            clinicianProfile,
             targetSection: selectedSection,
             hallucinationDelta: hallucinationCount > 0 ? 0.005 : 0,
             inconsistencyDelta: inconsistencyCount > 0 ? 0.005 : 0,
@@ -994,6 +1010,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         if (diagnosticIdRef.current && previousSavedText.trim() !== editValue.trim()) {
           await saveClinicalGenerationDiagnosticEdit({
             diagnostic_id: diagnosticIdRef.current,
+            clinician_profile: clinicianProfile || undefined,
             section_name: selectedSection || null,
             edit_type: mapDoctorReasonToEditType('', previousSavedText, editValue),
             importance: estimateEditImportance(previousSavedText, editValue),
@@ -1003,7 +1020,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             edit_distance_chars: Math.abs(editValue.length - previousSavedText.length),
             metadata: {
               record_id: recordId || null,
-              audit_id: metadata?.auditId || null
+              audit_id: metadata?.auditId || null,
+              clinician_profile: clinicianProfile || null,
+              clinician_name: clinicianName || null
             }
           });
         }
@@ -1024,7 +1043,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       }
     }, 1200);
     return () => clearTimeout(timeout);
-  }, [apiKey, editValue, historyText, isEditing, metadata, persistContent, recordId, selectedSection, specialty, transcription]);
+  }, [apiKey, clinicianName, clinicianProfile, editValue, historyText, isEditing, metadata, persistContent, recordId, selectedSection, specialty, transcription]);
 
   const reviewCompleted = (metadata?.uncertaintyFlags?.length || 0) === 0
     || (metadata?.uncertaintyFlags || []).every((flag) => flagDecisions[flag.field_path]);

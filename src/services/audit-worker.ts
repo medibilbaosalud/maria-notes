@@ -219,6 +219,12 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
     const modelsUsed = (auditData.models_used && typeof auditData.models_used === 'object')
         ? auditData.models_used as Record<string, unknown>
         : {};
+    const clinicianProfile = String(
+        payload.clinician_profile
+        || auditData.clinician_profile
+        || modelsUsed.clinician_profile
+        || ''
+    ).trim().toLowerCase() || null;
     const historyOutput = typeof auditData.history_output === 'string'
         ? String(auditData.history_output)
         : (generationVersions.length > 0
@@ -228,6 +234,7 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
     const { error: auditError } = await supabase.from('ai_audit_logs').upsert([{
         id: auditId,
         patient_name: auditData.patient_name || null,
+        clinician_profile: clinicianProfile,
         pipeline_version: auditData.pipeline_version || null,
         models_used: modelsUsed,
         extraction_data: auditData.extraction_data || null,
@@ -247,6 +254,7 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
             session_id: String(payload.session_id || '') || null,
             name: auditData.patient_name || null,
             patient_name: auditData.patient_name || null,
+            clinician_profile: clinicianProfile,
             medical_history: historyOutput || '',
             primary_model: typeof modelsUsed.generation === 'string' ? String(modelsUsed.generation) : null,
             models_used: modelsUsed,
@@ -323,6 +331,7 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
             latency_ms: Number.isFinite(Number(entry.latency_ms)) ? Number(entry.latency_ms) : null,
             estimated_tokens: Number.isFinite(Number(entry.estimated_tokens)) ? Number(entry.estimated_tokens) : null,
             specialty: entry.specialty ? String(entry.specialty) : null,
+            clinician_profile: entry.clinician_profile ? String(entry.clinician_profile) : clinicianProfile,
             artifact_type: entry.artifact_type ? String(entry.artifact_type) : null,
             result_status: entry.result_status ? String(entry.result_status) : null,
             pipeline_status: entry.pipeline_status ? String(entry.pipeline_status) : null,
@@ -393,6 +402,7 @@ const processPipelineRunUpdate = async (payload: Record<string, unknown>) => {
     const status = String(payload.status || 'recording');
     const outcome = payload.outcome ? String(payload.outcome) : null;
     const metadata = (payload.metadata as Record<string, unknown> | undefined) || {};
+    const clinicianProfile = String(payload.clinician_profile || metadata.clinician_profile || '').trim().toLowerCase() || null;
     if (status === 'awaiting_budget' || status === 'provisional' || status === 'degraded' || status === 'failed') {
         const reason = String(metadata.reason || outcome || status);
         recordDegradationCause(reason);
@@ -413,6 +423,7 @@ const processPipelineRunUpdate = async (payload: Record<string, unknown>) => {
         const { error } = await supabase.from('ai_pipeline_runs').insert([{
             session_id: sessionId,
             patient_name: patientName,
+            clinician_profile: clinicianProfile,
             status,
             outcome,
             metadata,
@@ -432,6 +443,7 @@ const processPipelineRunUpdate = async (payload: Record<string, unknown>) => {
         .from('ai_pipeline_runs')
         .update({
             patient_name: patientName,
+            clinician_profile: clinicianProfile,
             status,
             outcome,
             metadata,
@@ -456,6 +468,7 @@ const processPipelineAttempt = async (payload: Record<string, unknown>) => {
     const status = String(payload.status || 'started');
     const durationMs = typeof payload.duration_ms === 'number' ? payload.duration_ms : null;
     const metadata = (payload.metadata as Record<string, unknown> | undefined) || {};
+    const clinicianProfile = String(payload.clinician_profile || metadata.clinician_profile || '').trim().toLowerCase() || null;
     if (durationMs !== null) {
         recordStageLatency(stage, durationMs);
     }
@@ -480,6 +493,7 @@ const processPipelineAttempt = async (payload: Record<string, unknown>) => {
         model_used: payload.model_used || null,
         provider_used: payload.provider_used || null,
         specialty: payload.specialty || null,
+        clinician_profile: clinicianProfile,
         artifact_type: payload.artifact_type || null,
         result_status: payload.result_status || null,
         pipeline_status: payload.pipeline_status || null,
@@ -517,6 +531,7 @@ const processPipelineMarker = async (eventType: string, payload: Record<string, 
         model_used: payload.model_used || null,
         provider_used: payload.provider_used || null,
         specialty: payload.specialty || null,
+        clinician_profile: String(payload.clinician_profile || '').trim().toLowerCase() || null,
         artifact_type: payload.artifact_type || null,
         result_status: payload.result_status || null,
         pipeline_status: payload.pipeline_status || null,

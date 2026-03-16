@@ -129,6 +129,53 @@
   justify-content: flex-end;
 }
 
+.specialty-entry-clinician-block {
+  margin-top: 1.35rem;
+  padding: 1.1rem 1.05rem 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.specialty-entry-clinician-copy {
+  display: grid;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+}
+
+.specialty-entry-clinician-copy h2 {
+  margin: 0;
+  font-size: 1.18rem;
+  line-height: 1.15;
+  color: #0f172a;
+}
+
+.specialty-entry-clinician-copy span {
+  color: rgba(15, 23, 42, 0.68);
+  font-size: 0.95rem;
+}
+
+.specialty-entry-clinician-eyebrow {
+  margin: 0;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  color: #0f766e;
+}
+
+.specialty-entry-grid-clinicians {
+  margin-top: 0;
+}
+
+.specialty-entry-clinician-option {
+  min-height: 94px;
+}
+
+.specialty-entry-clinician-icon {
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
 .specialty-entry-continue {
   display: inline-flex;
   align-items: center;
@@ -164,6 +211,10 @@
 
   .specialty-entry-grid {
     grid-template-columns: 1fr;
+  }
+
+  .specialty-entry-clinician-block {
+    padding-inline: 0;
   }
 
   .specialty-entry-actions {

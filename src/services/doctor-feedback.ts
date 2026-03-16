@@ -62,6 +62,7 @@ export interface ProcessDoctorFeedbackV2Params {
     artifactType: LearningArtifactType;
     allowAutosaveLearn: boolean;
     specialty?: ClinicalSpecialtyId | string;
+    clinicianProfile?: string;
     doctorReasonCode?: LearningDoctorReasonCode;
 }
 
@@ -318,12 +319,14 @@ const buildFieldPath = (section: string, change: ChangeDetected): string => {
 
 const buildSignatureHash = (params: {
     specialty?: string;
+    clinicianProfile?: string;
     artifactType?: LearningArtifactType;
     section: string;
     intent: LearningEditIntent;
     normalizedAfter: string;
 }): string => deterministicHash([
     normalizeClinicalSpecialty(params.specialty),
+    String(params.clinicianProfile || '').trim().toLowerCase(),
     params.artifactType || 'medical_history',
     normalizeHeader(params.section),
     params.intent,
@@ -437,6 +440,7 @@ export const extractStructuredEdits = (
         sectionsChanged?: number;
         recordUuid?: string;
         specialty?: string;
+        clinicianProfile?: string;
         doctorReasonCode?: LearningDoctorReasonCode;
     }
 ): StructuredLearningEvent[] => {
@@ -451,6 +455,7 @@ export const extractStructuredEdits = (
         const targetSection = normalizeHeader(change.section || 'GENERAL');
         const signatureHash = buildSignatureHash({
             specialty: options?.specialty,
+            clinicianProfile: options?.clinicianProfile,
             artifactType: options?.artifactType,
             section: targetSection,
             intent,
@@ -471,6 +476,7 @@ export const extractStructuredEdits = (
             normalized_after: normalizedAfter,
             signature_hash: signatureHash,
             specialty: normalizeClinicalSpecialty(options?.specialty),
+            clinician_profile: options?.clinicianProfile || undefined,
             artifact_type: options?.artifactType,
             target_section: targetSection,
             scope_level: scopeLevel,
@@ -486,6 +492,7 @@ export const extractStructuredEdits = (
                 sections_changed: options?.sectionsChanged,
                 record_uuid: options?.recordUuid,
                 specialty: normalizeClinicalSpecialty(options?.specialty),
+                clinician_profile: options?.clinicianProfile || undefined,
                 target_section: targetSection,
                 scope_level: scopeLevel,
                 edit_scope: editScope,
@@ -522,17 +529,30 @@ const persistLearningDecision = async (
     reason: string,
     previousState: LearningLifecycleState,
     nextState: LearningLifecycleState,
-    metricsSnapshot?: Record<string, unknown>
+    metricsSnapshot?: Record<string, unknown>,
+    context?: {
+        specialty?: string;
+        clinician_profile?: string;
+        artifact_type?: LearningArtifactType;
+        target_section?: string;
+        doctor_reason_code?: LearningDoctorReasonCode;
+    }
 ): Promise<void> => {
     if (!supabase) return;
     await supabase.from('ai_learning_decisions').insert([{
         rule_id: ruleId,
         decision_type: decisionType,
         reason,
+        specialty: context?.specialty || null,
+        clinician_profile: context?.clinician_profile || null,
+        artifact_type: context?.artifact_type || null,
+        target_section: context?.target_section || null,
+        doctor_reason_code: context?.doctor_reason_code || null,
         metrics_snapshot: metricsSnapshot || {},
         context: {
             previous_state: previousState,
-            new_state: nextState
+            new_state: nextState,
+            clinician_profile: context?.clinician_profile || null
         }
     }]);
 
@@ -557,6 +577,7 @@ const updateEvidenceRollup = async (event: StructuredLearningEvent): Promise<voi
     const payload = {
         signature_hash: signatureHash,
         specialty: event.specialty || 'otorrino',
+        clinician_profile: event.clinician_profile || event.metadata?.clinician_profile || null,
         artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
         target_section: event.target_section || event.section,
         recurrence_count: nextRecurrence,
@@ -583,6 +604,7 @@ export const upsertRuleCandidateFromEvent = async (
 
     const reverseSignature = deterministicHash([
         normalizeClinicalSpecialty(event.specialty),
+        String(event.clinician_profile || event.metadata?.clinician_profile || '').trim().toLowerCase(),
         event.artifact_type || event.metadata?.artifact_type || 'medical_history',
         normalizeHeader(event.section),
         event.edit_intent || inferEditIntent(event.category),
@@ -610,12 +632,14 @@ export const upsertRuleCandidateFromEvent = async (
                 contradiction_count: reverseContradiction,
                 confidence_score: reverseScore,
                 specialty: event.specialty || 'otorrino',
+                clinician_profile: event.clinician_profile || event.metadata?.clinician_profile || null,
                 artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
                 target_section: event.target_section || event.section,
                 scope_level: event.scope_level || 'section',
                 rule_json: {
                     ...(reverse.rule_json || {}),
                     specialty: event.specialty || (reverse.rule_json as Record<string, unknown> | undefined)?.specialty || 'otorrino',
+                    clinician_profile: event.clinician_profile || (reverse.rule_json as Record<string, unknown> | undefined)?.clinician_profile || undefined,
                     artifact_type: event.artifact_type || event.metadata?.artifact_type || (reverse.rule_json as Record<string, unknown> | undefined)?.artifact_type || 'medical_history',
                     target_section: event.target_section || event.section,
                     scope_level: event.scope_level || 'section',
@@ -664,6 +688,7 @@ export const upsertRuleCandidateFromEvent = async (
                 confidence_score: nextConfidence,
                 lifecycle_state: nextState,
                 specialty: event.specialty || 'otorrino',
+                clinician_profile: event.clinician_profile || event.metadata?.clinician_profile || null,
                 artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
                 target_section: event.target_section || event.section,
                 scope_level: event.scope_level || 'section',
@@ -671,6 +696,7 @@ export const upsertRuleCandidateFromEvent = async (
                 rule_json: {
                     ...(existing.rule_json || {}),
                     specialty: event.specialty || (existing.rule_json as Record<string, unknown> | undefined)?.specialty || 'otorrino',
+                    clinician_profile: event.clinician_profile || (existing.rule_json as Record<string, unknown> | undefined)?.clinician_profile || undefined,
                     artifact_type: event.artifact_type || event.metadata?.artifact_type || (existing.rule_json as Record<string, unknown> | undefined)?.artifact_type || 'medical_history',
                     target_section: event.target_section || event.section,
                     scope_level: event.scope_level || 'section',
@@ -707,6 +733,13 @@ export const upsertRuleCandidateFromEvent = async (
                     confidence_score: nextConfidence,
                     evidence_count: nextEvidence,
                     contradiction_count: nextContradiction
+                },
+                {
+                    specialty: event.specialty || 'otorrino',
+                    clinician_profile: event.clinician_profile || event.metadata?.clinician_profile || undefined,
+                    artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
+                    target_section: event.target_section || event.section,
+                    doctor_reason_code: event.doctor_reason_code || undefined
                 }
             );
         }
@@ -722,6 +755,7 @@ export const upsertRuleCandidateFromEvent = async (
         rule_text: fallbackSummary,
         rule_json: {
             specialty: event.specialty || 'otorrino',
+            clinician_profile: event.clinician_profile || event.metadata?.clinician_profile || undefined,
             section: event.section,
             target_section: event.target_section || event.section,
             field_path: event.field_path,
@@ -751,6 +785,7 @@ export const upsertRuleCandidateFromEvent = async (
         }),
         lifecycle_state: 'candidate',
         specialty: event.specialty || 'otorrino',
+        clinician_profile: event.clinician_profile || event.metadata?.clinician_profile || undefined,
         artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
         target_section: event.target_section || event.section,
         scope_level: event.scope_level || 'section',
@@ -996,6 +1031,7 @@ export const processDoctorFeedbackV2 = async (
         recordUuid: params.recordId
         ,
         specialty,
+        clinicianProfile: params.clinicianProfile,
         doctorReasonCode: params.doctorReasonCode
     }).map((event) => normalizeLearningEvent(event, {
         recordId: params.recordId,
@@ -1027,6 +1063,7 @@ export const processDoctorFeedbackV2 = async (
             edit_intent: inferEditIntent(effectiveCategory),
             signature_hash: buildSignatureHash({
                 specialty,
+                clinicianProfile: params.clinicianProfile,
                 artifactType: params.artifactType,
                 section: event.section,
                 intent: inferEditIntent(effectiveCategory),
@@ -1052,6 +1089,7 @@ export const processDoctorFeedbackV2 = async (
             after_hash: afterHash,
             final_text_hash: finalTextHash,
             specialty,
+            clinician_profile: params.clinicianProfile || undefined,
             target_section: normalizedEvent.target_section || normalizedEvent.section,
             scope_level: normalizedEvent.scope_level || 'section',
             edit_intent: normalizedEvent.edit_intent || inferEditIntent(effectiveCategory),
@@ -1077,6 +1115,7 @@ export const processDoctorFeedbackV2 = async (
             normalized_after: normalizedEvent.normalized_after,
             signature_hash: normalizedEvent.signature_hash,
             specialty,
+            clinician_profile: params.clinicianProfile || undefined,
             artifact_type: params.artifactType,
             target_section: normalizedEvent.target_section || normalizedEvent.section,
             scope_level: normalizedEvent.scope_level || 'section',

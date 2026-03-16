@@ -117,6 +117,7 @@ export interface MedicalRecord {
     patient_name: string;
     consultation_type: string;
     specialty?: string;
+    clinician_profile?: string;
     transcription: string;
     medical_history: string;
     medical_report?: string;
@@ -144,6 +145,7 @@ export interface ClinicalGenerationDiagnosticEntry {
     audit_id?: string;
     session_id?: string;
     specialty: string;
+    clinician_profile?: string;
     artifact_type: string;
     patient_name_snapshot?: string;
     transcription_text: string;
@@ -165,6 +167,7 @@ export interface ClinicalGenerationDiagnosticEntry {
 
 export interface ClinicalGenerationDiagnosticEditEntry {
     diagnostic_id: string;
+    clinician_profile?: string;
     section_name?: string | null;
     edit_type: 'added' | 'removed' | 'rewritten' | 'terminology' | 'style' | 'formatting' | 'clinical_precision' | 'omission';
     importance?: 'low' | 'medium' | 'high';
@@ -541,6 +544,7 @@ export const saveDoctorSatisfactionEvent = async (entry: {
     audit_id?: string;
     session_id?: string;
     specialty?: string;
+    clinician_profile?: string;
     artifact_type?: string;
     feedback_stage?: string;
     feedback_text?: string;
@@ -555,6 +559,7 @@ export const saveDoctorSatisfactionEvent = async (entry: {
         audit_id: entry.audit_id || null,
         session_id: entry.session_id || null,
         specialty: entry.specialty || null,
+        clinician_profile: entry.clinician_profile || null,
         artifact_type: entry.artifact_type || null,
         feedback_stage: entry.feedback_stage || 'generated',
         feedback_text: entry.feedback_text || null,
@@ -576,6 +581,7 @@ export const upsertClinicalGenerationDiagnostic = async (
         audit_id: entry.audit_id || null,
         session_id: entry.session_id || null,
         specialty: entry.specialty,
+        clinician_profile: entry.clinician_profile || null,
         artifact_type: entry.artifact_type,
         patient_name_snapshot: entry.patient_name_snapshot || null,
         transcription_text: entry.transcription_text || '',
@@ -622,6 +628,7 @@ export const saveClinicalGenerationDiagnosticEdit = async (
         .from('clinical_generation_diagnostic_edits')
         .insert([{
             diagnostic_id: entry.diagnostic_id,
+            clinician_profile: entry.clinician_profile || null,
             section_name: entry.section_name || null,
             edit_type: entry.edit_type,
             importance: entry.importance || 'medium',
@@ -641,6 +648,7 @@ export const upsertConsultationQualitySummary = async (summary: {
     quality_score: number;
     critical_gaps_count: number;
     corrected_count: number;
+    clinician_profile?: string;
 }): Promise<void> => {
     const client = getProtectedSupabase();
     if (!client || !summary.record_id) return;
@@ -648,6 +656,7 @@ export const upsertConsultationQualitySummary = async (summary: {
         .from('consultation_quality_summary')
         .upsert([{
             record_id: summary.record_id,
+            clinician_profile: summary.clinician_profile || null,
             quality_score: Math.max(0, Math.min(100, Math.round(summary.quality_score))),
             critical_gaps_count: Math.max(0, Math.round(summary.critical_gaps_count || 0)),
             corrected_count: Math.max(0, Math.round(summary.corrected_count || 0)),

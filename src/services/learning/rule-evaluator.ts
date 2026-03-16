@@ -142,6 +142,7 @@ export interface EvaluateRuleImpactV2Params {
     source: DoctorEditSource;
     artifactType: LearningArtifactType;
     specialty?: string;
+    clinicianProfile?: string;
     targetSection?: string;
     scopeLevel?: 'field' | 'section' | 'document';
     doctorReasonCode?: LearningDoctorReasonCode;
@@ -308,6 +309,7 @@ export const evaluateAndPersistRuleImpactV2 = async (params: EvaluateRuleImpactV
                 source: params.source,
                 artifact_type: params.artifactType,
                 specialty: params.specialty || null,
+                clinician_profile: params.clinicianProfile || null,
                 target_section: params.targetSection || null,
                 scope_level: params.scopeLevel || 'document',
                 doctor_reason_code: params.doctorReasonCode || null,
@@ -316,6 +318,7 @@ export const evaluateAndPersistRuleImpactV2 = async (params: EvaluateRuleImpactV
                 trivial_edit: trivialEdit
             },
             specialty: params.specialty,
+            clinician_profile: params.clinicianProfile,
             artifact_type: params.artifactType,
             target_section: params.targetSection,
             scope_level: params.scopeLevel,
@@ -335,6 +338,7 @@ export const evaluateAndPersistRuleImpactV2 = async (params: EvaluateRuleImpactV
             inconsistency_delta: evalInput.inconsistency_delta,
             score: evalInput.score,
             specialty: params.specialty || null,
+            clinician_profile: params.clinicianProfile || null,
             artifact_type: params.artifactType,
             target_section: params.targetSection || null,
             scope_level: params.scopeLevel || 'document',
@@ -381,6 +385,7 @@ export const evaluateAndPersistRuleImpactV2 = async (params: EvaluateRuleImpactV
                     decision_type: decision,
                     reason: 'automatic_evaluation_v2',
                     specialty: params.specialty || null,
+                    clinician_profile: params.clinicianProfile || null,
                     artifact_type: params.artifactType,
                     target_section: params.targetSection || null,
                     doctor_reason_code: params.doctorReasonCode || null,

@@ -62,6 +62,7 @@ const toCloudRecord = (record: MedicalRecord) => {
         patient_name: record.patient_name,
         consultation_type: record.consultation_type,
         specialty: record.specialty || record.consultation_type,
+        clinician_profile: record.clinician_profile || null,
         transcription: record.transcription,
         medical_history: record.medical_history,
         original_medical_history: record.original_medical_history || null,
@@ -372,6 +373,7 @@ export const syncFromCloud = async (): Promise<number> => {
                     audit_id: cloudRec.audit_id || null,
                     idempotency_key: cloudRec.idempotency_key || null,
                     specialty: cloudRec.specialty || cloudRec.consultation_type || 'otorrino',
+                    clinician_profile: cloudRec.clinician_profile || null,
                     record_uuid: cloudUuid,
                     updated_at: cloudUpdatedAt || new Date().toISOString()
                 });
@@ -389,6 +391,7 @@ export const syncFromCloud = async (): Promise<number> => {
                     audit_id: cloudRec.audit_id || null,
                     idempotency_key: cloudRec.idempotency_key || null,
                     specialty: cloudRec.specialty || cloudRec.consultation_type || local.specialty || 'otorrino',
+                    clinician_profile: cloudRec.clinician_profile || local.clinician_profile || null,
                     record_uuid: cloudUuid,
                     updated_at: cloudUpdatedAt
                 });
@@ -415,6 +418,7 @@ export const syncFromCloud = async (): Promise<number> => {
                 patient_name: patientName,
                 consultation_type: String(history.consultation_type || history.specialty || 'Historia'),
                 specialty: normalizeClinicalSpecialty(history.specialty || history.consultation_type || history.medical_history),
+                clinician_profile: String(history.clinician_profile || '') || null,
                 transcription: '',
                 medical_history: historyText,
                 original_medical_history: historyText,
