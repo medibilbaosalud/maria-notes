@@ -779,6 +779,20 @@ const AppContent = () => {
                 retryable: true
             };
         }
+        if (normalized.includes('transcripcion_insuficiente_para_generacion')) {
+            return {
+                code: 'transcripcion_insuficiente_para_generacion',
+                message: 'La transcripcion util es demasiado corta para generar una historia clinica fiable. Graba un poco mas o reintenta con un audio mas completo.',
+                retryable: true
+            };
+        }
+        if (normalized.includes('insufficient_clinical_signal')) {
+            return {
+                code: 'insufficient_clinical_signal',
+                message: 'No hay suficiente contenido clinico reconocible para generar una historia fiable. Revisa el audio o reintenta la grabacion.',
+                retryable: true
+            };
+        }
 
         return {
             code,

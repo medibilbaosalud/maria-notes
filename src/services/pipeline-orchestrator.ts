@@ -60,9 +60,23 @@ interface FinalizeRequest<TFinalizeResult> {
 }
 
 const DEFAULT_FINALIZE_WAIT_MS = 180_000;
+const MISSING_BATCH_SETTLE_MS = 12_000;
 
 const MAX_CONCURRENT_PARTIALS = 4; // Allow parallel STT/Extraction
 const MAX_FINALIZE_RETRIES = 2;
+
+const isNonRetryableFinalizeError = (error: unknown): boolean => {
+    const message = String((error as Error)?.message || '').toLowerCase();
+    if (!message) return false;
+    return [
+        'transcripcion_insuficiente_para_generacion',
+        'insufficient_clinical_signal',
+        'placeholder_detected',
+        'required_sections_missing',
+        'pipeline_not_completed',
+        'quality_gate_failed'
+    ].some((token) => message.includes(token));
+};
 
 export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
     private readonly handlers: OrchestratorHandlers<TFinalizeResult>;
@@ -278,8 +292,9 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
                     } catch (error) {
                         const totalWaitedMs = Date.now() - finalizeReq.requestedAt;
                         const retryBudgetMs = Math.max(this.finalizeWaitMs, DEFAULT_FINALIZE_WAIT_MS);
+                        const shouldRetry = !isNonRetryableFinalizeError(error);
 
-                        if (this.finalizeRetries < MAX_FINALIZE_RETRIES && totalWaitedMs < retryBudgetMs) {
+                        if (shouldRetry && this.finalizeRetries < MAX_FINALIZE_RETRIES && totalWaitedMs < retryBudgetMs) {
                             this.finalizeRetries++;
                             this.state = 'processing_partials';
                             this.touch(`finalize retry ${this.finalizeRetries}/${MAX_FINALIZE_RETRIES}: ${(error as Error)?.message || 'error'}`);
@@ -316,6 +331,36 @@ export class ConsultationPipelineOrchestrator<TFinalizeResult = void> {
                         this.finalizeRequest = null;
                         this.state = 'provisional';
                         this.touch(`Known failed partial batches: ${failed.join(', ')}`);
+                        finalizeReq.resolve(result);
+                        this.resetInternal(false);
+                        break;
+                    } catch (error) {
+                        this.state = 'failed';
+                        this.touch((error as Error)?.message || 'finalize_failed');
+                        throw error;
+                    }
+                }
+
+                const shouldFinalizeWithKnownMissing =
+                    unresolved.length > 0
+                    && noMorePartialWork
+                    && waitedMs >= MISSING_BATCH_SETTLE_MS;
+
+                if (shouldFinalizeWithKnownMissing) {
+                    unresolved.forEach((idx) => this.missingBatches.add(idx));
+                    try {
+                        const result = await this.handlers.finalize({
+                            sessionId: context.sessionId,
+                            patientName: context.patientName,
+                            lastBatchIndex: finalizeReq.lastBatchIndex,
+                            finalBlob: finalizeReq.finalBlob,
+                            missingBatches: unresolved,
+                            failedBatches: failed,
+                            processedBatches: Array.from(this.processed).sort((a, b) => a - b)
+                        });
+                        this.finalizeRequest = null;
+                        this.state = 'provisional';
+                        this.touch(`Known missing partial batches: ${unresolved.join(', ')}`);
                         finalizeReq.resolve(result);
                         this.resetInternal(false);
                         break;
