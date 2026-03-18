@@ -4,6 +4,7 @@ import { Mic, Square, Stethoscope } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { MBSLogo } from './MBSLogo';
+import { ClinicalOrb } from './ClinicalOrb';
 import { getPatientNameSuggestions, type PatientNameSuggestion } from '../services/storage';
 import { fadeSlideInSmall, motionEase, motionTransitions, softScaleTap, statusPulseSoft } from '../features/ui/motion-tokens';
 import type { ClinicalSpecialtyId } from '../clinical/specialties';
@@ -269,7 +270,6 @@ export const Recorder: React.FC<RecorderProps> = ({
   const suggestionTitle = patientName.trim().length > 0
     ? 'Sugerencias de pacientes'
     : 'Pacientes recientes';
-  const micBars = Array.from({ length: 12 }, (_, index) => index);
   const micStatusMessage = micState === 'detecting'
     ? 'Microfono funcionando. Voz detectada correctamente.'
     : micState === 'ready'
@@ -448,18 +448,7 @@ export const Recorder: React.FC<RecorderProps> = ({
               </span>
             </div>
             <div className="microphone-visualizer" aria-hidden="true">
-              {micBars.map((bar) => {
-                const threshold = (bar + 1) / micBars.length;
-                const active = micLevel >= threshold * 0.92;
-                const scaledHeight = 12 + Math.max(0, micLevel * 48 - bar * 2.4);
-                return (
-                  <span
-                    key={bar}
-                    className={`microphone-bar ${active ? 'active' : ''}`}
-                    style={{ height: `${Math.max(10, Math.min(54, scaledHeight))}px` }}
-                  />
-                );
-              })}
+              <ClinicalOrb level={micLevel} isRecording={isRecording} />
             </div>
             <p className={`microphone-health-message ${micState === 'detecting' ? 'success' : micState === 'error' ? 'error' : ''}`}>
               {micStatusMessage}

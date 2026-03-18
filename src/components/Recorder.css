@@ -537,3 +537,44 @@
     min-width: 120px;
   }
 }
+
+/* ─── Clinical Orb Visualizer ─── */
+.clinical-orb-wrapper {
+  position: relative;
+  width: 140px;
+  height: 140px;
+  margin: 0 auto 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clinical-orb-svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 20px rgba(45, 223, 207, 0.25));
+  z-index: 2;
+}
+
+.clinical-orb-glow-outer {
+  position: absolute;
+  top: 15%;
+  left: 15%;
+  right: 15%;
+  bottom: 15%;
+  background: radial-gradient(circle, rgba(45, 223, 207, 0.4) 0%, transparent 70%);
+  border-radius: 50%;
+  filter: blur(24px);
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Micro-animations for the health card when detecing */
+.microphone-health-card[data-mic-state="detecting"] .clinical-orb-glow-outer {
+  animation: orbPulse 2s infinite ease-in-out;
+}
+
+@keyframes orbPulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.15); }
+}
