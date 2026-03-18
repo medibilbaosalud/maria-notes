@@ -18,6 +18,7 @@ import {
     purgeExpiredPipelineArtifacts
 } from './services/storage';
 import {
+    getSupabaseAuthSnapshot,
     getTranscriptChunksBySession,
     logError,
     upsertConsultationQualitySummary,
@@ -777,6 +778,20 @@ const AppContent = () => {
                 code: normalized.includes('cloud_merge_fallback') ? 'cloud_merge_fallback' : 'cloud_merge_unavailable',
                 message: 'No se pudo reconstruir la transcripcion desde nube; se aplico fallback local en modo provisional.',
                 retryable: true
+            };
+        }
+        if (normalized.includes('server_transcription_provider_unconfigured')) {
+            return {
+                code: 'server_transcription_provider_unconfigured',
+                message: 'La transcripcion no puede arrancar porque en Vercel faltan las credenciales del servidor para IA. Configura `GROQ_API_KEY` y/o `GEMINI_API_KEY` antes de reintentar.',
+                retryable: false
+            };
+        }
+        if (normalized.includes('server_groq_api_key_missing') || normalized.includes('server_gemini_api_key_missing')) {
+            return {
+                code: 'server_ai_api_key_missing',
+                message: 'Faltan claves de IA del servidor en Vercel para completar la transcripcion. Revisa `GROQ_API_KEY` y `GEMINI_API_KEY`.',
+                retryable: false
             };
         }
         if (normalized.includes('transcripcion_insuficiente_para_generacion')) {
@@ -1859,7 +1874,9 @@ const AppContent = () => {
         let fullTranscription = localFullTranscription;
         let mergeSource: 'cloud' | 'local_fallback' = 'cloud';
         let cloudMergeFallbackReason: string | undefined;
-        if (sessionId) {
+        const supabaseAuthSnapshot = getSupabaseAuthSnapshot();
+        const canUseCloudTranscriptMerge = Boolean(sessionId && supabaseAuthSnapshot.isAuthenticated);
+        if (canUseCloudTranscriptMerge) {
             try {
                 await withTimeout(
                     transcriptPersistQueueRef.current,
@@ -1988,9 +2005,8 @@ const AppContent = () => {
         ];
         let runStatus = result.pipeline_status || (missingBatches.length > 0 ? 'degraded' : 'completed');
         let resultStatus = result.result_status || (runStatus === 'completed' ? 'completed' : 'provisional');
+        const cloudMergeFallbackBlocking = Boolean(cloudMergeFallbackReason && !localFullTranscription);
         if (cloudMergeFallbackReason) {
-            runStatus = 'degraded';
-            resultStatus = 'provisional';
             remainingErrors = [
                 ...remainingErrors,
                 {
@@ -1999,6 +2015,10 @@ const AppContent = () => {
                     reason: cloudMergeFallbackReason
                 }
             ];
+        }
+        if (cloudMergeFallbackBlocking) {
+            runStatus = 'degraded';
+            resultStatus = 'provisional';
         }
         const qualityGate = buildQualityGateFromHistory({
             medical_history: result.data,
@@ -2021,7 +2041,7 @@ const AppContent = () => {
             ];
         }
         const effectiveProvisionalReason = result.provisional_reason
-            || cloudMergeFallbackReason
+            || (cloudMergeFallbackBlocking ? cloudMergeFallbackReason : undefined)
             || (resultStatus === 'provisional' ? (qualityGate.blocking_reason || 'quality_gate_blocked') : undefined);
 
         setHistory(result.data);

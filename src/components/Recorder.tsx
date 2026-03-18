@@ -322,7 +322,7 @@ export const Recorder: React.FC<RecorderProps> = ({
 
   return (
     <motion.div
-      className="recorder-card"
+      className="recorder-card glass-surface"
       variants={fadeSlideInSmall}
       initial="initial"
       animate="enter"

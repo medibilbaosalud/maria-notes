@@ -22,6 +22,7 @@ import type { PipelineUiError } from '../types/pipeline';
 import type { ClinicalSpecialtyId } from '../clinical/specialties';
 import { getClinicalSpecialtyConfig } from '../clinical/specialties';
 import { buildPrintableDocument } from '../utils/printTemplates';
+import './HistoryView.css';
 
 interface HistoryViewProps {
   content: string;
@@ -137,24 +138,32 @@ const estimateEditImportance = (beforeText: string, afterText: string): 'low' | 
   return 'low';
 };
 
+const LOADING_STEPS = [
+  { label: "Audio", messages: ["Analizando audio...", "Identificando hablantes..."] },
+  { label: "Transcripción", messages: ["Transcribiendo consulta...", "Detectando síntomas..."] },
+  { label: "Estructura", messages: ["Estructurando historia clínica..."] },
+  { label: "Redacción", messages: ["Redactando informe preliminar...", "Finalizando..."] },
+];
+
 const LoadingMessages = () => {
-  const messages = [
-    "Analizando audio...",
-    "Identificando hablantes...",
-    "Transcribiendo consulta...",
-    "Detectando síntomas...",
-    "Estructurando historia clínica...",
-    "Redactando informe preliminar...",
-    "Finalizando..."
-  ];
+  const allMessages = LOADING_STEPS.flatMap(s => s.messages);
   const [index, setIndex] = useState(0);
 
   React.useEffect(() => {
     const interval = setInterval(() => {
-      setIndex((prev) => (prev + 1) % messages.length);
+      setIndex((prev) => (prev + 1) % allMessages.length);
     }, 2500);
     return () => clearInterval(interval);
   }, []);
+
+  // Determine which step we're on
+  let stepIdx = 0;
+  let count = 0;
+  for (let i = 0; i < LOADING_STEPS.length; i++) {
+    count += LOADING_STEPS[i].messages.length;
+    if (index < count) { stepIdx = i; break; }
+  }
+  const progress = Math.min(((index + 1) / allMessages.length) * 100, 95);
 
   return createPortal(
     <div className="loading-container">
@@ -184,9 +193,28 @@ const LoadingMessages = () => {
             transition={{ duration: 0.5 }}
             className="loading-text"
           >
-            {messages[index]}
+            {allMessages[index]}
           </motion.p>
         </AnimatePresence>
+      </div>
+
+      <div className="loading-progress-wrapper">
+        <div className="loading-progress-track">
+          <motion.div
+            className="loading-progress-bar"
+            initial={{ width: 0 }}
+            animate={{ width: `${progress}%` }}
+            transition={{ duration: 1.2, ease: [0.4, 0, 0.2, 1] }}
+          />
+        </div>
+        <div className="loading-step-indicators">
+          {LOADING_STEPS.map((step, i) => (
+            <span key={i} className={`loading-step ${i === stepIdx ? 'active' : ''} ${i < stepIdx ? 'done' : ''}`}>
+              <span className="step-index">{i < stepIdx ? '✓' : i + 1}</span>
+              <span className="step-label">{step.label}</span>
+            </span>
+          ))}
+        </div>
       </div>
     </div>,
     document.body
@@ -1082,24 +1110,34 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
   if (!content) {
     return (
-      <div className="empty-state">
-        <FileText size={48} className="empty-icon" />
-        {processingError && (
-          <p>{`No se pudo completar el procesamiento (${processingError.code}). ${processingError.message}`}</p>
-        )}
-        <div className="doc-actions">
-          {processingError?.retryable && onRetryProcessing && (
-            <button className="action-button secondary" onClick={onRetryProcessing}>
-              Reintentar
-            </button>
+      <div className="history-view-container">
+        <div className="empty-state">
+          <FileText size={48} className="empty-icon" strokeWidth={1.5} />
+          {processingError ? (
+            <>
+              <p>{`No se pudo completar el procesamiento (${processingError.code}).`}</p>
+              <p className="empty-hint">{processingError.message}</p>
+            </>
+          ) : (
+            <>
+              <p>No hay historia clínica generada aún</p>
+              <p className="empty-hint">Graba una consulta para generar automáticamente la historia clínica</p>
+            </>
           )}
-          {onNewConsultation && (
-            <button className="action-button new-consultation" onClick={onNewConsultation}>
-              Nueva Consulta
-            </button>
-          )}
+          <div className="doc-actions" style={{ marginTop: '0.75rem' }}>
+            {processingError?.retryable && onRetryProcessing && (
+              <button className="action-button secondary" onClick={onRetryProcessing}>
+                Reintentar
+              </button>
+            )}
+            {onNewConsultation && (
+              <button className="action-button new-consultation" onClick={onNewConsultation}>
+                <Plus size={18} />
+                Nueva Consulta
+              </button>
+            )}
+          </div>
         </div>
-        {!processingError && <p>No hay historia clínica generada aún.</p>}
       </div>
     );
   }
@@ -1110,7 +1148,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         {/* Main Document Column */}
         <div className="document-column">
           <motion.div
-            className="document-card"
+            className={`document-card${hasFinalized ? ' verified-lift' : ''}`}
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ duration: 0.5 }}
@@ -1119,6 +1157,16 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               <div className="doc-title">
                 <FileText size={20} className="doc-icon" />
                 <span>Historia Clínica</span>
+                {typeof metadata?.qualityScore === 'number' && (
+                  <div
+                    className="confidence-meter"
+                    data-level={metadata.qualityScore >= 80 ? 'high' : metadata.qualityScore >= 50 ? 'medium' : 'low'}
+                    title={`Confianza IA: ${metadata.qualityScore}/100`}
+                  >
+                    <span className="confidence-meter-fill" style={{ width: `${metadata.qualityScore}%` }} />
+                    <span className="confidence-meter-label">{metadata.qualityScore}%</span>
+                  </div>
+                )}
               </div>
               <div className="doc-actions">
                 {metadata && (
@@ -1393,17 +1441,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     className="history-edit-textarea"
                     value={editValue}
                     onChange={(e) => setEditValue(e.target.value)}
-                    style={{
-                      width: '100%',
-                      minHeight: '400px',
-                      padding: '1rem',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: '8px',
-                      fontFamily: 'inherit',
-                      fontSize: '1rem',
-                      lineHeight: '1.6',
-                      resize: 'vertical'
-                    }}
                   />
                   {isSignificantHistoryEdit && (
                     <div className="learning-reason-box">
@@ -1583,7 +1620,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             )}
 
             {metadata?.uncertaintyFlags && metadata.uncertaintyFlags.length > 0 && (
-              <div className="uncertainty-panel">
+              <div className="uncertainty-panel attention-glow">
                 <div className="uncertainty-header">
                   <AlertTriangle size={18} />
                   <span>Revisión recomendada</span>
@@ -1983,1071 +2020,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           </motion.div>
         )}
       </AnimatePresence>
-
-      <style>{`
-        .history-view-container {
-          height: 100%;
-          width: 100%;
-          overflow-y: auto;
-          padding-bottom: 2rem;
-        }
-
-        .history-layout {
-          display: flex;
-          gap: 2rem;
-          align-items: flex-start;
-          max-width: 1200px;
-          margin: 0 auto;
-        }
-
-        .document-column {
-          flex: 3;
-          min-width: 0;
-        }
-
-        .notes-column {
-          flex: 1;
-          min-width: 280px;
-          position: sticky;
-          top: 0;
-        }
-
-        .document-card {
-          background: white;
-          border-radius: 16px;
-          box-shadow: var(--shadow-md);
-          border: 1px solid var(--glass-border);
-          position: relative;
-          display: flex;
-          flex-direction: column;
-          height: 100%;
-          overflow: hidden;
-        }
-
-        .document-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 1rem 2rem;
-          background: #f8fafc;
-          border-bottom: 1px solid var(--glass-border);
-        }
-
-        .classification-banner {
-          display: flex;
-          gap: 10px;
-          align-items: center;
-          padding: 0.75rem 2rem;
-          background: #f1f5f9;
-          border-bottom: 1px solid #e2e8f0;
-          font-size: 0.85rem;
-          color: #334155;
-        }
-
-        .classification-pill {
-          background: #e2e8f0;
-          color: #0f172a;
-          padding: 2px 8px;
-          border-radius: 999px;
-          font-weight: 600;
-          font-size: 0.75rem;
-        }
-
-        .provisional-review-banner {
-          display: flex;
-          align-items: center;
-          gap: 0.6rem;
-          margin: 0.75rem 2rem 0;
-          padding: 0.7rem 0.9rem;
-          border: 1px solid #fdba74;
-          background: #fff7ed;
-          color: #9a3412;
-          border-radius: 10px;
-          font-size: 0.86rem;
-          font-weight: 600;
-        }
-
-        .doc-title {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          font-weight: 600;
-          color: var(--text-primary);
-          font-size: 1.1rem;
-        }
-
-        .doc-icon {
-          color: var(--brand-primary);
-        }
-
-        .doc-actions {
-          display: flex;
-          align-items: center;
-          gap: 1rem;
-        }
-
-        .history-view-container .action-buttons-group {
-          display: flex;
-          align-items: center;
-          gap: 0.6rem;
-        }
-
-        .history-view-container .action-button {
-          display: flex;
-          align-items: center;
-          gap: 0.6rem;
-          padding: 0.6rem 1.2rem;
-          border-radius: 12px;
-          border: none;
-          font-size: 0.95rem;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
-            border-color var(--motion-duration-fast) var(--motion-ease-base),
-            color var(--motion-duration-fast) var(--motion-ease-base),
-            transform var(--motion-duration-fast) var(--motion-ease-base),
-            box-shadow var(--motion-duration-fast) var(--motion-ease-base),
-            opacity var(--motion-duration-fast) var(--motion-ease-base);
-        }
-
-        .history-view-container .action-button:hover {
-          transform: translateY(-1px);
-        }
-
-        .history-view-container .action-button:active {
-          transform: scale(0.98);
-        }
-
-        .history-view-container .action-button:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-          transform: none;
-        }
-
-        .history-view-container .action-button.new-consultation {
-          background: var(--brand-gradient);
-          color: white;
-          box-shadow: 0 4px 12px rgba(38, 166, 154, 0.3);
-          font-weight: 600;
-        }
-        
-        .history-view-container .action-button.new-consultation:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 8px 20px rgba(38, 166, 154, 0.4);
-        }
-
-        .history-view-container .action-button.copy-btn {
-          background: white;
-          color: var(--text-secondary);
-          border: 1px solid var(--glass-border);
-          box-shadow: var(--shadow-sm);
-        }
-        
-        .history-view-container .action-button.copy-btn:hover {
-          border-color: var(--brand-primary);
-          color: var(--brand-primary);
-          background: #f0fdfa;
-          transform: translateY(-1px);
-          box-shadow: var(--shadow-md);
-        }
-
-        .history-view-container .action-button.primary {
-          background: var(--bg-secondary);
-          color: var(--text-primary);
-          border: 1px solid var(--glass-border);
-        }
-
-        .history-view-container .action-button.primary:hover {
-          background: var(--bg-tertiary);
-        }
-
-        .history-view-container .action-button.secondary {
-          background: transparent;
-          color: var(--brand-primary);
-          border: 1px solid var(--brand-primary);
-        }
-        
-        .history-view-container .action-button.secondary:hover {
-          background: rgba(38, 166, 154, 0.05);
-        }
-
-        .history-view-container .action-button.success {
-          background: #10b981;
-          color: white;
-        }
-
-        .more-actions-menu {
-          position: relative;
-        }
-
-        .more-actions-trigger {
-          list-style: none;
-          user-select: none;
-          cursor: pointer;
-        }
-
-        .more-actions-trigger::-webkit-details-marker {
-          display: none;
-        }
-
-        .more-actions-trigger:focus-visible {
-          box-shadow: var(--focus-ring);
-        }
-
-        .more-actions-popover {
-          position: absolute;
-          right: 0;
-          top: calc(100% + 0.35rem);
-          min-width: 190px;
-          border: 1px solid var(--border-soft);
-          background: white;
-          border-radius: 12px;
-          box-shadow: var(--shadow-lg);
-          padding: 0.45rem;
-          display: grid;
-          gap: 0.35rem;
-          z-index: 12;
-        }
-
-        .menu-item {
-          width: 100%;
-          justify-content: flex-start;
-        }
-
-        .section-regen-item {
-          display: grid;
-          gap: 0.5rem;
-          padding: 0.25rem 0;
-        }
-
-        .section-regen-select {
-          width: 100%;
-          border: 1px solid #cbd5e1;
-          border-radius: 8px;
-          font-size: 0.8rem;
-          padding: 0.35rem 0.5rem;
-          background: #ffffff;
-          color: #0f172a;
-        }
-
-        .document-content {
-          padding: 2rem;
-          font-size: 1rem;
-          line-height: 1.7;
-          color: var(--text-primary);
-          overflow-y: auto;
-          flex: 1;
-          min-height: 0;
-        }
-
-        /* Markdown Styles */
-        .history-view-container .markdown-body h1, .history-view-container .markdown-body h2, .history-view-container .markdown-body h3 {
-          margin-top: 1.5em;
-          margin-bottom: 0.75em;
-          color: #1e293b;
-          font-family: var(--font-sans);
-        }
-        
-        .history-view-container .markdown-body h1 { font-size: 1.5em; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.3em; }
-        .history-view-container .markdown-body h2 { font-size: 1.25em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-primary); margin-top: 2em; }
-        .history-view-container .markdown-body p { margin-bottom: 1em; }
-        .history-view-container .markdown-body ul { padding-left: 1.5em; margin-bottom: 1em; }
-
-        /* Remaining Errors Warning */
-        .remaining-errors-warning {
-          margin: 1.5rem 2rem;
-          padding: 1rem 1.5rem;
-          background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
-          border: 1px solid #fca5a5;
-          border-left: 4px solid #ef4444;
-          border-radius: 12px;
-        }
-
-        .remaining-errors-warning .warning-header {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          color: #dc2626;
-          font-weight: 600;
-          font-size: 0.95rem;
-          margin-bottom: 0.75rem;
-        }
-
-        .remaining-errors-warning .error-list {
-          margin: 0;
-          padding-left: 1.5rem;
-          font-size: 0.9rem;
-          color: #991b1b;
-        }
-
-        .remaining-errors-warning .error-list li {
-          margin-bottom: 0.5rem;
-        }
-
-        .remaining-errors-warning .error-list li strong {
-          color: #b91c1c;
-        }
-
-        .uncertainty-panel {
-          margin: 1.5rem 2rem 2rem;
-          padding: 1rem;
-          border-radius: 12px;
-          background: #fefce8;
-          border: 1px solid #fde68a;
-        }
-
-        .quality-triage-panel {
-          margin: 1rem 2rem 0;
-          border: 1px solid #bfdbfe;
-          background: #eff6ff;
-          border-radius: 12px;
-          padding: 0.9rem 1rem;
-          display: grid;
-          gap: 0.65rem;
-        }
-
-        .quality-triage-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 0.75rem;
-        }
-
-        .quality-title {
-          font-weight: 700;
-          color: #1e3a8a;
-          font-size: 0.9rem;
-        }
-
-        .quality-score {
-          font-size: 0.8rem;
-          color: #1d4ed8;
-          background: #dbeafe;
-          border-radius: 999px;
-          padding: 4px 10px;
-          font-weight: 600;
-        }
-
-        .quality-actions-list {
-          margin: 0;
-          padding-left: 1rem;
-          color: #1e3a8a;
-          font-size: 0.85rem;
-          display: grid;
-          gap: 0.35rem;
-        }
-
-        .critical-gaps-row {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 0.5rem;
-        }
-
-        .gap-chip {
-          font-size: 0.75rem;
-          border-radius: 999px;
-          padding: 0.3rem 0.55rem;
-          border: 1px solid transparent;
-          font-weight: 600;
-        }
-
-        .gap-chip.critical {
-          background: #fee2e2;
-          color: #b91c1c;
-          border-color: #fecaca;
-        }
-
-        .gap-chip.major {
-          background: #ffedd5;
-          color: #c2410c;
-          border-color: #fed7aa;
-        }
-
-        .gap-chip.minor {
-          background: #fef9c3;
-          color: #854d0e;
-          border-color: #fde68a;
-        }
-
-        .uncertainty-header {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-weight: 600;
-          color: #92400e;
-          margin-bottom: 0.75rem;
-        }
-
-        .uncertainty-list {
-          list-style: none;
-          padding: 0;
-          margin: 0;
-          display: grid;
-          gap: 0.75rem;
-        }
-
-        .uncertainty-item {
-          display: flex;
-          justify-content: space-between;
-          gap: 1rem;
-          padding: 0.75rem;
-          background: #fff7ed;
-          border-radius: 10px;
-          border: 1px solid #fed7aa;
-        }
-
-        .uncertainty-details {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-          font-size: 0.85rem;
-          color: #7c2d12;
-        }
-
-        .uncertainty-intro {
-          font-size: 0.9rem;
-          color: #92400e;
-          margin: 0 0 1rem 0;
-          line-height: 1.5;
-        }
-
-        .uncertainty-value {
-          font-weight: 600;
-          color: #c2410c;
-          background: #ffedd5;
-          padding: 2px 8px;
-          border-radius: 6px;
-          font-size: 0.85rem;
-        }
-
-        .uncertainty-reason {
-          font-size: 0.8rem;
-          color: #9a3412;
-          font-style: italic;
-        }
-
-        .uncertainty-details em {
-          font-style: normal;
-          color: #9a3412;
-        }
-
-        .uncertainty-actions {
-          display: flex;
-          gap: 0.5rem;
-          align-items: center;
-        }
-
-        .uncertainty-bulk-actions {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 0.5rem;
-          margin-bottom: 0.75rem;
-        }
-
-        .empty-state {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          height: 100%;
-          min-height: 400px;
-          gap: 1rem;
-          color: var(--text-tertiary);
-        }
-
-        /* Modal Styles */
-        .history-view-container .modal-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0, 0, 0, 0.5);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 1000;
-          backdrop-filter: blur(4px);
-          transition: opacity var(--motion-duration-fast) var(--motion-ease-base);
-        }
-
-        .history-view-container .modal-content {
-          background: white;
-          width: 90%;
-          max-width: 800px;
-          height: 85vh;
-          border-radius: 20px;
-          display: flex;
-          flex-direction: column;
-          box-shadow: var(--shadow-lg);
-          transform-origin: center top;
-        }
-
-        .history-view-container .modal-header {
-          padding: 1.5rem;
-          border-bottom: 1px solid var(--glass-border);
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .history-view-container .modal-header h3 {
-          margin: 0;
-          font-family: var(--font-display);
-          color: var(--text-primary);
-        }
-
-        .history-view-container .close-btn {
-          background: none;
-          border: none;
-          cursor: pointer;
-          color: var(--text-secondary);
-        }
-
-        .history-view-container .modal-body {
-          flex: 1;
-          padding: 1.5rem;
-          overflow: hidden;
-          display: flex;
-          flex-direction: column;
-        }
-
-        .report-editor {
-          width: 100%;
-          height: 100%;
-          border: 1px solid var(--glass-border);
-          border-radius: 12px;
-          padding: 2rem;
-          font-family: 'Georgia', serif;
-          font-size: 1.1rem;
-          line-height: 1.6;
-          resize: none;
-          outline: none;
-          background: #fdfdfd;
-        }
-
-        .report-editor:focus {
-          border-color: var(--brand-primary);
-        }
-
-        .history-view-container .modal-footer {
-          padding: 1.5rem;
-          border-top: 1px solid var(--glass-border);
-          display: flex;
-          justify-content: flex-end;
-          gap: 1rem;
-        }
-
-        .history-view-container .modal-content.evidence-modal,
-        .history-view-container .modal-content.compare-modal,
-        .history-view-container .modal-content.versions-modal {
-          max-width: 880px;
-        }
-
-        .history-view-container .modal-body.evidence-body,
-        .history-view-container .modal-body.versions-body {
-          max-height: 60vh;
-          overflow-y: auto;
-          display: flex;
-          flex-direction: column;
-          gap: 1rem;
-        }
-
-        .modal-subtitle {
-          font-size: 0.85rem;
-          color: #475569;
-          margin-bottom: 0.25rem;
-        }
-
-        .evidence-entry {
-          border-radius: 10px;
-          border: 1px solid #e2e8f0;
-          padding: 0.75rem;
-          background: #f8fafc;
-        }
-
-        .evidence-meta {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 0.5rem;
-          font-size: 0.75rem;
-          color: #475569;
-          margin-bottom: 0.5rem;
-        }
-
-        .source-label {
-          font-weight: 600;
-          color: #0f172a;
-        }
-
-        .compare-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 1rem;
-        }
-
-        .compare-column h4 {
-          margin-top: 0;
-          margin-bottom: 0.5rem;
-          font-size: 0.85rem;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          color: #0f172a;
-        }
-
-        .compare-textarea {
-          width: 100%;
-          min-height: 220px;
-          border-radius: 12px;
-          border: 1px solid #cbd5f5;
-          padding: 1rem;
-          font-family: 'Georgia', serif;
-          font-size: 1rem;
-          line-height: 1.6;
-          background: #f8fafc;
-          resize: none;
-        }
-
-        .versions-list {
-          list-style: none;
-          margin: 0;
-          padding: 0;
-          display: flex;
-          flex-direction: column;
-          gap: 1rem;
-        }
-
-        .versions-item {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 0.75rem 1rem;
-          border-radius: 10px;
-          border: 1px solid #e5e7eb;
-          background: #fff;
-        }
-
-        .versions-meta {
-          display: flex;
-          flex-direction: column;
-          gap: 0.25rem;
-        }
-
-        .versions-meta span {
-          font-size: 0.8rem;
-          color: #64748b;
-        }
-
-        .versions-actions {
-          display: flex;
-          gap: 0.5rem;
-        }
-
-        .command-bar {
-          margin-top: 0.75rem;
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          flex-wrap: wrap;
-          font-size: 0.85rem;
-          color: #475569;
-        }
-
-        .learning-reason-box {
-          margin-top: 0.85rem;
-          padding: 0.85rem 1rem;
-          border-radius: 10px;
-          border: 1px solid #dbeafe;
-          background: #f8fbff;
-        }
-
-        .learning-reason-label {
-          display: block;
-          font-size: 0.8rem;
-          font-weight: 700;
-          color: #1e3a8a;
-          margin-bottom: 0.55rem;
-        }
-
-        .learning-reason-chips {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 0.45rem;
-        }
-
-        .learning-chip {
-          border: 1px solid #bfdbfe;
-          background: #eff6ff;
-          color: #1d4ed8;
-          padding: 0.35rem 0.75rem;
-          border-radius: 999px;
-          font-size: 0.78rem;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .learning-chip.active {
-          background: #1d4ed8;
-          border-color: #1d4ed8;
-          color: #fff;
-        }
-
-        .command-chip {
-          border: 1px solid #bae6fd;
-          background: #e0f2fe;
-          color: #0f172a;
-          padding: 0.35rem 0.9rem;
-          border-radius: 999px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .command-chip:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 3px 8px rgba(15, 118, 110, 0.2);
-        }
-
-        .ai-feedback-widget {
-          display: none;
-        }
-
-        .doctor-feedback-card {
-          margin-top: 1rem;
-          padding: 1rem 1.1rem;
-          border-radius: 16px;
-          border: 1px solid #bfdbfe;
-          background: linear-gradient(135deg, #f8fbff 0%, #f0fdfa 100%);
-          box-shadow: 0 14px 32px rgba(15, 118, 110, 0.08);
-        }
-
-        .feedback-header {
-          display: flex;
-          align-items: flex-start;
-          gap: 0.85rem;
-        }
-
-        .brain-icon-wrapper {
-          width: 2.5rem;
-          height: 2.5rem;
-          border-radius: 14px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          background: rgba(14, 165, 164, 0.12);
-          color: #0f766e;
-          flex-shrink: 0;
-        }
-
-        .feedback-title h4 {
-          margin: 0;
-          font-size: 1rem;
-          color: #0f172a;
-        }
-
-        .feedback-title p {
-          margin: 0.25rem 0 0;
-          color: #475569;
-          font-size: 0.9rem;
-          line-height: 1.5;
-        }
-
-        .feedback-content {
-          margin-top: 0.9rem;
-          display: grid;
-          gap: 0.85rem;
-        }
-
-        .improvement-preview {
-          display: flex;
-          gap: 0.65rem;
-          align-items: flex-start;
-          color: #334155;
-          font-size: 0.9rem;
-          line-height: 1.55;
-        }
-
-        .improvement-icon {
-          color: #0f766e;
-          flex-shrink: 0;
-          margin-top: 0.1rem;
-        }
-
-        .feedback-score-row {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 0.45rem;
-        }
-
-        .feedback-score-chip {
-          min-width: 2.2rem;
-          height: 2.2rem;
-          border-radius: 999px;
-          border: 1px solid #cbd5e1;
-          background: #fff;
-          color: #0f172a;
-          font-weight: 700;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .feedback-score-chip.active {
-          background: #0f766e;
-          border-color: #0f766e;
-          color: #fff;
-          box-shadow: 0 6px 18px rgba(15, 118, 110, 0.22);
-        }
-
-        .doctor-feedback-textarea {
-          width: 100%;
-          min-height: 96px;
-          border-radius: 14px;
-          border: 1px solid #cbd5e1;
-          padding: 0.85rem 1rem;
-          font: inherit;
-          resize: vertical;
-          background: rgba(255, 255, 255, 0.88);
-        }
-
-        .doctor-feedback-error {
-          color: #b91c1c;
-          font-size: 0.85rem;
-        }
-
-        .doctor-feedback-toast {
-          margin-top: 0.9rem;
-          padding: 0.75rem 0.95rem;
-          border-radius: 12px;
-          border: 1px solid #86efac;
-          background: #f0fdf4;
-          color: #166534;
-          font-size: 0.9rem;
-          font-weight: 600;
-        }
-
-        .workflow-bar {
-          margin-top: 1rem;
-          padding: 0 2rem 1rem;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 1rem;
-        }
-
-        .workflow-steps {
-          display: flex;
-          gap: 0.75rem;
-          flex-wrap: wrap;
-        }
-
-        .workflow-step {
-          display: flex;
-          align-items: center;
-          gap: 0.35rem;
-          padding: 0.35rem 0.75rem;
-          border-radius: 999px;
-          border: 1px solid #e5e7eb;
-          font-size: 0.75rem;
-          color: #475569;
-          transition: border-color var(--motion-duration-fast) var(--motion-ease-base),
-          background-color var(--motion-duration-fast) var(--motion-ease-base),
-          color var(--motion-duration-fast) var(--motion-ease-base);
-        }
-
-        .workflow-step.done {
-          background: #dcfce7;
-          border-color: #86efac;
-          color: #15803d;
-        }
-
-        .sync-status {
-          display: flex;
-          flex-direction: column;
-          font-size: 0.75rem;
-          color: #64748b;
-          text-align: right;
-          transition: color var(--motion-duration-fast) var(--motion-ease-base);
-        }
-
-        .sync-status.online span:first-child {
-          color: #15803d;
-        }
-
-        .sync-status.offline span:first-child {
-          color: #dc2626;
-        }
-
-        .sync-detail {
-          font-size: 0.7rem;
-          color: #475569;
-          transition: color var(--motion-duration-fast) var(--motion-ease-base),
-          opacity var(--motion-duration-fast) var(--motion-ease-base);
-        }
-
-        .sync-detail[data-ui-state="active"] {
-          color: #0f766e;
-        }
-
-        .sync-detail[data-ui-state="success"] {
-          color: #15803d;
-        }
-
-        .uncertainty-highlight {
-          background: #fef3c7;
-          border: 1px dashed #f59e0b;
-          color: #92400e;
-          padding: 0 4px;
-          border-radius: 4px;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .uncertainty-highlight:hover {
-          background: #fef08a;
-        }
-
-        .history-view-container .loading-state {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          height: 100%;
-          gap: 1rem;
-          color: var(--text-secondary);
-        }
-
-        .history-view-container .spinner {
-          width: 30px;
-          height: 30px;
-          border: 3px solid var(--bg-tertiary);
-          border-top-color: var(--brand-primary);
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-          to {transform: rotate(360deg); }
-        }
-
-        /* Markdown Styles for Medical Report */
-        .history-view-container .markdown-body {
-          color: #334155;
-          line-height: 1.7;
-          font-size: 1rem;
-        }
-
-        .history-view-container .markdown-body h2 {
-          font-size: 1.1rem;
-          font-weight: 700;
-          color: #0f766e; /* Teal-700 */
-          margin-top: 1.5rem;
-          margin-bottom: 0.75rem;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          border-bottom: 2px solid #e2e8f0;
-          padding-bottom: 0.25rem;
-        }
-
-        .history-view-container .markdown-body h3 {
-          font-size: 1rem;
-          font-weight: 600;
-          color: #475569;
-          margin-top: 1.25rem;
-          margin-bottom: 0.5rem;
-        }
-
-        .history-view-container .markdown-body p {
-          margin-bottom: 1rem;
-          text-align: justify;
-        }
-
-        .history-view-container .markdown-body ul {
-          list-style-type: none; /* Removed bullets for clean "Form" look */
-          padding-left: 0;       /* Align with headers */
-          margin-bottom: 1rem;
-        }
-
-        .history-view-container .markdown-body li {
-          margin-bottom: 0.5rem;
-          border-bottom: 1px dashed #f1f5f9; /* Subtle separator line */
-          padding-bottom: 0.25rem;
-        }
-
-        .history-view-container .markdown-body li:last-child {
-          border-bottom: none;
-        }
-
-        .history-view-container .markdown-body strong {
-          color: #1e293b;
-          font-weight: 600;
-        }
-
-        @media (max-width: 1200px) {
-          .history-layout {
-            gap: 1rem;
-            max-width: 100%;
-          }
-
-          .history-view-container .action-buttons-group {
-            gap: 0.4rem;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-          }
-
-          .history-view-container .action-button {
-            padding: 0.5rem 0.85rem;
-            font-size: 0.85rem;
-          }
-        }
-
-        @media (max-width: 1024px) {
-          .history-layout {
-            flex-direction: column;
-          }
-
-          .notes-column {
-            min-width: 0;
-            width: 100%;
-            position: static;
-          }
-
-          .history-view-container .document-header {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 0.8rem;
-          }
-
-          .history-view-container .action-buttons-group {
-            width: 100%;
-            justify-content: flex-start;
-          }
-
-          .document-content {
-            padding: 1.25rem;
-          }
-
-          .workflow-bar {
-            padding: 0 1.25rem 1rem;
-            flex-direction: column;
-            align-items: flex-start;
-          }
-
-          .classification-banner {
-            padding: 0.75rem 1.25rem;
-            flex-wrap: wrap;
-          }
-
-          .uncertainty-item {
-            flex-direction: column;
-            align-items: flex-start;
-          }
-
-          .more-actions-popover {
-            left: 0;
-            right: auto;
-          }
-        }
-      `}</style>
     </div>
   );
 };

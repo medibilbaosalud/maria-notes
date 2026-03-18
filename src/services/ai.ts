@@ -140,6 +140,11 @@ const SERVER_TRANSCRIPTION_MODEL = 'groq:whisper-large-v3-turbo';
 const AUDIO_BLOB_UPLOAD_ENABLED = String(import.meta.env.VITE_AUDIO_BLOB_UPLOAD_ENABLED || 'true').toLowerCase() === 'true';
 const BLOB_UPLOAD_TIMEOUT_MS = 45_000;
 const TRANSCRIBE_REQUEST_TIMEOUT_MS = 120_000;
+const TRANSCRIBE_PREFLIGHT_TIMEOUT_MS = 10_000;
+
+let transcribeReadinessCache:
+    | { checkedAt: number; promise: Promise<void> }
+    | null = null;
 
 const buildTraceId = () => {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
@@ -198,6 +203,41 @@ const persistClientTrace = (trace: TranscriptionDebugTrace) => {
         // Ignore quota/privacy errors; console output remains available.
     }
     console.info('[AIService] transcription trace', trace);
+};
+
+const ensureServerTranscriptionReady = async (signal?: AbortSignal): Promise<void> => {
+    const now = Date.now();
+    if (transcribeReadinessCache && (now - transcribeReadinessCache.checkedAt) < 30_000) {
+        return transcribeReadinessCache.promise;
+    }
+
+    const readinessPromise = withTimeout(
+        fetch('/api/ai/transcribe-ready', {
+            method: 'GET',
+            signal
+        }).then(async (response) => {
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok || !body?.ready) {
+                throw new Error(
+                    typeof body?.error === 'string'
+                        ? body.error
+                        : 'server_transcription_provider_unconfigured:missing_groq_api_key,missing_gemini_api_key'
+                );
+            }
+        }),
+        TRANSCRIBE_PREFLIGHT_TIMEOUT_MS,
+        () => new Error(`transcribe_preflight_timeout:${TRANSCRIBE_PREFLIGHT_TIMEOUT_MS}`)
+    );
+
+    transcribeReadinessCache = {
+        checkedAt: now,
+        promise: readinessPromise.catch((error) => {
+            transcribeReadinessCache = null;
+            throw error;
+        })
+    };
+
+    return transcribeReadinessCache.promise;
 };
 
 const getAudioExtensionFromMimeType = (mimeType: string): string => {
@@ -450,6 +490,10 @@ export class AIService {
 
         this.emitInvocation('transcription', 'transcription', 'start', SERVER_TRANSCRIPTION_MODEL);
         try {
+            const preflightStepIndex = recordTraceStart(debugTrace, 'transcribe_preflight');
+            await ensureServerTranscriptionReady(options?.signal);
+            recordTraceEnd(debugTrace, preflightStepIndex, 'passed');
+
             const uploadedAudio = await maybeUploadAudioToBlob(blob, options?.signal, debugTrace);
             const encodeStepIndex = !uploadedAudio ? recordTraceStart(debugTrace, 'inline_encode', `bytes=${blob.size}`) : -1;
             const encodedAudio = uploadedAudio ? undefined : await blobToBase64(blob);

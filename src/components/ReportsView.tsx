@@ -9,6 +9,7 @@ import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
 import { buildPrintableDocument } from '../utils/printTemplates';
 import { getClinicalSpecialtyConfig, normalizeClinicalSpecialty } from '../clinical/specialties';
+import './ReportsView.css';
 
 interface ReportsViewProps {
   apiKey?: string;
@@ -223,9 +224,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
       <div className="reports-content">
         <div className="reports-results-list">
           {isLoading ? (
-            <div className="reports-loading">Cargando...</div>
+            <div className="reports-loading">
+              <div className="skeleton-card" style={{ height: '80px' }} />
+              <div className="skeleton-card" style={{ height: '80px' }} />
+              <div className="skeleton-card" style={{ height: '80px' }} />
+            </div>
           ) : results.length === 0 ? (
-            <div className="reports-no-results">No se encontraron registros</div>
+            <div className="reports-no-results">
+              <Search size={24} style={{ opacity: 0.3 }} />
+              <span>No se encontraron registros</span>
+            </div>
           ) : (
             results.map((record) => (
               <motion.div
@@ -329,362 +337,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ apiKey }) => {
               </div>
             ) : (
               <div className="reports-empty-preview">
-                <FileOutput size={48} />
-                <p>Este paciente no tiene un informe generado.</p>
-                <p className="reports-sub-text">Ve al Historial para generar uno.</p>
+                <FileOutput size={48} className="empty-icon" strokeWidth={1.5} />
+                <p>Este paciente no tiene un informe generado</p>
+                <p className="reports-sub-text">Ve al Historial para generar uno</p>
               </div>
             )
           ) : (
             <div className="reports-empty-preview">
-              <FileOutput size={48} />
+              <FileOutput size={48} className="empty-icon" strokeWidth={1.5} />
               <p>Selecciona un paciente para ver su informe</p>
+              <p className="reports-sub-text">Busca o selecciona de la lista</p>
             </div>
           )}
         </div>
       </div>
-
-      <style>{`
-        .reports-container {
-          height: 100%;
-          display: flex;
-          flex-direction: column;
-          gap: 1.5rem;
-        }
-
-        .reports-search-header h2 {
-          margin: 0 0 1rem 0;
-          color: var(--text-primary);
-        }
-
-        .reports-search-bar {
-          position: relative;
-          max-width: 540px;
-        }
-
-        .reports-search-icon {
-          position: absolute;
-          left: 1rem;
-          top: 50%;
-          transform: translateY(-50%);
-          color: var(--text-secondary);
-        }
-
-        .reports-search-input {
-          width: 100%;
-          padding: 0.9rem 1rem 0.9rem 2.8rem;
-          border-radius: var(--radius-full);
-          border: 1px solid var(--border-soft);
-          background: white;
-          font-size: 1rem;
-          color: var(--text-primary);
-          box-shadow: var(--shadow-sm);
-        }
-
-        .reports-search-input:focus {
-          outline: none;
-          box-shadow: var(--shadow-glow);
-          border-color: var(--brand-primary);
-        }
-
-        .reports-content {
-          display: grid;
-          grid-template-columns: 340px 1fr;
-          gap: 1.5rem;
-          flex: 1;
-          overflow: hidden;
-          min-height: 0;
-        }
-
-        .reports-results-list {
-          overflow-y: auto;
-          padding-right: 0.4rem;
-          display: flex;
-          flex-direction: column;
-          gap: 0.75rem;
-        }
-
-        .reports-result-card {
-          background: var(--bg-primary);
-          padding: 1rem;
-          border-radius: 14px;
-          cursor: pointer;
-          border: 1px solid transparent;
-          transition: border-color var(--motion-duration-fast) var(--motion-ease-base),
-            background-color var(--motion-duration-fast) var(--motion-ease-base),
-            box-shadow var(--motion-duration-fast) var(--motion-ease-base),
-            transform var(--motion-duration-fast) var(--motion-ease-base);
-          position: relative;
-          box-shadow: var(--shadow-sm);
-        }
-
-        .reports-result-card:hover {
-          box-shadow: var(--shadow-md);
-        }
-
-        .reports-result-card.active {
-          border-color: var(--brand-primary);
-          background: rgba(38, 166, 154, 0.05);
-        }
-
-        .reports-card-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 0.4rem;
-        }
-
-        .reports-patient-name {
-          font-weight: 600;
-          color: var(--text-primary);
-        }
-
-        .reports-date {
-          font-size: 0.8rem;
-          color: var(--text-tertiary);
-        }
-
-        .reports-status-badge {
-          font-size: 0.75rem;
-          padding: 4px 8px;
-          border-radius: 8px;
-          font-weight: 500;
-          transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
-            color var(--motion-duration-fast) var(--motion-ease-base);
-        }
-
-        .reports-status-badge.success {
-          background: #dcfce7;
-          color: #166534;
-        }
-
-        .reports-status-badge.pending {
-          background: #f1f5f9;
-          color: #64748b;
-        }
-
-        .reports-chevron {
-          position: absolute;
-          right: 0.7rem;
-          top: 50%;
-          transform: translateY(-50%);
-          color: var(--text-tertiary);
-          opacity: 0;
-          transition: opacity var(--motion-duration-fast) var(--motion-ease-base);
-        }
-
-        .reports-result-card:hover .reports-chevron {
-          opacity: 1;
-        }
-
-        .reports-preview-panel {
-          background: var(--bg-primary);
-          border-radius: 20px;
-          padding: 1.25rem;
-          box-shadow: var(--shadow-md);
-          overflow: auto;
-          border: 1px solid var(--border-soft);
-          min-height: 0;
-        }
-
-        .reports-preview-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: 1rem;
-          margin-bottom: 1rem;
-          padding-bottom: 1rem;
-          border-bottom: 1px solid var(--border-soft);
-        }
-
-        .reports-preview-header h3 {
-          margin: 0;
-          color: var(--text-primary);
-        }
-
-        .reports-actions {
-          display: flex;
-          gap: 0.5rem;
-          flex-wrap: wrap;
-        }
-
-        .reports-body {
-          background: white;
-          padding: 1.5rem;
-          border-radius: 10px;
-          box-shadow: var(--shadow-sm);
-          min-height: 420px;
-        }
-
-        .reports-markdown-content {
-          font-family: 'Georgia', serif;
-          line-height: 1.78;
-          color: var(--text-primary);
-          font-size: 1.05rem;
-        }
-
-        .reports-markdown-content p {
-          margin-bottom: 1rem;
-          white-space: pre-wrap;
-        }
-
-        .reports-markdown-content h1,
-        .reports-markdown-content h2,
-        .reports-markdown-content h3 {
-          margin-top: 1.3rem;
-          margin-bottom: 0.8rem;
-          color: #2c3e50;
-        }
-
-        .reports-empty-preview {
-          height: 100%;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          color: var(--text-tertiary);
-          gap: 1rem;
-          text-align: center;
-        }
-
-        .reports-sub-text {
-          font-size: 0.9rem;
-          color: var(--text-secondary);
-        }
-
-        .reports-action-button {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          padding: 0.5rem 0.9rem;
-          border-radius: 10px;
-          border: none;
-          font-size: 0.88rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
-            border-color var(--motion-duration-fast) var(--motion-ease-base),
-            color var(--motion-duration-fast) var(--motion-ease-base),
-            transform var(--motion-duration-fast) var(--motion-ease-base),
-            box-shadow var(--motion-duration-fast) var(--motion-ease-base);
-        }
-
-        .reports-action-button:hover {
-          transform: translateY(-1px);
-        }
-
-        .reports-action-button:active {
-          transform: scale(0.98);
-        }
-
-        .reports-action-button.primary {
-          background: var(--bg-secondary);
-          color: var(--text-primary);
-          border: 1px solid var(--glass-border);
-        }
-
-        .reports-action-button.success {
-          background: #10b981;
-          color: white;
-        }
-
-        .reports-action-button.secondary {
-          background: #f1f5f9;
-          color: #475569;
-          border: 1px solid #e2e8f0;
-        }
-
-        .reports-action-button.secondary:hover {
-          background: #e2e8f0;
-        }
-
-        .reports-editor {
-          width: 100%;
-          min-height: 400px;
-          padding: 1.25rem;
-          font-family: 'Georgia', serif;
-          font-size: 1rem;
-          line-height: 1.6;
-          border: 1px solid var(--glass-border);
-          border-radius: 8px;
-          resize: vertical;
-          background: #fafafa;
-        }
-
-        .reports-editor:focus {
-          outline: none;
-          border-color: var(--brand-primary);
-          box-shadow: 0 0 0 3px rgba(38, 166, 154, 0.1);
-        }
-
-        .learning-reason-box {
-          margin-top: 0.9rem;
-          padding: 0.85rem 1rem;
-          border-radius: 10px;
-          border: 1px solid #dbeafe;
-          background: #f8fbff;
-        }
-
-        .learning-reason-label {
-          display: block;
-          font-size: 0.8rem;
-          font-weight: 700;
-          color: #1e3a8a;
-          margin-bottom: 0.55rem;
-        }
-
-        .learning-reason-chips {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 0.45rem;
-        }
-
-        .learning-chip {
-          border: 1px solid #bfdbfe;
-          background: #eff6ff;
-          color: #1d4ed8;
-          border-radius: 999px;
-          padding: 0.35rem 0.75rem;
-          font-size: 0.78rem;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .learning-chip.active {
-          background: #1d4ed8;
-          color: #fff;
-          border-color: #1d4ed8;
-        }
-
-        @media (max-width: 1024px) {
-          .reports-content {
-            grid-template-columns: 1fr;
-            gap: 1rem;
-          }
-
-          .reports-results-list {
-            max-height: 260px;
-            border-bottom: 1px solid var(--border-soft);
-            padding-bottom: 1rem;
-          }
-
-          .reports-preview-panel {
-            padding: 1rem;
-          }
-
-          .reports-preview-header {
-            flex-direction: column;
-          }
-
-          .reports-actions {
-            width: 100%;
-          }
-
-          .reports-action-button {
-            flex: 1;
-            justify-content: center;
-          }
-        }
-      `}</style>
     </div>
   );
 };

@@ -1,0 +1,362 @@
+/* ─── ReportsView — Report Browser ─── */
+
+.reports-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.reports-search-header h2 {
+  margin: 0 0 1rem 0;
+  color: var(--text-primary);
+}
+
+.reports-search-bar {
+  position: relative;
+  max-width: 540px;
+}
+
+.reports-search-icon {
+  position: absolute;
+  left: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+}
+
+.reports-search-input {
+  width: 100%;
+  padding: 0.9rem 1rem 0.9rem 2.8rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-soft);
+  background: white;
+  font-size: 1rem;
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--motion-duration-fast) var(--motion-ease-base),
+    border-color var(--motion-duration-fast) var(--motion-ease-base);
+}
+
+.reports-search-input:focus {
+  outline: none;
+  box-shadow: var(--shadow-glow);
+  border-color: var(--brand-primary);
+}
+
+/* ─── Two-Pane Layout ─── */
+.reports-content {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 1.5rem;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.reports-results-list {
+  overflow-y: auto;
+  padding-right: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* ─── Result Cards ─── */
+.reports-result-card {
+  background: var(--bg-primary);
+  padding: 1rem;
+  border-radius: 14px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-base),
+    background-color var(--motion-duration-fast) var(--motion-ease-base),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-base),
+    transform var(--motion-duration-fast) var(--motion-ease-base);
+  position: relative;
+  box-shadow: var(--shadow-sm);
+}
+
+.reports-result-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.reports-result-card.active {
+  border-color: var(--brand-primary);
+  background: rgba(38, 166, 154, 0.05);
+}
+
+.reports-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+
+.reports-patient-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.reports-date {
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+}
+
+.reports-status-badge {
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
+    color var(--motion-duration-fast) var(--motion-ease-base);
+}
+
+.reports-status-badge.success {
+  background: var(--surface-success-bg);
+  color: var(--surface-success-text);
+}
+
+.reports-status-badge.pending {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.reports-chevron {
+  position: absolute;
+  right: 0.7rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-base);
+}
+
+.reports-result-card:hover .reports-chevron {
+  opacity: 1;
+}
+
+/* ─── Preview Panel ─── */
+.reports-preview-panel {
+  background: var(--bg-primary);
+  border-radius: 20px;
+  padding: 1.25rem;
+  box-shadow: var(--shadow-md);
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  min-height: 0;
+}
+
+.reports-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.reports-preview-header h3 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.reports-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* ─── Report Body ─── */
+.reports-body {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+  min-height: 420px;
+}
+
+.reports-markdown-content {
+  font-family: 'Georgia', serif;
+  line-height: 1.78;
+  color: var(--text-primary);
+  font-size: 1.05rem;
+}
+
+.reports-markdown-content p {
+  margin-bottom: 1rem;
+  white-space: pre-wrap;
+}
+
+.reports-markdown-content h1,
+.reports-markdown-content h2,
+.reports-markdown-content h3 {
+  margin-top: 1.3rem;
+  margin-bottom: 0.8rem;
+  color: #2c3e50;
+}
+
+.reports-markdown-content h2 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-left: 0.85rem;
+  border-left: 3px solid var(--brand-primary);
+  color: var(--brand-dark);
+}
+
+/* ─── Empty Preview ─── */
+.reports-empty-preview {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  gap: 1rem;
+  text-align: center;
+  min-height: 400px;
+}
+
+.reports-empty-preview .empty-icon {
+  opacity: 0.3;
+}
+
+.reports-empty-preview p {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--text-secondary);
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+.reports-sub-text {
+  font-size: 0.88rem !important;
+  color: var(--text-tertiary) !important;
+}
+
+/* ─── Loading / No Results ─── */
+.reports-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+}
+
+.reports-no-results {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 3rem 1rem;
+  color: var(--text-tertiary);
+  font-size: 0.92rem;
+  text-align: center;
+}
+
+/* ─── Action Buttons ─── */
+.reports-action-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 10px;
+  border: none;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--btn-shadow-rest);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
+    border-color var(--motion-duration-fast) var(--motion-ease-base),
+    color var(--motion-duration-fast) var(--motion-ease-base),
+    transform var(--motion-duration-fast) var(--motion-ease-base),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-base);
+}
+
+.reports-action-button:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--btn-shadow-hover);
+}
+
+.reports-action-button:active {
+  transform: scale(0.98);
+  box-shadow: var(--btn-shadow-active);
+}
+
+.reports-action-button.primary {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--glass-border);
+}
+
+.reports-action-button.success {
+  background: #10b981;
+  color: white;
+}
+
+.reports-action-button.secondary {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+.reports-action-button.secondary:hover {
+  background: #e2e8f0;
+}
+
+/* ─── Editor ─── */
+.reports-editor {
+  width: 100%;
+  min-height: 400px;
+  padding: 1.25rem;
+  font-family: 'Georgia', serif;
+  font-size: 1rem;
+  line-height: 1.6;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  resize: vertical;
+  background: var(--surface-2);
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-base),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-base);
+}
+
+.reports-editor:focus {
+  outline: none;
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 3px rgba(38, 166, 154, 0.1);
+}
+
+/* ─── Responsive ─── */
+@media (max-width: 1024px) {
+  .reports-content {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .reports-results-list {
+    max-height: 260px;
+    border-bottom: 1px solid var(--border-soft);
+    padding-bottom: 1rem;
+  }
+
+  .reports-preview-panel {
+    padding: 1rem;
+  }
+
+  .reports-preview-header {
+    flex-direction: column;
+  }
+
+  .reports-actions {
+    width: 100%;
+  }
+
+  .reports-action-button {
+    flex: 1;
+    justify-content: center;
+  }
+}

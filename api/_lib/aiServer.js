@@ -411,6 +411,19 @@ const getGeminiApiKey = () => {
     return key;
 };
 
+const getTranscriptionProviderAvailability = () => ({
+    groq: String(process.env.GROQ_API_KEY || '').trim().length > 0,
+    gemini: String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim().length > 0
+});
+
+const assertTranscriptionProviderAvailable = () => {
+    const availability = getTranscriptionProviderAvailability();
+    if (availability.groq || availability.gemini) {
+        return availability;
+    }
+    throw new Error('server_transcription_provider_unconfigured:missing_groq_api_key,missing_gemini_api_key');
+};
+
 const getJsonBody = (req) => {
     if (typeof req.body === 'string') {
         return req.body ? JSON.parse(req.body) : {};
@@ -1317,12 +1330,14 @@ export const regenerateHistorySectionPayload = async (params) => {
 export const transcribeAudioPayload = async ({ audioBase64, audioUrl, mimeType, consultationType, clinicianName, clientTrace }) => {
     const debugTrace = createServerDebugTrace(clientTrace);
     try {
+        const availability = assertTranscriptionProviderAvailable();
         console.info('[aiServer] transcribeAudioPayload:start', {
             trace_id: debugTrace.trace_id,
             mode: audioUrl ? 'blob' : 'inline',
             mimeType: mimeType || null,
             consultationType: consultationType || null,
-            clinicianName: clinicianName || null
+            clinicianName: clinicianName || null,
+            providerAvailability: availability
         });
         const response = await callPreferredTranscriptionModel({
             audioBase64,
@@ -1361,5 +1376,6 @@ export const transcribeAudioPayload = async ({ audioBase64, audioUrl, mimeType, 
 
 export {
     getJsonBody,
-    writeJson
+    writeJson,
+    getTranscriptionProviderAvailability
 };

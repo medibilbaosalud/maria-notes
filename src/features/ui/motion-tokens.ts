@@ -32,8 +32,23 @@ export const fadeSlideInSmall: Variants = {
 };
 
 export const softScaleTap = {
-  whileHover: { scale: 1.01, transition: motionTransitions.fast } as TargetAndTransition,
-  whileTap: { scale: 0.98, transition: motionTransitions.fast } as TargetAndTransition
+  whileHover: { scale: 1.015, y: -1, transition: motionTransitions.fast } as TargetAndTransition,
+  whileTap: { scale: 0.975, y: 0, transition: { duration: 0.08, ease: motionEase.base } } as TargetAndTransition
+};
+
+/** Subtle lift for cards on hover */
+export const cardHoverLift = {
+  whileHover: { y: -2, boxShadow: '0 8px 24px rgba(0,0,0,0.08)', transition: motionTransitions.normal } as TargetAndTransition,
+};
+
+/** Verified document completion — single celebratory bounce */
+export const verifiedEntrance: Variants = {
+  initial: { scale: 0.97, opacity: 0 },
+  enter: {
+    scale: 1,
+    opacity: 1,
+    transition: { duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }
+  }
 };
 
 export const statusPulseSoft = (isActive: boolean): TargetAndTransition => {
