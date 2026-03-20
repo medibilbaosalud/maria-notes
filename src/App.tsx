@@ -71,19 +71,9 @@ const LessonsPanel = lazy(() => import('./components/LessonsPanel'));
 const INTERNAL_AI_ROUTE_KEY = 'server-routed';
 const SPECIALTY_PREFERENCE_STORAGE_KEY = 'maria_notes_specialty_preference';
 const PSYCHOLOGY_CLINICIAN_STORAGE_KEY = 'maria_notes_psychology_clinician';
-const ONBOARDING_STORAGE_KEY = 'maria_notes_onboarding_state';
 type PsychologyClinicianName = 'Ainhoa' | 'June';
 const normalizePsychologyClinician = (value: string | null | undefined): PsychologyClinicianName => {
     return value === 'June' ? 'June' : 'Ainhoa';
-};
-const getOnboardingVersion = (
-    specialty: ClinicalSpecialtyId,
-    clinicianName?: PsychologyClinicianName
-): string => {
-    if (specialty === 'psicologia') {
-        return clinicianName === 'June' ? 'june_psicologia_v1' : 'ainhoa_psicologia_v1';
-    }
-    return 'otorrino_core_v1';
 };
 const PIPELINE_V4_ENABLED = String(import.meta.env.VITE_PIPELINE_V4_ENABLED || 'true').toLowerCase() === 'true';
 // Raw/base64 uploads travel through Vercel functions, so keep fallback blobs below a
@@ -173,36 +163,6 @@ const getApiKeys = (userKey?: string) => {
 };
 
 const getInitialApiKey = () => '';
-
-const readOnboardingState = (): Partial<Record<ClinicalSpecialtyId, string>> => {
-    try {
-        const raw = safeGetLocalStorage(ONBOARDING_STORAGE_KEY, '{}');
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object') return {};
-        return parsed as Partial<Record<ClinicalSpecialtyId, string>>;
-    } catch {
-        return {};
-    }
-};
-
-const hasSeenOnboardingFor = (
-    specialty: ClinicalSpecialtyId,
-    clinicianName?: PsychologyClinicianName
-): boolean => {
-    const state = readOnboardingState();
-    return state[specialty] === getOnboardingVersion(specialty, clinicianName);
-};
-
-const markOnboardingSeen = (
-    specialty: ClinicalSpecialtyId,
-    clinicianName?: PsychologyClinicianName
-): void => {
-    const nextState = {
-        ...readOnboardingState(),
-        [specialty]: getOnboardingVersion(specialty, clinicianName)
-    };
-    safeSetLocalStorage(ONBOARDING_STORAGE_KEY, JSON.stringify(nextState));
-};
 
 // canSafelyBinarySplitAudio removed — all audio is pre-converted to WAV now
 
@@ -321,6 +281,7 @@ const AppContent = () => {
         | 'failed'
     >('idle');
     const contextSpecialtyRef = useRef<ClinicalSpecialtyId>(contextSpecialty);
+    const welcomeAutoOpenedRef = useRef(false);
 
     const lockContextSpecialty = useCallback((specialty: ClinicalSpecialtyId) => {
         contextSpecialtyRef.current = specialty;
@@ -407,15 +368,15 @@ const AppContent = () => {
 
     useEffect(() => {
         if (!hasChosenWorkspaceMode) return;
-        if (activeSpecialty !== 'psicologia') return;
-        if (hasSeenOnboardingFor(activeSpecialty, psychologyClinicianName)) return;
+        if (welcomeAutoOpenedRef.current) return;
+        if (showWelcomeModal) return;
+        welcomeAutoOpenedRef.current = true;
         setShowWelcomeModal(true);
-    }, [activeSpecialty, hasChosenWorkspaceMode, psychologyClinicianName]);
+    }, [hasChosenWorkspaceMode, showWelcomeModal]);
 
     const handleCloseWelcomeModal = useCallback(() => {
-        markOnboardingSeen(activeSpecialty, psychologyClinicianName);
         setShowWelcomeModal(false);
-    }, [activeSpecialty, psychologyClinicianName]);
+    }, []);
 
     const handleOpenWelcomeModal = useCallback(() => {
         setShowWelcomeModal(true);
