@@ -44,6 +44,7 @@ interface SearchHistoryProps {
   apiKey: string;
   focusedPatientName?: string;
   psychologyClinicianName?: 'Ainhoa' | 'June';
+  onFocusedPatientNameConsumed?: () => void;
   onLoadRecord?: (record: MedicalRecord) => void;
   onUseAsContext?: (payload: {
     patientName: string;
@@ -78,6 +79,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   apiKey,
   focusedPatientName = '',
   psychologyClinicianName,
+  onFocusedPatientNameConsumed,
   onLoadRecord,
   onUseAsContext
 }) => {
@@ -177,7 +179,8 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     if (!focusedPatientName) return;
     setQuery(focusedPatientName);
     void loadResults(focusedPatientName, focusedPatientName);
-  }, [focusedPatientName, loadResults]);
+    onFocusedPatientNameConsumed?.();
+  }, [focusedPatientName, loadResults, onFocusedPatientNameConsumed]);
 
   useEffect(() => {
     let cancelled = false;

@@ -430,6 +430,10 @@ const AppContent = () => {
         setCurrentRecordId(null);
         setPipelineMetadata(demoData.pipelineMetadata);
         setProcessingError(null);
+        setIsLoading(false);
+        setProcessingStatus('Listo para grabar');
+        setActiveEngine('idle');
+        setActiveModel('');
     }, [isPlaying, demoData, currentStep?.id]);
 
     // DEBUG: Monitor currentView changes
@@ -3453,6 +3457,7 @@ const AppContent = () => {
                         apiKey={apiKey}
                         focusedPatientName={historyFocusedPatientName}
                         psychologyClinicianName={psychologyClinicianName}
+                        onFocusedPatientNameConsumed={() => setHistoryFocusedPatientName('')}
                         onLoadRecord={(record) => {
                             setHistory(record.medical_history);
                             setOriginalHistory(record.original_medical_history || record.medical_history);
