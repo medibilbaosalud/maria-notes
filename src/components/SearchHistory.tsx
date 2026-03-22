@@ -32,7 +32,7 @@ import {
   type PatientTimelineItem,
   updateMedicalRecord
 } from '../services/storage';
-import { isCloudSyncEnabled } from '../hooks/useCloudSync';
+import { isCloudSyncEnabled, useCloudSync } from '../hooks/useCloudSync';
 import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
 import { buildPrintableDocument } from '../utils/printTemplates';
@@ -98,6 +98,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const [reportContent, setReportContent] = useState('');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const briefingRequestRef = useRef(0);
+  const { isCloudEnabled, isCloudAuthenticated } = useCloudSync();
   const { isPlaying, demoData } = useSimulation();
   const demoContinuity = isPlaying
     && demoData?.specialty === 'psicologia'
@@ -354,6 +355,11 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   };
 
   const selectedContent = activeHistory || activeContent;
+  const emptyStateMessage = !isCloudEnabled
+    ? 'No hay nube configurada y no existen pacientes guardados en local.'
+    : !isCloudAuthenticated
+      ? 'No se han encontrado pacientes. Inicia sesion y sincroniza para traer el historico desde Supabase.'
+      : 'No se han encontrado pacientes. Pulsa sincronizar para actualizar el historial desde la nube.';
 
   return (
     <div className="history-container">
@@ -397,7 +403,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
             </div>
           ) : results.length === 0 ? (
             <div className="empty-state">
-              <p>No se encontraron pacientes</p>
+              <p>{emptyStateMessage}</p>
             </div>
           ) : (
             <div className="cards-list">

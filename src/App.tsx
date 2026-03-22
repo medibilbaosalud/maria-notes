@@ -54,7 +54,7 @@ import { useSessionRecovery } from './features/pipeline/useSessionRecovery';
 import { fadeSlideInSmall } from './features/ui/motion-tokens';
 import { withTimeout } from './utils/asyncTimeout';
 import { safeGetLocalStorage, safeSetLocalStorage } from './utils/safeBrowser';
-import { isCloudSyncEnabled } from './hooks/useCloudSync';
+import { useCloudSync } from './hooks/useCloudSync';
 import type { PipelineUiError } from './types/pipeline';
 import type { ClinicalSpecialtyId } from './clinical/specialties';
 import {
@@ -203,6 +203,7 @@ const isLikelyContainerValid = async (blob: Blob): Promise<boolean> => {
 // NEW: WELCOME MODAL FOR DRA. GOTXI (30 DEC 2025)
 // ════════════════════════════════════════════════════════════════
 const AppContent = () => {
+    const { isCloudEnabled, isCloudAuthenticated } = useCloudSync();
     const [apiKey, setApiKey] = useState<string>(getInitialApiKey());
     const [showSettings, setShowSettings] = useState(false);
     const [history, setHistory] = useState<string>('');
@@ -343,11 +344,11 @@ const AppContent = () => {
     }, [psychologyClinicianName]);
 
     useEffect(() => {
-        if (!isCloudSyncEnabled()) return;
+        if (!isCloudEnabled || !isCloudAuthenticated) return;
         void syncFromCloud().catch((error) => {
             console.warn('[App] Initial cloud sync failed:', error);
         });
-    }, []);
+    }, [isCloudAuthenticated, isCloudEnabled]);
 
     const { isPlaying, demoData, startSimulation, currentStep } = useSimulation();
 
@@ -360,8 +361,15 @@ const AppContent = () => {
                 setHistory('');
                 setOriginalHistory('');
                 setCurrentPatientName('');
+                setHistoryFocusedPatientName('');
                 setPipelineMetadata(undefined);
                 setProcessingError(null);
+                setCurrentRecordId(null);
+                setTranscription('');
+                setProcessingStatus('Listo para grabar');
+                setActiveEngine('idle');
+                setActiveModel('');
+                activeSessionIdRef.current = null;
             }
             return;
         }
