@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getSupabaseAuthSnapshot, onSupabaseAuthChange } from '../services/supabase';
+import { getSupabaseAccessMode, getSupabaseAuthSnapshot, onSupabaseAuthChange } from '../services/supabase';
 
 const hasCloudConfig = (): boolean => {
     const url = String(import.meta.env.VITE_SUPABASE_URL || '').trim();
@@ -16,10 +16,12 @@ export const useCloudSync = () => {
     useEffect(() => onSupabaseAuthChange(setAuthSnapshot), []);
 
     const isCloudEnabled = hasCloudConfig();
+    const cloudAccessMode = !isCloudEnabled ? 'disabled' : getSupabaseAccessMode();
 
     return {
         isCloudEnabled,
-        isCloudAuthenticated: authSnapshot.isAuthenticated,
+        isCloudAuthenticated: cloudAccessMode !== 'disabled',
+        cloudAccessMode,
         cloudUserEmail: authSnapshot.userEmail,
         toggleCloud: () => { console.warn("Cloud sync is always enabled by system policy."); },
         enableCloud: () => { },

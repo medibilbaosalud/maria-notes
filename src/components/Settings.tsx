@@ -28,7 +28,7 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [backupStatus, setBackupStatus] = useState<'idle' | 'exporting' | 'importing' | 'success' | 'error'>('idle');
   const [backupMessage, setBackupMessage] = useState('');
-  const { isCloudEnabled, isCloudAuthenticated, cloudUserEmail } = useCloudSync();
+  const { isCloudEnabled, isCloudAuthenticated, cloudUserEmail, cloudAccessMode } = useCloudSync();
   const hasSupabaseAutologin = isSupabaseAutologinConfigured();
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [cloudSyncMessage, setCloudSyncMessage] = useState('');
@@ -217,16 +217,16 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
                   <div className="settings-cloud-text">
                     <span className="settings-cloud-status" data-ui-state={isCloudEnabled && isCloudAuthenticated ? 'success' : 'warning'}>
                       {isCloudEnabled
-                        ? (isCloudAuthenticated ? 'Configurado y autenticado' : 'Configurado')
+                        ? (cloudAccessMode === 'session'
+                          ? 'Configurado y autenticado'
+                          : 'Configurado en modo interno')
                         : 'No configurado'}
                     </span>
                     <span className="settings-cloud-desc">
                       {isCloudEnabled
-                        ? (isCloudAuthenticated
+                        ? (cloudAccessMode === 'session'
                           ? `Los datos se guardan localmente y en Supabase como ${cloudUserEmail || 'usuario autenticado'}`
-                          : (hasSupabaseAutologin
-                            ? 'La app intentara iniciar la sesion cloud automaticamente al arrancar.'
-                            : 'La app esta protegida por contrasena de acceso. Si no hay sesion cloud, el modo autenticado de Supabase no esta activo.'))
+                          : 'Los datos se guardan localmente y en Supabase sin pedir una sesion manual en esta app interna.')
                         : 'Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY para activar sync'}
                     </span>
                   </div>
@@ -255,9 +255,11 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
                   </div>
                   <p className="settings-help-text settings-help-tight">
                     La puerta principal de la aplicacion ya se valida con la contrasena definida en Vercel.
-                    {hasSupabaseAutologin
-                      ? ' Supabase tambien esta configurado para iniciar sesion automaticamente.'
-                      : ' La autenticacion propia de Supabase sigue siendo un mecanismo aparte.'}
+                    {cloudAccessMode === 'session'
+                      ? ' Supabase esta trabajando con una sesion activa.'
+                      : (hasSupabaseAutologin
+                        ? ' Si hace falta, Supabase tambien puede iniciar sesion automaticamente.'
+                        : ' Para este uso interno, la sincronizacion cloud puede funcionar sin pedir una sesion manual.')}
                   </p>
                 </div>
               )}

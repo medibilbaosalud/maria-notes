@@ -98,7 +98,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const [reportContent, setReportContent] = useState('');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const briefingRequestRef = useRef(0);
-  const { isCloudEnabled, isCloudAuthenticated } = useCloudSync();
+  const { isCloudEnabled, isCloudAuthenticated, cloudAccessMode } = useCloudSync();
   const { isPlaying, demoData } = useSimulation();
   const demoContinuity = isPlaying
     && demoData?.specialty === 'psicologia'
@@ -362,9 +362,9 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const selectedContent = activeHistory || activeContent;
   const emptyStateMessage = !isCloudEnabled
     ? 'No hay nube configurada y no existen pacientes guardados en local.'
-    : !isCloudAuthenticated
-      ? 'No se han encontrado pacientes. Inicia sesion y sincroniza para traer el historico desde Supabase.'
-      : 'No se han encontrado pacientes. Pulsa sincronizar para actualizar el historial desde la nube.';
+    : cloudAccessMode === 'session'
+      ? 'No se han encontrado pacientes. Pulsa sincronizar para actualizar el historial desde la nube.'
+      : 'No se han encontrado pacientes. Pulsa sincronizar para traer el historial interno desde Supabase.';
 
   return (
     <div className="history-container">

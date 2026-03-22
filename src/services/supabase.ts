@@ -33,6 +33,8 @@ export interface SupabaseAuthSnapshot {
     userEmail: string | null;
 }
 
+export type SupabaseAccessMode = 'disabled' | 'internal' | 'session';
+
 let authSnapshot: SupabaseAuthSnapshot = {
     isConfigured: Boolean(supabase),
     isAuthenticated: false,
@@ -116,6 +118,13 @@ export const ensureSupabaseAutologin = async (): Promise<boolean> => {
 export const getSupabaseAuthSnapshot = (): SupabaseAuthSnapshot => authSnapshot;
 
 export const hasSupabaseSession = (): boolean => authSnapshot.isAuthenticated;
+
+export const getSupabaseAccessMode = (): SupabaseAccessMode => {
+    if (!supabase) return 'disabled';
+    return authSnapshot.isAuthenticated ? 'session' : 'internal';
+};
+
+export const hasSupabaseDirectAccess = (): boolean => Boolean(supabase);
 
 export const onSupabaseAuthChange = (listener: (snapshot: SupabaseAuthSnapshot) => void): (() => void) => {
     authListeners.add(listener);

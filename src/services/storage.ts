@@ -14,7 +14,7 @@ import {
     type AiImprovementLesson
 } from './db';
 import { AIService } from './ai';
-import { hasSupabaseSession, supabase } from './supabase';
+import { supabase } from './supabase';
 import { isCloudSyncEnabled } from '../hooks/useCloudSync';
 import type { ConsultationClassification, ExtractionMeta, ExtractionResult } from './groq';
 import { normalizeClinicalSpecialty } from '../clinical/specialties';
@@ -71,7 +71,7 @@ export interface PatientCaseSummary {
 const PIPELINE_ARTIFACT_RETENTION_MS = 24 * 60 * 60 * 1000;
 const nowIso = () => new Date().toISOString();
 
-const getCloudClient = () => (supabase && isCloudSyncEnabled() && hasSupabaseSession() ? supabase : null);
+const getCloudClient = () => (supabase && isCloudSyncEnabled() ? supabase : null);
 
 const normalizeKey = (value: string): string => value
     .trim()
@@ -535,7 +535,7 @@ const upsertPatientBriefingToCloud = async (briefing: PatientBriefing): Promise<
     const { error } = await client
         .from('patient_briefings')
         .upsert([payload], {
-            onConflict: 'owner_user_id,normalized_patient_name,specialty,clinician_scope'
+            onConflict: 'scope_owner_key,normalized_patient_name,specialty,clinician_scope'
         });
     if (error) {
         console.error('[Cloud Sync] patient_briefings upsert error:', error.message);
