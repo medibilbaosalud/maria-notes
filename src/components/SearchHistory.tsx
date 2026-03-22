@@ -98,6 +98,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const [reportContent, setReportContent] = useState('');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const briefingRequestRef = useRef(0);
+  const selectedGroupRef = useRef<PatientTimelineGroup | null>(null);
   const { isCloudEnabled, isCloudAuthenticated, cloudAccessMode } = useCloudSync();
   const { isPlaying, demoData } = useSimulation();
   const demoContinuity = isPlaying
@@ -139,10 +140,12 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
         : await searchPatientTimeline(effectiveQuery, 'psicologia', psychologyClinicianName);
       setResults(groups);
       const normalizedPreferredPatient = preferredPatientName?.trim().toLowerCase();
+      const previousSelectedGroup = selectedGroupRef.current;
       const nextGroup = groups.find((group) => group.patientName.trim().toLowerCase() === normalizedPreferredPatient)
-        || groups.find((group) => group.normalizedPatientName === selectedGroup?.normalizedPatientName)
+        || groups.find((group) => group.normalizedPatientName === previousSelectedGroup?.normalizedPatientName)
         || groups[0]
         || null;
+      selectedGroupRef.current = nextGroup;
       setSelectedGroup(nextGroup);
       const nextItem = nextGroup ? selectBestItem(nextGroup) : null;
       setSelectedItem(nextItem);
@@ -150,7 +153,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [demoContinuity, getDemoGroups, psychologyClinicianName, query, selectedGroup?.normalizedPatientName]);
+  }, [demoContinuity, getDemoGroups, psychologyClinicianName, query]);
 
   const refreshResults = useCallback(async () => {
     if (isSyncing) return;
@@ -187,6 +190,10 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     void loadResults(focusedPatientName, focusedPatientName);
     onFocusedPatientNameConsumed?.();
   }, [focusedPatientName, loadResults, onFocusedPatientNameConsumed]);
+
+  useEffect(() => {
+    selectedGroupRef.current = selectedGroup;
+  }, [selectedGroup]);
 
   useEffect(() => {
     let cancelled = false;
