@@ -12,6 +12,7 @@
     "test:all": "playwright test",
     "test:release": "npm run lint && npm run build && npm run test",
     "preview": "vite preview",
+    "style:profiles": "node scripts/generate-psychology-style-profiles.mjs",
     "diag:fixtures": "node scripts/generate-diagnostic-fixtures.mjs",
     "diag:e2e": "cross-env DIAG_MODE=simulated playwright test e2e/diagnostic.spec.ts",
     "diag:e2e:real": "cross-env DIAG_MODE=real playwright test e2e/diagnostic.spec.ts",

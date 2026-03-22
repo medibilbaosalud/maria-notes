@@ -1,19 +1,15 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowRight,
-  Calendar,
   ChevronRight,
-  Clock3,
   Copy,
   FileText,
-  Layers3,
   Printer,
   RefreshCcw,
   Search,
   Shield,
   Sparkles,
-  User,
   X
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -475,20 +471,19 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                 >
                   <div className="card-content">
                     <div className="card-top">
-                      <div className="patient-avatar">
-                        <User size={18} />
-                      </div>
                       <span className="card-date">{new Date(group.latestConsultationAt).toLocaleDateString()}</span>
                     </div>
                     <h3 className="card-name">{group.patientName}</h3>
                     <div className="card-type">
-                      {group.sessionCount} sesiones · {group.sourceCounts.current} actual · {group.sourceCounts.legacy} legado
+                      {group.sessionCount} sesiones Â· {group.sourceCounts.current} actual Â· {group.sourceCounts.legacy} legado
                     </div>
-                    <div className="card-tags">
-                      {group.clinicians.slice(0, 2).map((clinician) => (
-                        <span key={clinician} className="card-tag">{clinician}</span>
-                      ))}
-                    </div>
+                    {group.clinicians.length > 0 && (
+                      <div className="card-tags">
+                        {group.clinicians.slice(0, 2).map((clinician) => (
+                          <span key={clinician} className="card-tag">{clinician}</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="card-actions">
                     <ChevronRight size={16} className="chevron" />
@@ -512,23 +507,13 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
               >
                 <div className="detail-header">
                   <div className="header-main">
-                    <div className="patient-badge"><User size={24} /></div>
                     <div className="header-text">
                       <div className="name-display-wrapper">
                         <h1>{selectedGroup.patientName}</h1>
                       </div>
                       <div className="meta-row">
                         <span className="meta-item">
-                          <Calendar size={14} />
-                          {new Date(selectedGroup.latestConsultationAt).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                        </span>
-                        <span className="meta-item">
-                          <Layers3 size={14} />
-                          {selectedGroup.sessionCount} sesiones
-                        </span>
-                        <span className="meta-item">
-                          <Clock3 size={14} />
-                          {selectedItem.clinicianName || selectedItem.clinicianProfile || 'Sin profesional'}
+                          Última sesión: {new Date(selectedGroup.latestConsultationAt).toLocaleDateString()} · {selectedGroup.sessionCount} sesiones · {selectedGroup.clinicians.join(', ')}
                         </span>
                       </div>
                     </div>
@@ -536,9 +521,9 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
 
                   <div className="header-actions">
                     {canOpenCurrent && (
-                      <button className="search-history-btn-secondary" onClick={() => void handleLoadCurrentRecord(selectedItem)}>
+                      <button className="search-history-btn-secondary" onClick={() => void handleLoadCurrentRecord(selectedItem)} title="Abrir resultado completo">
                         <ArrowRight size={16} />
-                        <span>Abrir resultado</span>
+                        <span>Abrir</span>
                       </button>
                     )}
                     {isLegacySelection && onUseAsContext && (
@@ -551,12 +536,13 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                           clinicianProfile: selectedItem.clinicianProfile,
                           clinicianName: selectedItem.clinicianName
                         })}
+                        title="Usar como contexto para nueva consulta"
                       >
-                        <span>Usar como contexto para nueva consulta</span>
+                        <span>Usar como contexto</span>
                       </button>
                     )}
                     {canOpenCurrent && (
-                      <button className="search-history-btn-secondary" onClick={handleOpenReport}>
+                      <button className="search-history-btn-secondary" onClick={handleOpenReport} title="Generar informe mÃ©dico">
                         <FileText size={16} />
                         <span>Informe</span>
                       </button>
@@ -638,7 +624,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                       )}
                     </div>
                   ) : (
-                    <div className="case-hub-loading">Todavía no hay suficiente contexto histórico para resumir el caso.</div>
+                    <div className="case-hub-loading">TodavÃ­a no hay suficiente contexto histÃ³rico para resumir el caso.</div>
                   )}
                 </div>
 
@@ -740,7 +726,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   <FileText size={48} />
                 </div>
                 <h3>Selecciona un paciente</h3>
-                <p>Su historial y contexto aparecerán aquí</p>
+                <p>Su historial y contexto aparecerÃ¡n aquÃ­</p>
               </div>
             )}
           </AnimatePresence>
@@ -786,3 +772,5 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
 };
 
 export default SearchHistory;
+
+
