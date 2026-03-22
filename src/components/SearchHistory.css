@@ -9,6 +9,10 @@
   min-height: 0;
 }
 
+.search-section {
+  flex-shrink: 0;
+}
+
 .section-title {
   font-family: var(--font-display);
   font-size: 1.5rem;
@@ -103,9 +107,11 @@
   flex: 1;
   overflow: hidden;
   min-height: 0;
+  align-items: stretch;
 }
 
 .list-column {
+  height: 100%;
   min-height: 0;
   overflow-y: auto;
   padding-right: 0.5rem;
@@ -261,6 +267,7 @@
 
 /* ─── Detail View ─── */
 .detail-column {
+  height: 100%;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -369,6 +376,9 @@
   gap: 1.25rem;
   padding-bottom: 2rem;
   min-height: 0;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.5) transparent;
 }
 
 /* ─── Paper Document (clinical display) ─── */
@@ -1030,39 +1040,63 @@
   .history-container {
     height: auto;
     gap: 1rem;
+    overflow: visible;
   }
 
   .content-grid {
     grid-template-columns: 1fr;
-    overflow: auto;
+    overflow: visible;
+    align-items: start;
   }
 
   .list-column {
+    height: auto;
     max-height: 260px;
     padding-bottom: 1rem;
     border-bottom: 1px solid var(--border-soft);
   }
 
+  .detail-column,
+  .detail-view,
+  .detail-scroll-area {
+    height: auto;
+    min-height: auto;
+    overflow: visible;
+  }
+
   .detail-header {
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    background: var(--bg-app);
-    padding-top: 0.5rem;
+    position: static;
+    padding-top: 0;
   }
 
   .header-actions {
     width: 100%;
     justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .detail-scroll-area {
     padding-right: 0;
+    padding-bottom: 0;
   }
 
   .name-edit-input {
     width: 220px;
     font-size: 1.25rem;
+  }
+
+  .case-hub-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .header-main,
+  .detail-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .search-bar-wrapper {
+    max-width: none;
   }
 
   .search-history-modal-content {
