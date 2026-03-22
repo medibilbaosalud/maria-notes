@@ -170,6 +170,11 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   }, []);
 
   useEffect(() => {
+    if (!isCloudEnabled || !isCloudAuthenticated || demoContinuity) return;
+    void refreshResults();
+  }, [demoContinuity, isCloudAuthenticated, isCloudEnabled, refreshResults]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadResults(query);
     }, 140);

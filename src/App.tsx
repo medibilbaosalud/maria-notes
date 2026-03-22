@@ -10,6 +10,7 @@ import {
     updateMedicalRecord,
     ensurePatientBriefing,
     markPatientBriefingStale,
+    purgeDemoArtifacts,
     upsertPipelineJob,
     upsertConsultationSession,
     saveSegment,
@@ -350,6 +351,10 @@ const AppContent = () => {
         });
     }, [isCloudAuthenticated, isCloudEnabled]);
 
+    useEffect(() => {
+        void purgeDemoArtifacts();
+    }, []);
+
     const { isPlaying, demoData, startSimulation, currentStep } = useSimulation();
 
     // Effect to handle Simulation Mode Data Injection
@@ -370,6 +375,7 @@ const AppContent = () => {
                 setActiveEngine('idle');
                 setActiveModel('');
                 activeSessionIdRef.current = null;
+                void purgeDemoArtifacts();
             }
             return;
         }

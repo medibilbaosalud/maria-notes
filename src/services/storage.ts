@@ -970,6 +970,63 @@ export const updateMedicalRecord = async (idOrUuid: string | number, updates: Pa
     }
 };
 
+const isDemoPatientName = (value?: string | null): boolean => {
+    const normalized = normalizePatientName(String(value || ''));
+    return normalized.includes('paciente demo') || normalized.includes('simulacion');
+};
+
+export const purgeDemoArtifacts = async (): Promise<void> => {
+    try {
+        const demoMedicalRecords = await db.medical_records
+            .filter((record) => isDemoPatientName(record.patient_name))
+            .toArray();
+
+        if (demoMedicalRecords.length > 0) {
+            await db.medical_records.bulkDelete(
+                demoMedicalRecords
+                    .map((record) => record.id)
+                    .filter((value): value is number => typeof value === 'number')
+            );
+        }
+
+        const demoBriefings = await db.patient_briefings
+            .filter((briefing) => isDemoPatientName(briefing.patient_name))
+            .toArray();
+
+        if (demoBriefings.length > 0) {
+            await db.patient_briefings.bulkDelete(demoBriefings.map((briefing) => briefing.id));
+        }
+
+        const client = getCloudClient();
+        if (client) {
+            const demoPatientNames = Array.from(new Set([
+                ...demoMedicalRecords.map((record) => record.patient_name),
+                ...demoBriefings.map((briefing) => briefing.patient_name)
+            ].filter(Boolean)));
+
+            if (demoPatientNames.length > 0) {
+                const { error: medicalDeleteError } = await client
+                    .from('medical_records')
+                    .delete()
+                    .in('patient_name', demoPatientNames);
+                if (medicalDeleteError) {
+                    console.warn('[Cloud Sync] Failed to delete demo medical records:', medicalDeleteError.message);
+                }
+
+                const { error: briefingDeleteError } = await client
+                    .from('patient_briefings')
+                    .delete()
+                    .in('patient_name', demoPatientNames);
+                if (briefingDeleteError) {
+                    console.warn('[Cloud Sync] Failed to delete demo briefings:', briefingDeleteError.message);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error purging demo artifacts:', error);
+    }
+};
+
 export const syncFromCloud = async (): Promise<number> => {
     const client = getCloudClient();
     if (!client) return 0;
