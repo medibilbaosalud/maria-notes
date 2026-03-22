@@ -108,12 +108,10 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const demoContinuity = isPlaying
     && demoData?.specialty === 'psicologia'
     && demoData.timelineGroup
-    && demoData.caseSummary
-    && demoData.briefing
     ? {
       timelineGroup: demoData.timelineGroup,
-      caseSummary: demoData.caseSummary,
-      briefing: demoData.briefing
+      caseSummary: demoData.caseSummary ?? null,
+      briefing: demoData.briefing ?? null
     }
     : null;
   const normalizedDemoPatientName = demoData?.patientName?.trim().toLowerCase() || '';
@@ -122,12 +120,14 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const selectedGroupLegacyCount = selectedGroup?.sourceCounts.legacy || 0;
   const selectedGroupCurrentCount = selectedGroup?.sourceCounts.current || 0;
   const isDemoSelectedGroup = Boolean(
-    demoContinuity
+    isPlaying
+    && demoData?.specialty === 'psicologia'
     && selectedGroupNormalizedName
     && selectedGroupNormalizedName === normalizedDemoPatientName
   );
-  const effectiveCaseSummary = isDemoSelectedGroup ? demoContinuity?.caseSummary ?? null : caseSummary;
+  const effectiveCaseSummary = isDemoSelectedGroup ? demoData?.caseSummary ?? null : caseSummary;
   const effectiveCaseSummaryLoading = isDemoSelectedGroup ? false : caseSummaryLoading;
+  const effectiveBriefing = isDemoSelectedGroup ? demoData?.briefing ?? null : briefing;
 
   const selectedSpecialty = normalizeClinicalSpecialty(selectedItem?.specialty || 'psicologia');
   const selectedBriefingClinician = selectedItem?.clinicianProfile || selectedItem?.clinicianName || selectedGroup?.clinicians[0];
@@ -561,7 +561,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   </div>
                 </div>
 
-                {briefing && (
+                {effectiveBriefing && (
                   <div id="history-briefing-card" className="briefing-card">
                     <div className="case-hub-header">
                       <div>
@@ -570,7 +570,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                       </div>
                     </div>
                     <div className="briefing-lines">
-                      {briefing.summary_text.split('\n').filter(l => l.trim()).map((line, index) => (
+                      {effectiveBriefing.summary_text.split('\n').filter(l => l.trim()).map((line, index) => (
                         <p key={`${index}-${line}`} className="briefing-line">{line}</p>
                       ))}
                     </div>
