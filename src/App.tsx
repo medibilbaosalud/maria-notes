@@ -354,7 +354,7 @@ const AppContent = () => {
     // Effect to handle Simulation Mode Data Injection
     useEffect(() => {
         if (!isPlaying) {
-            if (currentPatientName === "Paciente Demo (Simulación)") {
+            if (currentPatientName.includes('(Simulación)') || currentPatientName.includes('(Simulacion)')) {
                 // Reset when stopping demo
                 setCurrentView('record');
                 setHistory('');
@@ -368,18 +368,68 @@ const AppContent = () => {
 
         if (!demoData) return;
 
-        // Skip view switch for prep steps
-        const prepSteps = ['intro', 'move_to_input', 'type_patient_name', 'move_to_record', 'click_record'];
-        if (currentStep && prepSteps.includes(currentStep.id)) {
-            setCurrentView('record');
+        if (!currentStep) {
             return;
         }
 
-        // Apply demo data and switch to result view
+        if (demoData.specialty === 'psicologia') {
+            const recordSteps = [
+                'intro',
+                'move_to_input',
+                'type_patient_name',
+                'wait_for_briefing',
+                'move_to_history',
+                'click_use_context',
+                'move_to_record',
+                'click_record'
+            ];
+            const historySteps = [
+                'click_history',
+                'move_to_demo_patient',
+                'focus_briefing_card',
+                'focus_case_hub',
+                'focus_timeline',
+                'select_legacy_timeline_item',
+                'move_to_use_context'
+            ];
+
+            if (historySteps.includes(currentStep.id)) {
+                setHistoryFocusedPatientName(demoData.patientName);
+                setCurrentView('history');
+                return;
+            }
+
+            if (recordSteps.includes(currentStep.id)) {
+                setCurrentView('record');
+                return;
+            }
+        }
+
+        const resultSteps = [
+            'processing_1',
+            'processing_2',
+            'wait_for_highlight',
+            'click_highlight',
+            'wait_for_modal',
+            'click_confirm',
+            'move_to_edit',
+            'click_edit',
+            'simulate_typing',
+            'click_save',
+            'finish_learning',
+            'move_to_feedback',
+            'submit_feedback'
+        ];
+
+        if (!resultSteps.includes(currentStep.id)) {
+            return;
+        }
+
         setCurrentView('result');
         setHistory(demoData.history);
         setOriginalHistory(demoData.history);
         setCurrentPatientName(demoData.patientName);
+        setCurrentRecordId(null);
         setPipelineMetadata(demoData.pipelineMetadata);
         setProcessingError(null);
     }, [isPlaying, demoData, currentStep?.id]);

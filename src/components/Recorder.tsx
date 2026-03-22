@@ -7,6 +7,7 @@ import { MBSLogo } from './MBSLogo';
 import { buildPsychologyCaseSummary, getPatientBriefing, getPatientNameSuggestions, type PatientNameSuggestion, type PatientCaseSummary, type PatientBriefing } from '../services/storage';
 import { fadeSlideInSmall, motionEase, motionTransitions, softScaleTap, statusPulseSoft } from '../features/ui/motion-tokens';
 import type { ClinicalSpecialtyId } from '../clinical/specialties';
+import { useSimulation } from './Simulation/SimulationContext';
 import './Recorder.css';
 
 type ActiveEngine = 'whisper' | 'gemini' | 'groq' | 'llm' | 'storage' | 'idle';
@@ -63,6 +64,8 @@ export const Recorder: React.FC<RecorderProps> = ({
   const [micLevel, setMicLevel] = useState(0);
   const [micState, setMicState] = useState<'requesting' | 'ready' | 'detecting' | 'error'>('requesting');
   const [micErrorMessage, setMicErrorMessage] = useState('');
+  const { isPlaying, demoData } = useSimulation();
+  const normalizedDemoPatientName = demoData?.patientName?.trim().toLowerCase() || '';
 
   useEffect(() => {
     patientNameRef.current = patientName;
@@ -246,6 +249,14 @@ export const Recorder: React.FC<RecorderProps> = ({
       };
     }
 
+    if (isPlaying && demoData?.specialty === 'psicologia' && demoData.caseSummary && trimmed.toLowerCase() === normalizedDemoPatientName) {
+      setCaseSummaryLoading(false);
+      setCaseSummary(demoData.caseSummary);
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const currentRequest = ++caseSummaryRequestRef.current;
     setCaseSummaryLoading(true);
     const timer = window.setTimeout(() => {
@@ -271,13 +282,20 @@ export const Recorder: React.FC<RecorderProps> = ({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [patientName, psychologyClinicianName, selectedSpecialty]);
+  }, [demoData, isPlaying, normalizedDemoPatientName, patientName, psychologyClinicianName, selectedSpecialty]);
 
   useEffect(() => {
     let cancelled = false;
     const trimmed = patientName.trim();
     if (selectedSpecialty !== 'psicologia' || trimmed.length < 2) {
       setBriefing(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (isPlaying && demoData?.specialty === 'psicologia' && demoData.briefing && trimmed.toLowerCase() === normalizedDemoPatientName) {
+      setBriefing(demoData.briefing);
       return () => {
         cancelled = true;
       };
@@ -303,7 +321,7 @@ export const Recorder: React.FC<RecorderProps> = ({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [patientName, psychologyClinicianName, selectedSpecialty]);
+  }, [demoData, isPlaying, normalizedDemoPatientName, patientName, psychologyClinicianName, selectedSpecialty]);
 
   const patientNameValid = patientNameRef.current.trim().length >= 2;
   const canStartRecording = canStart && patientNameValid && !isFinalizing;
@@ -520,10 +538,12 @@ export const Recorder: React.FC<RecorderProps> = ({
 
         {selectedSpecialty === 'psicologia' && patientName.trim().length >= 2 && (
           <motion.div
+            id="recorder-context-card"
             className="recorder-context-card"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={motionTransitions.normal}
+            data-context-kind={briefing ? 'briefing' : caseSummary ? 'summary' : 'empty'}
           >
             {briefing ? (
               <>
@@ -541,7 +561,7 @@ export const Recorder: React.FC<RecorderProps> = ({
                 </div>
                 <div className="recorder-context-actions">
                   {onOpenHistory && (
-                    <button type="button" className="recorder-context-link" onClick={onOpenHistory}>
+                    <button id="recorder-open-history-btn" type="button" className="recorder-context-link" onClick={onOpenHistory}>
                       Ver historial completo
                     </button>
                   )}
@@ -591,7 +611,7 @@ export const Recorder: React.FC<RecorderProps> = ({
                 )}
                 <div className="recorder-context-actions">
                   {onOpenHistory && (
-                    <button type="button" className="recorder-context-link" onClick={onOpenHistory}>
+                    <button id="recorder-open-history-btn" type="button" className="recorder-context-link" onClick={onOpenHistory}>
                       Ver historial completo
                     </button>
                   )}
@@ -650,6 +670,7 @@ export const Recorder: React.FC<RecorderProps> = ({
             {!isRecording ? (
               <motion.button
                 key="start"
+                id="main-record-btn"
                 className="action-btn-large start"
                 onClick={handleStart}
                 disabled={!canStartRecording}

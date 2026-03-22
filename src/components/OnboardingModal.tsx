@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Brain,
+    Clock3,
     ChevronRight,
     FileText,
+    Layers3,
     Mic,
     PlayCircle
 } from 'lucide-react';
@@ -35,17 +37,31 @@ const PSYCHOLOGY_SLIDES: TunnelSlide[] = [
         accent: 'sunrise'
     },
     {
-        id: 'aprende',
-        icon: Brain,
-        headline: 'Cada correccion que haces ensena a la app',
-        body: 'Si editas una seccion, la IA aprende tu estilo y criterio clinico. La proxima nota se parecera mas a tu forma de trabajar.',
+        id: 'briefing',
+        icon: Clock3,
+        headline: 'Antes de empezar, tendras un briefing de 30 segundos',
+        body: 'Si el paciente ya ha pasado por consulta, veras un resumen breve con ultima sesion, foco actual, puntos pendientes y alertas explicitas para retomar rapido el caso.',
         accent: 'teal'
     },
     {
-        id: 'entrega',
+        id: 'timeline',
+        icon: Layers3,
+        headline: 'Ahora el historial es una linea temporal real del caso',
+        body: 'Hemos unido las consultas actuales con el historico importado para que puedas entender la evolucion del paciente sin releer notas sueltas una por una.',
+        accent: 'paper'
+    },
+    {
+        id: 'hub',
         icon: FileText,
-        headline: 'Historial, informes y continuidad clinica',
-        body: 'Recupera sesiones anteriores, genera informes exportables y mantiene la continuidad entre consultas sin esfuerzo.',
+        headline: 'Case Hub: foco, temas recurrentes y acuerdos abiertos',
+        body: 'Al abrir un paciente veras continuidad clinica util de verdad: foco principal, temas recurrentes, tareas pendientes y profesionales que lo han visto.',
+        accent: 'sunrise'
+    },
+    {
+        id: 'aprende',
+        icon: Brain,
+        headline: 'Cada correccion que haces afina el estilo de la app',
+        body: 'Si editas una seccion, Maria Notes aprende tu criterio clinico y se acerca mas a tu forma real de escribir y estructurar la historia.',
         accent: 'paper'
     }
 ];

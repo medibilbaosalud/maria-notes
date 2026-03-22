@@ -1,11 +1,21 @@
-import React, { createContext, useContext, useState, useRef, useEffect, ReactNode } from 'react';
-import { simulationData, getSimulationDataForSpecialty } from './simulationData';
+import React, { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { getSimulationDataForSpecialty, simulationData, type SimulationPayload } from './simulationData.ts';
 import type { ClinicalSpecialtyId } from '../../clinical/specialties';
 
 type SimulationStepId =
     | 'intro'
     | 'move_to_input'
     | 'type_patient_name'
+    | 'wait_for_briefing'
+    | 'move_to_history'
+    | 'click_history'
+    | 'move_to_demo_patient'
+    | 'focus_briefing_card'
+    | 'focus_case_hub'
+    | 'focus_timeline'
+    | 'select_legacy_timeline_item'
+    | 'move_to_use_context'
+    | 'click_use_context'
     | 'move_to_record'
     | 'click_record'
     | 'processing_1'
@@ -37,7 +47,7 @@ interface SimulationContextType {
     startSimulation: (specialty?: ClinicalSpecialtyId, clinicianName?: string) => void;
     stopSimulation: () => void;
     cursorPosition: { x: number; y: number } | null;
-    demoData: typeof simulationData | null;
+    demoData: SimulationPayload | null;
 }
 
 const SimulationContext = createContext<SimulationContextType | undefined>(undefined);
@@ -50,101 +60,99 @@ export const useSimulation = () => {
     return context;
 };
 
-// ────────────────────────────────────────────────
-// OTORRINO SCRIPT (original)
-// ────────────────────────────────────────────────
+const typeIntoInput = (inputId: string, value: string, intervalMs = 80) => {
+    const el = document.getElementById(inputId) as HTMLInputElement | null;
+    if (!el) return;
+    let index = 0;
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    const timer = window.setInterval(() => {
+        const nextValue = value.slice(0, index + 1);
+        if (nativeSetter) {
+            nativeSetter.call(el, nextValue);
+        } else {
+            el.value = nextValue;
+        }
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        index += 1;
+        if (index >= value.length) {
+            window.clearInterval(timer);
+        }
+    }, intervalMs);
+};
+
+const clickById = (id: string) => {
+    const el = document.getElementById(id);
+    if (el) {
+        el.click();
+    }
+};
+
 const OTORRINO_SCRIPT: SimulationStep[] = [
     {
         id: 'intro',
         duration: 4000,
-        caption: "Bienvenida, {{clinicianName}}. Vamos a ver una consulta completa desde cero."
+        caption: 'Bienvenida, {{clinicianName}}. Vamos a ver una consulta completa desde cero.'
     },
     {
         id: 'move_to_input',
         targetId: 'patient-name-input',
         duration: 2000,
-        caption: "Primero identificamos al paciente."
+        caption: 'Primero identificamos al paciente.'
     },
     {
         id: 'type_patient_name',
         targetId: 'patient-name-input',
         duration: 3500,
-        action: () => {
-            const el = document.getElementById('patient-name-input') as HTMLInputElement;
-            if (el) {
-                const name = "Paciente Demo (Simulación)";
-                let i = 0;
-                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-                const interval = setInterval(() => {
-                    if (nativeSetter) {
-                        nativeSetter.call(el, name.slice(0, i + 1));
-                    } else {
-                        el.value = name.slice(0, i + 1);
-                    }
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    i++;
-                    if (i >= name.length) clearInterval(interval);
-                }, 80);
-            }
-        },
-        caption: "Escribimos el nombre del paciente..."
+        action: () => typeIntoInput('patient-name-input', 'Paciente Demo (Simulación)', 80),
+        caption: 'Escribimos el nombre del paciente...'
     },
     {
         id: 'move_to_record',
         targetId: 'main-record-btn',
         duration: 2000,
-        caption: "Iniciamos la consulta para que Maria Notes empiece a escuchar."
+        caption: 'Iniciamos la consulta para que Maria Notes empiece a escuchar.'
     },
     {
         id: 'click_record',
         targetId: 'main-record-btn',
         duration: 1000,
-        action: () => {
-            const el = document.getElementById('main-record-btn');
-            if (el) el.click();
-        }
+        action: () => clickById('main-record-btn')
     },
     {
         id: 'processing_1',
         duration: 5000,
-        caption: "1. Procesando Audio: Nuestra IA transcribe y estructura los datos médicos al instante...",
+        caption: '1. Procesando audio: la IA transcribe y estructura los datos médicos al instante.'
     },
     {
         id: 'processing_2',
         duration: 5000,
-        caption: "2. Validación Clínica: El sistema audita el resultado buscando alucinaciones o errores."
+        caption: '2. Validación clínica: el sistema audita el resultado buscando alucinaciones o errores.'
     },
     {
         id: 'wait_for_highlight',
         targetId: 'uncertainty-highlight-0',
         duration: 4000,
-        caption: "3. Detección de Dudas: La IA marca en amarillo un dato ambiguo ('hipoacusia') para tu revisión."
+        caption: "3. Detección de dudas: la IA marca en amarillo un dato ambiguo para tu revisión."
     },
     {
         id: 'click_highlight',
         targetId: 'uncertainty-highlight-0',
         duration: 1500,
-        action: () => {
-            const el = document.getElementById('uncertainty-highlight-0');
-            if (el) el.click();
-        },
-        caption: "Hacemos clic para ver la evidencia original..."
+        action: () => clickById('uncertainty-highlight-0'),
+        caption: 'Hacemos clic para ver la evidencia original...'
     },
     {
         id: 'wait_for_modal',
         targetId: 'evidence-modal-confirm-btn',
         duration: 5000,
-        caption: "Aquí ves la transcripción exacta. Tú tienes la última palabra sobre qué guardar."
+        caption: 'Aquí ves la transcripción exacta. Tú tienes la última palabra sobre qué guardar.'
     },
     {
         id: 'click_confirm',
         targetId: 'evidence-modal-confirm-btn',
         duration: 1500,
-        action: () => {
-            const el = document.getElementById('evidence-modal-confirm-btn');
-            if (el) el.click();
-        },
-        caption: "Validamos el dato correcto."
+        action: () => clickById('evidence-modal-confirm-btn'),
+        caption: 'Validamos el dato correcto.'
     },
     {
         id: 'move_to_edit',
@@ -156,236 +164,250 @@ const OTORRINO_SCRIPT: SimulationStep[] = [
         id: 'click_edit',
         targetId: 'edit-mode-btn',
         duration: 1500,
-        action: () => {
-            const el = document.getElementById('edit-mode-btn');
-            if (el) el.click();
-        },
-        caption: "Entrando en modo edición..."
+        action: () => clickById('edit-mode-btn'),
+        caption: 'Entrando en modo edición...'
     },
     {
         id: 'simulate_typing',
         targetId: 'save-edit-btn',
         duration: 6000,
-        caption: "Modificas el texto... (La IA observa cómo prefieres estructurar la 'Enfermedad Actual')",
+        caption: "Modificas el texto... la IA observa cómo prefieres estructurar la nota."
     },
     {
         id: 'click_save',
         targetId: 'save-edit-btn',
         duration: 2000,
-        action: () => {
-            const el = document.getElementById('save-edit-btn');
-            if (el) el.click();
-        },
-        caption: "Guardando cambios..."
+        action: () => clickById('save-edit-btn'),
+        caption: 'Guardando cambios...'
     },
     {
         id: 'finish_learning',
         duration: 7000,
-        caption: "¡Analizando correcciones! He actualizado mis parámetros para que la próxima nota use TU estructura preferida."
+        caption: 'Analizando correcciones. La próxima nota usará mejor tu estructura preferida.'
     },
     {
         id: 'move_to_feedback',
         targetId: 'feedback-score-10',
         duration: 3000,
-        caption: "Maria Notes quiere mejorar. Lo último es valorar la calidad clínica de la nota generada."
+        caption: 'Lo último es valorar la calidad clínica de la nota generada.'
     },
     {
         id: 'submit_feedback',
         targetId: 'feedback-submit-btn',
         duration: 3000,
-        caption: "Enviamos la valoración para que el sistema aprenda de tus preferencias."
+        action: () => clickById('feedback-submit-btn'),
+        caption: 'Enviamos la valoración para que el sistema aprenda de tus preferencias.'
     },
     {
-        id: 'finish',
-        action: () => { /* Stop simulation handles cleanup */ }
+        id: 'finish'
     }
 ];
 
-// ────────────────────────────────────────────────
-// PSYCHOLOGY SCRIPT (new guided demo)
-// ────────────────────────────────────────────────
 const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
-    // Phase 0 — Welcome
     {
         id: 'intro',
-        duration: 3000,
-        caption: "Bienvenida, {{clinicianName}}. Vamos a recorrer juntas una sesión completa de Psicología con Maria Notes."
+        duration: 3200,
+        caption: 'Bienvenida, {{clinicianName}}. Vamos a enseñarte cómo Maria Notes te prepara una sesión de Psicología con continuidad real.'
     },
     {
         id: 'move_to_input',
         targetId: 'patient-name-input',
-        duration: 2500,
-        caption: "Primero, identificamos al paciente que ha venido a terapia."
+        duration: 2200,
+        caption: 'Primero identificamos al paciente.'
     },
     {
         id: 'type_patient_name',
         targetId: 'patient-name-input',
-        duration: 4000,
-        action: () => {
-            const el = document.getElementById('patient-name-input') as HTMLInputElement;
-            if (el) {
-                const name = "Paciente Demo Psicología (Simulación)";
-                let i = 0;
-                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-                const interval = setInterval(() => {
-                    if (nativeSetter) {
-                        nativeSetter.call(el, name.slice(0, i + 1));
-                    } else {
-                        el.value = name.slice(0, i + 1);
-                    }
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    i++;
-                    if (i >= name.length) clearInterval(interval);
-                }, 75);
-            }
-        },
-        caption: "Escribimos el nombre del paciente..."
+        duration: 3800,
+        action: () => typeIntoInput('patient-name-input', 'Paciente Demo Psicología (Simulación)', 75),
+        caption: 'Escribimos el nombre y Maria Notes reconoce que ya existe contexto previo.'
+    },
+    {
+        id: 'wait_for_briefing',
+        targetId: 'recorder-context-card',
+        duration: 3200,
+        caption: 'Antes de grabar, aparece un Briefing 30s con lo último importante del caso.'
+    },
+    {
+        id: 'move_to_history',
+        targetId: 'recorder-open-history-btn',
+        duration: 2600,
+        caption: 'Si quieres profundizar, puedes abrir el historial completo sin salir del flujo.'
+    },
+    {
+        id: 'click_history',
+        targetId: 'recorder-open-history-btn',
+        duration: 1400,
+        action: () => clickById('recorder-open-history-btn'),
+        caption: 'Entramos al historial unificado del paciente.'
+    },
+    {
+        id: 'move_to_demo_patient',
+        targetId: 'history-patient-card-0',
+        duration: 2600,
+        caption: 'Aquí se agrupan juntas la consulta actual y el histórico importado.'
+    },
+    {
+        id: 'focus_briefing_card',
+        targetId: 'history-briefing-card',
+        duration: 3200,
+        caption: 'El mismo briefing queda guardado para que la siguiente sesión esté preparada en segundos.'
+    },
+    {
+        id: 'focus_case_hub',
+        targetId: 'history-case-hub',
+        duration: 3400,
+        caption: 'Debajo tienes el Case Hub: foco principal, temas recurrentes, acuerdos y profesionales implicados.'
+    },
+    {
+        id: 'focus_timeline',
+        targetId: 'history-timeline-panel',
+        duration: 3000,
+        caption: 'Y aquí ves el Patient Timeline, mezclando continuidad actual e histórico importado.'
+    },
+    {
+        id: 'select_legacy_timeline_item',
+        targetId: 'history-timeline-item-1',
+        duration: 1500,
+        action: () => clickById('history-timeline-item-1'),
+        caption: 'Seleccionamos una sesión importada para reutilizarla como contexto.'
+    },
+    {
+        id: 'move_to_use_context',
+        targetId: 'history-use-context-btn',
+        duration: 2200,
+        caption: 'Con un clic volvemos a consulta usando ese histórico como memoria clínica.'
+    },
+    {
+        id: 'click_use_context',
+        targetId: 'history-use-context-btn',
+        duration: 1200,
+        action: () => clickById('history-use-context-btn'),
+        caption: 'Volvemos a la grabación con el paciente y el contexto ya listos.'
     },
     {
         id: 'move_to_record',
         targetId: 'main-record-btn',
-        duration: 2500,
-        caption: "Pulsamos en Iniciar Consulta y Maria Notes empezará a escuchar discretamente."
+        duration: 2400,
+        caption: 'Ahora sí, empezamos la consulta con todo el contexto relevante al alcance.'
     },
     {
         id: 'click_record',
         targetId: 'main-record-btn',
         duration: 1000,
-        action: () => {
-            const el = document.getElementById('main-record-btn');
-            if (el) el.click();
-        }
+        action: () => clickById('main-record-btn')
     },
-
-    // Phase 1 — Recording & Transcription
     {
         id: 'processing_1',
-        duration: 6000,
-        caption: "📍 Fase 1 · Grabación: El audio se procesa en bloques mientras tú te centras 100% en el paciente."
+        duration: 5200,
+        caption: 'Mientras tú te centras en la conversación, Maria Notes transcribe y estructura la sesión.'
     },
     {
         id: 'processing_2',
-        duration: 6000,
-        caption: "📍 Fase 2 · Estructura: Nuestros motores inteligentes organizan la sesión en: motivo, sintomatología, observaciones e impresión."
+        duration: 5200,
+        caption: 'Después valida el borrador clínico para que partas de una nota segura y editable.'
     },
-
-    // Phase 2 — AI Validation
     {
         id: 'wait_for_highlight',
         targetId: 'uncertainty-highlight-0',
-        duration: 6000,
-        caption: "📍 Fase 3 · Validación clínica: El sistema revisa el resultado buscando errores o datos ambiguos. ¡Mira! Ha marcado en amarillo la dosis de sertralina porque no estaba claro en el audio."
+        duration: 5000,
+        caption: 'Si detecta una duda importante, la resalta para que la confirmes con evidencia.'
     },
     {
         id: 'click_highlight',
         targetId: 'uncertainty-highlight-0',
-        duration: 2000,
-        action: () => {
-            const el = document.getElementById('uncertainty-highlight-0');
-            if (el) el.click();
-        },
-        caption: "Hacemos clic en el dato marcado para ver la transcripción original..."
+        duration: 1500,
+        action: () => clickById('uncertainty-highlight-0'),
+        caption: 'Abrimos la evidencia original.'
     },
     {
         id: 'wait_for_modal',
         targetId: 'evidence-modal-confirm-btn',
-        duration: 6000,
-        caption: "📍 Aquí puedes escuchar lo que dijo el paciente. Si la dosis es correcta, confirmas. Si no, editas. Tú tienes la última palabra."
+        duration: 4500,
+        caption: 'Sigues teniendo la última palabra sobre lo que se guarda en la historia clínica.'
     },
     {
         id: 'click_confirm',
         targetId: 'evidence-modal-confirm-btn',
-        duration: 1500,
-        action: () => {
-            const el = document.getElementById('evidence-modal-confirm-btn');
-            if (el) el.click();
-        },
-        caption: "Confirmamos la dosis."
+        duration: 1200,
+        action: () => clickById('evidence-modal-confirm-btn'),
+        caption: 'Confirmamos el dato.'
     },
-
-    // Phase 3 — Editing & Learning
     {
         id: 'move_to_edit',
         targetId: 'edit-mode-btn',
-        duration: 5000,
-        caption: "📍 Fase 4 · Tu criterio clínico: ¿Quieres cambiar la redacción del plan terapéutico o añadir una observación? Pulsa «Editar»."
+        duration: 2600,
+        caption: 'Si quieres, puedes ajustar la redacción con tu propio criterio terapéutico.'
     },
     {
         id: 'click_edit',
         targetId: 'edit-mode-btn',
-        duration: 1500,
-        action: () => {
-            const el = document.getElementById('edit-mode-btn');
-            if (el) el.click();
-        },
-        caption: "Entrando en modo edición..."
+        duration: 1300,
+        action: () => clickById('edit-mode-btn'),
+        caption: 'Entrando en modo edición...'
     },
     {
         id: 'simulate_typing',
         targetId: 'save-edit-btn',
-        duration: 7000,
-        caption: "📍 Fase 5 · Aprendizaje: Cada corrección que haces enseña a Maria Notes cómo prefieres documentar. Si reformulas la «Impresión Clínica» con tu estilo, la IA lo recordará para la próxima sesión."
+        duration: 5000,
+        caption: 'Cada corrección ayuda a que Maria Notes se adapte a tu estilo clínico.'
     },
     {
         id: 'click_save',
         targetId: 'save-edit-btn',
-        duration: 2000,
-        action: () => {
-            const el = document.getElementById('save-edit-btn');
-            if (el) el.click();
-        },
-        caption: "Guardando tus cambios..."
+        duration: 1400,
+        action: () => clickById('save-edit-btn'),
+        caption: 'Guardamos tus cambios.'
     },
-
-    // Phase 4 — Finish
     {
         id: 'finish_learning',
-        duration: 8000,
-        caption: "📍 Fase 6 · Informe y continuidad: Desde «Informes» puedes generar un documento para derivación o archivo. En «Historial» recuperas sesiones anteriores. Maria Notes se adapta a TU forma de trabajar. ¡Bienvenida!"
+        duration: 5600,
+        caption: 'La continuidad queda guardada para la próxima sesión: briefing, timeline y contexto clínico del caso.'
     },
     {
         id: 'move_to_feedback',
         targetId: 'feedback-score-10',
-        duration: 3500,
-        caption: "Por último, valoras el borrador. Esto ayuda a Maria a refinar el tono terapéutico para tus próximas sesiones."
+        duration: 2800,
+        caption: 'Solo queda valorar el resultado para seguir afinando el sistema.'
     },
     {
         id: 'submit_feedback',
         targetId: 'feedback-submit-btn',
-        duration: 3500,
-        caption: "Con un solo clic, envías tu feedback clínico y cierras la consulta."
+        duration: 2500,
+        action: () => clickById('feedback-submit-btn'),
+        caption: 'Con esto queda cerrada la demo completa de continuidad en Psicología.'
     },
     {
-        id: 'finish',
-        action: () => { /* Stop simulation handles cleanup */ }
+        id: 'finish'
     }
 ];
 
 const getScriptForSpecialty = (specialty: ClinicalSpecialtyId): SimulationStep[] =>
     specialty === 'psicologia' ? PSYCHOLOGY_SCRIPT : OTORRINO_SCRIPT;
 
-
 export const SimulationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [isPlaying, setIsPlaying] = useState(false);
     const [stepIndex, setStepIndex] = useState(-1);
-    const [activeClinicianName, setActiveClinicianName] = useState<string>('');
+    const [activeClinicianName, setActiveClinicianName] = useState('');
     const [cursorPosition, setCursorPosition] = useState<{ x: number; y: number } | null>(null);
     const activeScriptRef = useRef<SimulationStep[]>(OTORRINO_SCRIPT);
-    const activeDemoDataRef = useRef(simulationData);
-    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const activeDemoDataRef = useRef<SimulationPayload>(simulationData);
+    const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const startSimulation = (specialty?: ClinicalSpecialtyId, clinicianName?: string) => {
-        const resolved = specialty || 'otorrino';
-        activeScriptRef.current = getScriptForSpecialty(resolved);
-        activeDemoDataRef.current = getSimulationDataForSpecialty(resolved);
-        setActiveClinicianName(clinicianName || (resolved === 'otorrino' ? 'Dra. Gotxi' : 'Ainhoa'));
+        const resolvedSpecialty = specialty || 'otorrino';
+        activeScriptRef.current = getScriptForSpecialty(resolvedSpecialty);
+        activeDemoDataRef.current = getSimulationDataForSpecialty(resolvedSpecialty);
+        setActiveClinicianName(clinicianName || (resolvedSpecialty === 'psicologia' ? 'Ainhoa' : 'Dra. Gotxi'));
         setIsPlaying(true);
         setStepIndex(0);
         setCursorPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
     };
 
     const stopSimulation = () => {
-        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+        }
         setIsPlaying(false);
         setStepIndex(-1);
         setCursorPosition(null);
@@ -394,25 +416,22 @@ export const SimulationProvider: React.FC<{ children: ReactNode }> = ({ children
     useEffect(() => {
         const script = activeScriptRef.current;
         if (!isPlaying || stepIndex < 0 || stepIndex >= script.length) {
-            if (stepIndex >= script.length) stopSimulation();
+            if (stepIndex >= script.length) {
+                stopSimulation();
+            }
             return;
         }
 
         const step = script[stepIndex];
 
-        // 1. Execute Action
         if (step.action) {
             step.action();
         }
 
-        // 2. Move Cursor if target
         if (step.targetId) {
             const el = document.getElementById(step.targetId);
             if (el) {
-                // Ensure element is in view for the cursor to target it
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                
-                // Wait a bit for scroll to finish before calculating position
                 const rect = el.getBoundingClientRect();
                 setCursorPosition({
                     x: rect.left + rect.width / 2,
@@ -421,21 +440,25 @@ export const SimulationProvider: React.FC<{ children: ReactNode }> = ({ children
             }
         }
 
-        // 3. Schedule Next Step
-        const duration = step.duration || 1000;
         timeoutRef.current = setTimeout(() => {
-            setStepIndex(prev => prev + 1);
-        }, duration);
+            setStepIndex((prev) => prev + 1);
+        }, step.duration || 1000);
 
         return () => {
-            if (timeoutRef.current) clearTimeout(timeoutRef.current);
+            if (timeoutRef.current) {
+                clearTimeout(timeoutRef.current);
+            }
         };
     }, [isPlaying, stepIndex]);
 
     const getCurrentStep = () => {
-        if (!isPlaying || stepIndex < 0 || stepIndex >= activeScriptRef.current.length) return null;
+        if (!isPlaying || stepIndex < 0 || stepIndex >= activeScriptRef.current.length) {
+            return null;
+        }
         const step = activeScriptRef.current[stepIndex];
-        if (!step.caption) return step;
+        if (!step.caption) {
+            return step;
+        }
 
         return {
             ...step,
@@ -444,14 +467,16 @@ export const SimulationProvider: React.FC<{ children: ReactNode }> = ({ children
     };
 
     return (
-        <SimulationContext.Provider value={{
-            isPlaying,
-            currentStep: getCurrentStep(),
-            startSimulation,
-            stopSimulation,
-            cursorPosition,
-            demoData: isPlaying ? activeDemoDataRef.current : null
-        }}>
+        <SimulationContext.Provider
+            value={{
+                isPlaying,
+                currentStep: getCurrentStep(),
+                startSimulation,
+                stopSimulation,
+                cursorPosition,
+                demoData: isPlaying ? activeDemoDataRef.current : null
+            }}
+        >
             {children}
         </SimulationContext.Provider>
     );

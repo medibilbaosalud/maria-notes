@@ -37,6 +37,7 @@ import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
 import { buildPrintableDocument } from '../utils/printTemplates';
 import { getClinicalSpecialtyConfig, normalizeClinicalSpecialty } from '../clinical/specialties';
+import { useSimulation } from './Simulation/SimulationContext';
 import './SearchHistory.css';
 
 interface SearchHistoryProps {
@@ -95,19 +96,44 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const [reportContent, setReportContent] = useState('');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const briefingRequestRef = useRef(0);
+  const { isPlaying, demoData } = useSimulation();
+  const demoContinuity = isPlaying
+    && demoData?.specialty === 'psicologia'
+    && demoData.timelineGroup
+    && demoData.caseSummary
+    && demoData.briefing
+    ? {
+      timelineGroup: demoData.timelineGroup,
+      caseSummary: demoData.caseSummary,
+      briefing: demoData.briefing
+    }
+    : null;
+  const normalizedDemoPatientName = demoData?.patientName?.trim().toLowerCase() || '';
 
   const selectedSpecialty = normalizeClinicalSpecialty(selectedItem?.specialty || 'psicologia');
   const selectedBriefingClinician = selectedItem?.clinicianProfile || selectedItem?.clinicianName || selectedGroup?.clinicians[0];
   const activeContent = selectedItem?.medicalHistory || '';
   const { history: activeHistory, notes: activeNotes } = parseContent(activeContent);
   const isLegacySelection = selectedItem?.source === 'legacy';
-  const canOpenCurrent = selectedItem?.source === 'current' && Boolean(onLoadRecord);
+  const canOpenCurrent = selectedItem?.source === 'current' && Boolean(onLoadRecord) && Boolean(selectedItem?.recordUuid);
+
+  const getDemoGroups = useCallback((searchTerm: string) => {
+    if (!demoContinuity?.timelineGroup) return [] as PatientTimelineGroup[];
+    const trimmed = searchTerm.trim().toLowerCase();
+    const groups = [demoContinuity.timelineGroup];
+    if (!trimmed) return groups;
+    return groups.filter((group) =>
+      group.patientName.toLowerCase().includes(trimmed)
+    );
+  }, [demoContinuity]);
 
   const loadResults = useCallback(async (nextQuery?: string, preferredPatientName?: string) => {
     setIsLoading(true);
     try {
       const effectiveQuery = typeof nextQuery === 'string' ? nextQuery : query;
-      const groups = await searchPatientTimeline(effectiveQuery, 'psicologia', psychologyClinicianName);
+      const groups = demoContinuity
+        ? getDemoGroups(effectiveQuery)
+        : await searchPatientTimeline(effectiveQuery, 'psicologia', psychologyClinicianName);
       setResults(groups);
       const normalizedPreferredPatient = preferredPatientName?.trim().toLowerCase();
       const nextGroup = groups.find((group) => group.patientName.trim().toLowerCase() === normalizedPreferredPatient)
@@ -121,20 +147,20 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [psychologyClinicianName, query, selectedGroup?.normalizedPatientName]);
+  }, [demoContinuity, getDemoGroups, psychologyClinicianName, query, selectedGroup?.normalizedPatientName]);
 
   const refreshResults = useCallback(async () => {
     if (isSyncing) return;
     setIsSyncing(true);
     try {
-      if (isCloudSyncEnabled()) {
+      if (!demoContinuity && isCloudSyncEnabled()) {
         await syncFromCloud();
       }
       await loadResults();
     } finally {
       setIsSyncing(false);
     }
-  }, [isSyncing, loadResults]);
+  }, [demoContinuity, isSyncing, loadResults]);
 
   useEffect(() => {
     void refreshResults();
@@ -178,6 +204,11 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
         setCaseSummary(null);
         return;
       }
+      if (demoContinuity && selectedGroup.normalizedPatientName === normalizedDemoPatientName) {
+        setCaseSummary(demoContinuity.caseSummary ?? null);
+        setCaseSummaryLoading(false);
+        return;
+      }
       setCaseSummaryLoading(true);
       try {
         const summary = await buildPsychologyCaseSummary(selectedGroup.patientName, selectedBriefingClinician);
@@ -190,13 +221,17 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [selectedBriefingClinician, selectedGroup]);
+  }, [demoContinuity, normalizedDemoPatientName, selectedBriefingClinician, selectedGroup]);
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
       if (!selectedGroup || selectedSpecialty !== 'psicologia') {
         setBriefing(null);
+        return;
+      }
+      if (demoContinuity && selectedGroup.normalizedPatientName === normalizedDemoPatientName) {
+        setBriefing(demoContinuity.briefing ?? null);
         return;
       }
 
@@ -230,7 +265,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [selectedGroup, selectedBriefingClinician, selectedSpecialty]);
+  }, [demoContinuity, normalizedDemoPatientName, selectedGroup, selectedBriefingClinician, selectedSpecialty]);
 
   const selectGroup = useCallback((group: PatientTimelineGroup) => {
     setSelectedGroup(group);
@@ -331,6 +366,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
           <div style={{ position: 'relative', flex: 1 }}>
             <Search size={20} className="search-icon" />
             <input
+              id="history-search-input"
               type="text"
               placeholder="Buscar por paciente o nota clinica..."
               value={query}
@@ -362,10 +398,11 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
             </div>
           ) : (
             <div className="cards-list">
-              {results.map((group) => (
+              {results.map((group, index) => (
                 <motion.button
                   type="button"
                   key={group.normalizedPatientName}
+                  id={`history-patient-card-${index}`}
                   className={`patient-card ${selectedGroup?.normalizedPatientName === group.normalizedPatientName ? 'active' : ''}`}
                   onClick={() => selectGroup(group)}
                   initial={{ opacity: 0, y: 10 }}
@@ -374,6 +411,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   whileTap={{ scale: 0.99, transition: motionTransitions.fast }}
                   transition={motionTransitions.normal}
                   data-ui-state={selectedGroup?.normalizedPatientName === group.normalizedPatientName ? 'active' : 'idle'}
+                  data-patient-name={group.patientName}
                 >
                   <div className="card-content">
                     <div className="card-top">
@@ -445,6 +483,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                     )}
                     {isLegacySelection && onUseAsContext && (
                       <button
+                        id="history-use-context-btn"
                         className="search-history-btn-secondary"
                         onClick={() => onUseAsContext({
                           patientName: selectedGroup.patientName,
@@ -466,7 +505,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                 </div>
 
                 {briefing && (
-                  <div className="briefing-card">
+                  <div id="history-briefing-card" className="briefing-card">
                     <div className="case-hub-header">
                       <div>
                         <div className="case-hub-kicker">Briefing 30s</div>
@@ -485,7 +524,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   </div>
                 )}
 
-                <div className="case-hub-card">
+                <div id="history-case-hub" className="case-hub-card">
                   <div className="case-hub-header">
                     <div>
                       <div className="case-hub-kicker">Case Hub</div>
@@ -547,17 +586,18 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   )}
                 </div>
 
-                <div className="timeline-panel">
+                <div id="history-timeline-panel" className="timeline-panel">
                   <div className="timeline-panel-header">
                     <h3>Patient Timeline</h3>
                     <span>{selectedGroup.items.length} entradas</span>
                   </div>
                   <div className="timeline-list">
-                    {selectedGroup.items.map((item) => {
+                    {selectedGroup.items.map((item, index) => {
                       const active = selectedItem.id === item.id;
                       return (
                         <div
                           key={item.id}
+                          id={`history-timeline-item-${index}`}
                           className={`timeline-entry ${active ? 'active' : ''}`}
                           onClick={() => {
                             selectTimelineItem(item);
@@ -570,6 +610,9 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                               selectTimelineItem(item);
                             }
                           }}
+                          data-timeline-index={String(index)}
+                          data-source={item.source}
+                          data-clinician={item.clinicianName || item.clinicianProfile || 'Sin profesional'}
                         >
                           <div className="timeline-entry-main">
                             <div className="timeline-entry-top">

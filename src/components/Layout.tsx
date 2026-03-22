@@ -75,24 +75,28 @@ export const Layout: React.FC<LayoutProps> = ({
 
         <nav className="nav-menu" aria-label="Navegacion principal">
           <NavItem
+            id="nav-record-btn"
             icon={<Mic size={20} />}
             label="Consulta"
             isActive={currentView === 'record'}
             onClick={() => onNavigate('record')}
           />
           <NavItem
+            id="nav-history-btn"
             icon={<FileText size={20} />}
             label="Historial"
             isActive={currentView === 'history'}
             onClick={() => onNavigate('history')}
           />
           <NavItem
+            id="nav-reports-btn"
             icon={<FileBarChart size={20} />}
             label="Informes"
             isActive={currentView === 'reports'}
             onClick={() => onNavigate('reports')}
           />
           <NavItem
+            id="nav-test-lab-btn"
             icon={<FlaskConical size={20} />}
             label="Zona Test"
             isActive={currentView === 'test-lab'}
@@ -147,15 +151,17 @@ export const Layout: React.FC<LayoutProps> = ({
 };
 
 interface NavItemProps {
+  id?: string;
   icon: React.ReactNode;
   label: string;
   isActive: boolean;
   onClick: () => void;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ icon, label, isActive, onClick }) => {
+const NavItem: React.FC<NavItemProps> = ({ id, icon, label, isActive, onClick }) => {
   return (
     <button
+      id={id}
       className={`nav-item ${isActive ? 'active' : ''}`}
       onClick={onClick}
       aria-label={label}
