@@ -121,6 +121,13 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const selectedGroupNormalizedName = selectedGroup?.normalizedPatientName || '';
   const selectedGroupLegacyCount = selectedGroup?.sourceCounts.legacy || 0;
   const selectedGroupCurrentCount = selectedGroup?.sourceCounts.current || 0;
+  const isDemoSelectedGroup = Boolean(
+    demoContinuity
+    && selectedGroupNormalizedName
+    && selectedGroupNormalizedName === normalizedDemoPatientName
+  );
+  const effectiveCaseSummary = isDemoSelectedGroup ? demoContinuity?.caseSummary ?? null : caseSummary;
+  const effectiveCaseSummaryLoading = isDemoSelectedGroup ? false : caseSummaryLoading;
 
   const selectedSpecialty = normalizeClinicalSpecialty(selectedItem?.specialty || 'psicologia');
   const selectedBriefingClinician = selectedItem?.clinicianProfile || selectedItem?.clinicianName || selectedGroup?.clinicians[0];
@@ -576,51 +583,51 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                       <div className="case-hub-kicker">Vista general</div>
                       <h2>Continuidad del caso</h2>
                     </div>
-                    <div className="case-hub-meta">
-                      <Shield size={14} />
-                      {caseSummaryLoading ? 'Preparando contexto...' : `${selectedGroup.clinicians.length} profesionales`}
-                    </div>
+                  <div className="case-hub-meta">
+                    <Shield size={14} />
+                      {effectiveCaseSummaryLoading ? 'Preparando contexto...' : `${selectedGroup.clinicians.length} profesionales`}
                   </div>
+                </div>
 
-                  {caseSummaryLoading && !caseSummary ? (
+                  {effectiveCaseSummaryLoading && !effectiveCaseSummary ? (
                     <div className="case-hub-loading">Preparando el contexto del caso...</div>
-                  ) : caseSummary ? (
+                  ) : effectiveCaseSummary ? (
                     <div className="case-hub-grid">
                       <div>
                         <span className="case-hub-label">Ultima sesion</span>
-                        <p>{caseSummary.latestConsultationAt ? new Date(caseSummary.latestConsultationAt).toLocaleDateString() : 'Sin dato'}</p>
+                        <p>{effectiveCaseSummary.latestConsultationAt ? new Date(effectiveCaseSummary.latestConsultationAt).toLocaleDateString() : 'Sin dato'}</p>
                       </div>
                       <div>
                         <span className="case-hub-label">Profesionales</span>
-                        <p>{caseSummary.clinicians.length > 0 ? caseSummary.clinicians.join(', ') : 'Sin dato'}</p>
+                        <p>{effectiveCaseSummary.clinicians.length > 0 ? effectiveCaseSummary.clinicians.join(', ') : 'Sin dato'}</p>
                       </div>
                       <div className="case-hub-span">
                         <span className="case-hub-label">Motivo / foco principal</span>
-                        <p>{caseSummary.mainFocus}</p>
+                        <p>{effectiveCaseSummary.mainFocus}</p>
                       </div>
-                      {caseSummary.recurringTopics.length > 0 && (
+                      {effectiveCaseSummary.recurringTopics.length > 0 && (
                         <div className="case-hub-span">
                           <span className="case-hub-label">Temas recurrentes</span>
                           <div className="case-hub-chips">
-                            {caseSummary.recurringTopics.map((topic) => (
+                            {effectiveCaseSummary.recurringTopics.map((topic) => (
                               <span key={topic} className="case-hub-chip">{topic}</span>
                             ))}
                           </div>
                         </div>
                       )}
-                      {caseSummary.openItems.length > 0 && (
+                      {effectiveCaseSummary.openItems.length > 0 && (
                         <div className="case-hub-span">
                           <span className="case-hub-label">Ultimas tareas o acuerdos</span>
                           <ul className="case-hub-list">
-                            {caseSummary.openItems.map((item) => <li key={item}>{item}</li>)}
+                            {effectiveCaseSummary.openItems.map((item) => <li key={item}>{item}</li>)}
                           </ul>
                         </div>
                       )}
-                      {caseSummary.sensitiveFlags.length > 0 && (
+                      {effectiveCaseSummary.sensitiveFlags.length > 0 && (
                         <div className="case-hub-span">
                           <span className="case-hub-label">Riesgos o senales sensibles</span>
                           <div className="case-hub-chips sensitive">
-                            {caseSummary.sensitiveFlags.map((flag) => (
+                            {effectiveCaseSummary.sensitiveFlags.map((flag) => (
                               <span key={flag} className="case-hub-chip sensitive">{flag}</span>
                             ))}
                           </div>

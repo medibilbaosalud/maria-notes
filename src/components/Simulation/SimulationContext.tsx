@@ -325,7 +325,7 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
         id: 'wait_for_highlight',
         targetId: 'uncertainty-highlight-antecedentes_relevantes-0',
         duration: 3600,
-        caption: 'Mira, aqui Maria ha marcado una duda importante para que puedas revisarla con la evidencia original.'
+        caption: '¡Mira! Maria ha marcado una duda importante para que la revises con la evidencia original.'
     },
     {
         id: 'click_highlight',
@@ -336,13 +336,13 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     },
     {
         id: 'wait_for_modal',
-        targetId: 'evidence-modal-close-btn',
+        targetId: 'evidence-modal-confirm-btn',
         duration: 4000,
         caption: 'Asi decides tu, con calma, que entra en la historia clinica y que no.'
     },
     {
         id: 'click_confirm',
-        targetId: 'evidence-modal-close-btn',
+        targetId: 'evidence-modal-confirm-btn',
         duration: 1200,
         action: () => {
             clickFirstAvailable(['evidence-modal-confirm-btn', 'evidence-modal-close-btn']);
