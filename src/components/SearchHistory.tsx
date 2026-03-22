@@ -99,7 +99,6 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const queryRef = useRef('');
   const syncingRef = useRef(false);
   const cloudReadyRef = useRef(false);
-  const detailTopRef = useRef<HTMLDivElement | null>(null);
   const detailScrollRef = useRef<HTMLDivElement | null>(null);
   const { isCloudEnabled, isCloudAuthenticated, cloudAccessMode } = useCloudSync();
   const { isPlaying, demoData } = useSimulation();
@@ -226,7 +225,6 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     if (!selectedGroup) return;
     const frame = window.requestAnimationFrame(() => {
       detailScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
-      detailTopRef.current?.scrollIntoView({ block: 'start', behavior: 'auto' });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [selectedGroup]);
@@ -510,7 +508,6 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
             {selectedGroup && selectedItem ? (
               <motion.div
                 key={selectedGroup.normalizedPatientName}
-                ref={detailTopRef}
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}

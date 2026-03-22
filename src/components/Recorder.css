@@ -44,7 +44,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.5rem 1rem;
+  padding: 0.6rem 1.15rem;
   background: rgba(15, 23, 42, 0.04);
   border-radius: 99px;
   font-size: 0.85rem;
@@ -70,7 +70,7 @@
 }
 
 .timer-display-large {
-  font-size: 5rem;
+  font-size: 5.6rem;
   font-weight: 200;
   font-variant-numeric: tabular-nums;
   letter-spacing: -3px;
@@ -82,15 +82,15 @@
 /* Input Area */
 .recorder-input-area {
   width: 100%;
-  max-width: 600px;
+  max-width: 720px;
   position: relative;
   z-index: 50;
 }
 
 .recorder-context-card {
   width: 100%;
-  max-width: 600px;
-  padding: 1rem 1.1rem;
+  max-width: 720px;
+  padding: 1.1rem 1.2rem;
   border-radius: 20px;
   background: linear-gradient(180deg, rgba(240, 253, 250, 0.96) 0%, rgba(255, 255, 255, 0.98) 100%);
   border: 1px solid rgba(13, 148, 136, 0.14);
@@ -218,8 +218,8 @@
 
 .microphone-health-card {
   width: 100%;
-  max-width: 600px;
-  padding: 1rem 1.1rem 0.95rem;
+  max-width: 720px;
+  padding: 1.05rem 1.2rem 1rem;
   border-radius: 20px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(240, 253, 250, 0.92) 100%);
   border: 1px solid rgba(16, 185, 129, 0.14);
@@ -227,9 +227,9 @@
 }
 
 .microphone-health-card.compact {
-  padding: 0.6rem 1rem;
+  padding: 0.72rem 1.15rem;
   border-radius: 999px;
-  max-width: 320px;
+  max-width: 420px;
   box-shadow: 0 8px 20px -16px rgba(15, 23, 42, 0.2);
 }
 
@@ -386,8 +386,8 @@
 
 .recorder-text-input-large {
   width: 100%;
-  font-size: 1.25rem;
-  padding: 1.2rem 1.5rem 1.2rem 3.5rem;
+  font-size: 1.3rem;
+  padding: 1.3rem 1.65rem 1.3rem 3.65rem;
   border-radius: 18px;
   border: 1px solid rgba(0, 0, 0, 0.08);
   /* Subtle border */
@@ -509,7 +509,8 @@
     0 10px 15px -3px rgba(14, 165, 233, 0.3),
     0 4px 6px -2px rgba(14, 165, 233, 0.1);
   transition: all 0.2s ease;
-  min-width: 280px;
+  min-width: 380px;
+  justify-content: center;
 }
 
 .action-btn-large:hover:not(:disabled) {

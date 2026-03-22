@@ -1180,7 +1180,7 @@ const normalizeBriefingText = (rawText) => {
         });
 
     if (!lines.length) return '';
-    return lines.slice(0, 5).join('\n');
+    return lines.slice(0, 6).join('\n');
 };
 
 const buildBriefingPrompt = ({ patientName, consultationType, clinicianName, timelineItems }) => {
@@ -1202,21 +1202,24 @@ const buildBriefingPrompt = ({ patientName, consultationType, clinicianName, tim
         })
         .join('\n\n');
 
-    return `Eres un asistente clinico de psicologia. Redacta un briefing ultra-breve para la psicologa que va a ver este caso.
-El objetivo es que la psicologa lo lea en 15 segundos antes de que entre la paciente y recuerde lo esencial.
+    return `Eres un asistente clinico de psicologia. Redacta un briefing breve y muy util para la psicologa que va a retomar este caso.
+El objetivo es que en 20-30 segundos recuerde lo importante sin releer toda la historia.
 
-Resume en maximo 3-4 lineas concretas:
-1. Que se trabajo en la ultima sesion (fecha y tema concreto).
-2. Que tareas, compromisos o pendientes quedaron (solo si constan explicitamente).
-3. Si hay algun dato sensible o importante que no deba olvidarse (solo si consta explicitamente).
+Resume en 4-6 lineas cortas, priorizando este orden:
+1. Motivo actual o foco principal del caso, con algo de contexto funcional si aparece.
+2. Que se trabajo en la ultima sesion o en la etapa mas reciente (tema concreto, no generalidades).
+3. Factores relevantes que estan manteniendo el malestar o areas afectadas si constan con claridad.
+4. Tareas, acuerdos, objetivos terapeuticos o pendientes para la siguiente sesion, solo si estan escritos.
+5. Recordatorios clinicos sensibles o importantes que convenga no olvidar, solo si constan explicitamente.
 
 Reglas estrictas:
 - Usa SOLO informacion explicitamente presente en las notas.
-- No inventes diagnosticos, gravedad, riesgos, ni proximos pasos.
+- No inventes diagnosticos, gravedad, riesgos ni interpretaciones no escritas.
 - Si no hay informacion suficiente para un punto, OMITELO. No escribas "No consta".
-- Prioriza lo concreto: fechas, temas, tareas, datos literales. No prosa generica.
-- Tono: como una nota rapida pegada en la carpeta del paciente. Breve, directa, util.
-- No repitas informacion entre lineas.
+- Prioriza lo clinicamente util para una psicologa: foco actual, contexto relevante, areas afectadas, objetivos y pendientes.
+- Evita repetir datos entre lineas.
+- Evita frases demasiado largas o literarias.
+- Tono: nota breve, humana y muy clara, como contexto de trabajo antes de abrir la consulta.
 
 Paciente: ${patientName || 'Paciente'}
 Especialidad: ${specialty}
@@ -1466,7 +1469,7 @@ export const generatePatientBriefingPayload = async ({ patientName, consultation
         prompt: buildBriefingPrompt({ patientName, consultationType, clinicianName, timelineItems }),
         jsonMode: false,
         temperature: 0.15,
-        maxTokens: 450
+        maxTokens: 650
     });
     const normalizedText = normalizeBriefingText(response.text);
     if (!normalizedText) {

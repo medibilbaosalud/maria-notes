@@ -342,11 +342,21 @@ const getPatientBriefingCandidates = async (
 };
 
 const isBriefingCurrent = (briefing: PatientBriefing, latestConsultationAt: string): boolean => {
-    if (!latestConsultationAt) return briefing.status === 'ready';
-    return toIsoString(briefing.latest_consultation_at || '') >= toIsoString(latestConsultationAt);
+    if (!latestConsultationAt) return briefing.status === 'ready' && hasCurrentBriefingVersion(briefing);
+    return briefing.status === 'ready'
+        && hasCurrentBriefingVersion(briefing)
+        && toIsoString(briefing.latest_consultation_at || '') >= toIsoString(latestConsultationAt);
 };
 
 const createBriefingClient = () => new AIService();
+const CURRENT_BRIEFING_VERSION = 'briefing_v2';
+const withBriefingVersion = (model: string) => {
+    const cleaned = cleanText(model || '');
+    if (!cleaned) return `groq:briefing:${CURRENT_BRIEFING_VERSION}`;
+    if (cleaned.includes(CURRENT_BRIEFING_VERSION)) return cleaned;
+    return `${cleaned}:${CURRENT_BRIEFING_VERSION}`;
+};
+const hasCurrentBriefingVersion = (briefing: PatientBriefing) => cleanText(briefing.model || '').includes(CURRENT_BRIEFING_VERSION);
 
 const mapTimelineForBriefing = (items: PatientTimelineItem[]) => items.slice(0, 12).map((item) => ({
     id: item.id,
@@ -703,7 +713,7 @@ export const markPatientBriefingStale = async (
             latest_consultation_at: latestConsultationAt,
             generated_from_count: timeline.length,
             generated_from_record_ids: recordIds,
-            model: existing?.model || 'pending',
+            model: withBriefingVersion(existing?.model || 'pending'),
             status: 'stale',
             created_at: existing?.created_at || nowIso(),
             updated_at: nowIso()
@@ -773,7 +783,7 @@ export const ensurePatientBriefing = async (
             latest_consultation_at: latestConsultationAt,
             generated_from_count: timeline.length,
             generated_from_record_ids: getBriefingRecordIds(timeline),
-            model: briefingResult.model,
+            model: withBriefingVersion(briefingResult.model),
             status: 'ready',
             created_at: latestCandidate?.created_at || nowIso(),
             updated_at: nowIso()
@@ -802,7 +812,7 @@ export const ensurePatientBriefing = async (
                 latest_consultation_at: latestConsultationAt,
                 generated_from_count: timeline.length,
                 generated_from_record_ids: getBriefingRecordIds(timeline),
-                model: 'groq:briefing',
+                model: withBriefingVersion('groq:briefing'),
                 status: 'failed',
                 created_at: latestCandidate?.created_at || nowIso(),
                 updated_at: nowIso()
