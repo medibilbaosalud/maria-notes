@@ -952,10 +952,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         parts.push(text.slice(cursor, match.start));
       }
       const snippet = text.slice(match.start, match.end);
+      const safeFieldId = match.fieldPath.replace(/[^a-zA-Z0-9_-]/g, '-');
       parts.push(
         <button
           key={`${match.fieldPath}-${match.start}-${idx}`}
-          id={`uncertainty-highlight-${idx}`}
+          id={`uncertainty-highlight-${safeFieldId}-${idx}`}
           type="button"
           className="uncertainty-highlight"
           onClick={() => openEvidence(match.fieldPath)}
@@ -1842,7 +1843,12 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             >
               <div className="modal-header">
                 <h3>Evidencia guiada</h3>
-                <button className="close-btn" onClick={() => setShowEvidenceModal(false)} aria-label="Cerrar evidencia">
+                <button
+                  id="evidence-modal-close-btn"
+                  className="close-btn"
+                  onClick={() => setShowEvidenceModal(false)}
+                  aria-label="Cerrar evidencia"
+                >
                   <X size={20} />
                 </button>
               </div>

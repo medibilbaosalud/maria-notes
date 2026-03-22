@@ -86,6 +86,17 @@ const clickById = (id: string) => {
     }
 };
 
+const clickFirstAvailable = (ids: string[]) => {
+    for (const id of ids) {
+        const el = document.getElementById(id);
+        if (el instanceof HTMLElement) {
+            el.click();
+            return true;
+        }
+    }
+    return false;
+};
+
 const positionCursorOnTarget = (
     targetId: string,
     setCursorPosition: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>
@@ -149,28 +160,30 @@ const OTORRINO_SCRIPT: SimulationStep[] = [
     },
     {
         id: 'wait_for_highlight',
-        targetId: 'uncertainty-highlight-0',
+        targetId: 'uncertainty-highlight-motivo_consulta-0',
         duration: 4200,
         caption: 'Si detecta una duda, la resalta para que la confirmes con evidencia.'
     },
     {
         id: 'click_highlight',
-        targetId: 'uncertainty-highlight-0',
+        targetId: 'uncertainty-highlight-motivo_consulta-0',
         duration: 1400,
-        action: () => clickById('uncertainty-highlight-0'),
+        action: () => clickById('uncertainty-highlight-motivo_consulta-0'),
         caption: 'Abrimos la evidencia original.'
     },
     {
         id: 'wait_for_modal',
-        targetId: 'evidence-modal-confirm-btn',
+        targetId: 'evidence-modal-close-btn',
         duration: 4200,
         caption: 'Tu sigues teniendo la ultima palabra sobre lo que se guarda.'
     },
     {
         id: 'click_confirm',
-        targetId: 'evidence-modal-confirm-btn',
+        targetId: 'evidence-modal-close-btn',
         duration: 1200,
-        action: () => clickById('evidence-modal-confirm-btn')
+        action: () => {
+            clickFirstAvailable(['evidence-modal-confirm-btn', 'evidence-modal-close-btn']);
+        }
     },
     {
         id: 'move_to_edit',
@@ -310,28 +323,30 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     },
     {
         id: 'wait_for_highlight',
-        targetId: 'uncertainty-highlight-0',
+        targetId: 'uncertainty-highlight-antecedentes_relevantes-0',
         duration: 3600,
         caption: 'Mira, aqui Maria ha marcado una duda importante para que puedas revisarla con la evidencia original.'
     },
     {
         id: 'click_highlight',
-        targetId: 'uncertainty-highlight-0',
+        targetId: 'uncertainty-highlight-antecedentes_relevantes-0',
         duration: 1400,
-        action: () => clickById('uncertainty-highlight-0'),
+        action: () => clickById('uncertainty-highlight-antecedentes_relevantes-0'),
         caption: 'La abrimos y compruebas enseguida si la sertralina era esa o no.'
     },
     {
         id: 'wait_for_modal',
-        targetId: 'evidence-modal-confirm-btn',
+        targetId: 'evidence-modal-close-btn',
         duration: 4000,
         caption: 'Asi decides tu, con calma, que entra en la historia clinica y que no.'
     },
     {
         id: 'click_confirm',
-        targetId: 'evidence-modal-confirm-btn',
+        targetId: 'evidence-modal-close-btn',
         duration: 1200,
-        action: () => clickById('evidence-modal-confirm-btn')
+        action: () => {
+            clickFirstAvailable(['evidence-modal-confirm-btn', 'evidence-modal-close-btn']);
+        }
     },
     {
         id: 'move_to_edit',
