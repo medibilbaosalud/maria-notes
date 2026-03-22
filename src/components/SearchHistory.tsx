@@ -119,11 +119,14 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const selectedGroupNormalizedName = selectedGroup?.normalizedPatientName || '';
   const selectedGroupLegacyCount = selectedGroup?.sourceCounts.legacy || 0;
   const selectedGroupCurrentCount = selectedGroup?.sourceCounts.current || 0;
+  const normalizedSelectedGroupName = selectedGroupName.trim().toLowerCase();
   const isDemoSelectedGroup = Boolean(
     isPlaying
     && demoData?.specialty === 'psicologia'
-    && selectedGroupNormalizedName
-    && selectedGroupNormalizedName === normalizedDemoPatientName
+    && (
+      (selectedGroupNormalizedName && selectedGroupNormalizedName === normalizedDemoPatientName)
+      || (normalizedSelectedGroupName && normalizedSelectedGroupName === normalizedDemoPatientName)
+    )
   );
   const effectiveCaseSummary = isDemoSelectedGroup ? demoData?.caseSummary ?? null : caseSummary;
   const effectiveCaseSummaryLoading = isDemoSelectedGroup ? false : caseSummaryLoading;
