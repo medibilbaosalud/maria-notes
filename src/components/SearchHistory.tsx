@@ -113,6 +113,10 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     }
     : null;
   const normalizedDemoPatientName = demoData?.patientName?.trim().toLowerCase() || '';
+  const selectedGroupName = selectedGroup?.patientName || '';
+  const selectedGroupNormalizedName = selectedGroup?.normalizedPatientName || '';
+  const selectedGroupLegacyCount = selectedGroup?.sourceCounts.legacy || 0;
+  const selectedGroupCurrentCount = selectedGroup?.sourceCounts.current || 0;
 
   const selectedSpecialty = normalizeClinicalSpecialty(selectedItem?.specialty || 'psicologia');
   const selectedBriefingClinician = selectedItem?.clinicianProfile || selectedItem?.clinicianName || selectedGroup?.clinicians[0];
@@ -216,18 +220,18 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      if (!selectedGroup) {
+      if (!selectedGroupName) {
         setCaseSummary(null);
         return;
       }
-      if (demoContinuity && selectedGroup.normalizedPatientName === normalizedDemoPatientName) {
+      if (demoContinuity && selectedGroupNormalizedName === normalizedDemoPatientName) {
         setCaseSummary(demoContinuity.caseSummary ?? null);
         setCaseSummaryLoading(false);
         return;
       }
       setCaseSummaryLoading(true);
       try {
-        const summary = await buildPsychologyCaseSummary(selectedGroup.patientName, selectedBriefingClinician);
+        const summary = await buildPsychologyCaseSummary(selectedGroupName, selectedBriefingClinician);
         if (!cancelled) setCaseSummary(summary);
       } finally {
         if (!cancelled) setCaseSummaryLoading(false);
@@ -237,36 +241,36 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [demoContinuity, normalizedDemoPatientName, selectedBriefingClinician, selectedGroup]);
+  }, [demoContinuity, normalizedDemoPatientName, selectedBriefingClinician, selectedGroupName, selectedGroupNormalizedName]);
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      if (!selectedGroup || selectedSpecialty !== 'psicologia') {
+      if (!selectedGroupName || selectedSpecialty !== 'psicologia') {
         setBriefing(null);
         return;
       }
-      if (demoContinuity && selectedGroup.normalizedPatientName === normalizedDemoPatientName) {
+      if (demoContinuity && selectedGroupNormalizedName === normalizedDemoPatientName) {
         setBriefing(demoContinuity.briefing ?? null);
         return;
       }
 
       const currentRequest = ++briefingRequestRef.current;
       try {
-        const existing = await getPatientBriefing(selectedGroup.patientName, 'psicologia', selectedBriefingClinician);
+        const existing = await getPatientBriefing(selectedGroupName, 'psicologia', selectedBriefingClinician);
         if (cancelled || currentRequest !== briefingRequestRef.current) return;
         if (existing) {
           setBriefing(existing);
           return;
         }
 
-        const shouldGenerate = selectedGroup.sourceCounts.legacy > 0 && selectedGroup.sourceCounts.current === 0;
+        const shouldGenerate = selectedGroupLegacyCount > 0 && selectedGroupCurrentCount === 0;
         if (!shouldGenerate) {
           setBriefing(null);
           return;
         }
 
-        const generated = await ensurePatientBriefing(selectedGroup.patientName, 'psicologia', selectedBriefingClinician);
+        const generated = await ensurePatientBriefing(selectedGroupName, 'psicologia', selectedBriefingClinician);
         if (cancelled || currentRequest !== briefingRequestRef.current) return;
         setBriefing(generated);
       } catch (error) {
@@ -281,7 +285,16 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [demoContinuity, normalizedDemoPatientName, selectedGroup, selectedBriefingClinician, selectedSpecialty]);
+  }, [
+    demoContinuity,
+    normalizedDemoPatientName,
+    selectedBriefingClinician,
+    selectedGroupCurrentCount,
+    selectedGroupLegacyCount,
+    selectedGroupName,
+    selectedGroupNormalizedName,
+    selectedSpecialty
+  ]);
 
   const selectGroup = useCallback((group: PatientTimelineGroup) => {
     setSelectedGroup(group);
@@ -529,12 +542,12 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   <div id="history-briefing-card" className="briefing-card">
                     <div className="case-hub-header">
                       <div>
-                        <div className="case-hub-kicker">Briefing 30s</div>
-                        <h2>Preparacion rapida del caso</h2>
+                        <div className="case-hub-kicker">Resumen 30s</div>
+                        <h2>Preparación rápida del caso</h2>
                       </div>
                       <div className="case-hub-meta">
                         <Sparkles size={14} />
-                        Groq
+                        Contexto listo
                       </div>
                     </div>
                     <div className="briefing-lines">
@@ -548,17 +561,17 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                 <div id="history-case-hub" className="case-hub-card">
                   <div className="case-hub-header">
                     <div>
-                      <div className="case-hub-kicker">Case Hub</div>
+                      <div className="case-hub-kicker">Vista general</div>
                       <h2>Continuidad del caso</h2>
                     </div>
                     <div className="case-hub-meta">
                       <Shield size={14} />
-                      {caseSummaryLoading ? 'Resumiendo...' : `${selectedGroup.clinicians.length} profesionales`}
+                      {caseSummaryLoading ? 'Preparando contexto...' : `${selectedGroup.clinicians.length} profesionales`}
                     </div>
                   </div>
 
                   {caseSummaryLoading && !caseSummary ? (
-                    <div className="case-hub-loading">Analizando historico...</div>
+                    <div className="case-hub-loading">Preparando el contexto del caso...</div>
                   ) : caseSummary ? (
                     <div className="case-hub-grid">
                       <div>
@@ -603,13 +616,13 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                       )}
                     </div>
                   ) : (
-                    <div className="case-hub-loading">Sin suficiente contexto historico para resumir.</div>
+                    <div className="case-hub-loading">Todavía no hay suficiente contexto histórico para resumir el caso.</div>
                   )}
                 </div>
 
                 <div id="history-timeline-panel" className="timeline-panel">
                   <div className="timeline-panel-header">
-                    <h3>Patient Timeline</h3>
+                    <h3>Línea temporal del caso</h3>
                     <span>{selectedGroup.items.length} entradas</span>
                   </div>
                   <div className="timeline-list">
@@ -698,7 +711,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   <FileText size={48} />
                 </div>
                 <h3>Selecciona un paciente</h3>
-                <p>Su timeline y contexto apareceran aqui</p>
+                <p>Su historial y su contexto aparecerán aquí</p>
               </div>
             )}
           </AnimatePresence>

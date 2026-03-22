@@ -549,10 +549,10 @@ export const Recorder: React.FC<RecorderProps> = ({
               <>
                 <div className="recorder-context-header">
                   <div>
-                    <div className="recorder-context-kicker">Briefing 30s</div>
-                    <h3>Preparacion rapida del caso</h3>
+                    <div className="recorder-context-kicker">Resumen 30s</div>
+                    <h3>Preparación rápida del caso</h3>
                   </div>
-                  <div className="recorder-context-meta">Groq</div>
+                  <div className="recorder-context-meta">Contexto listo</div>
                 </div>
                 <div className="recorder-context-main briefing-context-main">
                   {briefing.summary_text.split('\n').map((line, index) => (
@@ -578,13 +578,13 @@ export const Recorder: React.FC<RecorderProps> = ({
                 </div>
               </>
             ) : caseSummaryLoading && !caseSummary ? (
-              <div className="recorder-context-loading">Buscando contexto clinico...</div>
+              <div className="recorder-context-loading">Preparando el contexto del caso...</div>
             ) : caseSummary ? (
               <>
                 <div className="recorder-context-header">
                   <div>
                     <div className="recorder-context-kicker">Contexto previo</div>
-                    <h3>Ya has visto a este paciente</h3>
+                    <h3>Continuidad del caso</h3>
                   </div>
                   <div className="recorder-context-meta">{caseSummary.sessionCount} sesiones</div>
                 </div>

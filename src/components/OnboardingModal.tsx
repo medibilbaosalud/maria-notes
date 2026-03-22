@@ -32,28 +32,28 @@ const PSYCHOLOGY_SLIDES: TunnelSlide[] = [
         id: 'consulta',
         icon: Mic,
         headline: 'Siempre empiezas en Consulta',
-        body: 'Escribes el nombre del paciente y pulsas grabar. Maria Notes escucha por ti y al terminar te deja la historia lista para revisar.',
+        body: 'Escribes el nombre del paciente, pulsas grabar y te centras en la sesion. Maria te ayuda a dejar la historia preparada para revisarla con calma.',
         accent: 'sunrise'
     },
     {
         id: 'contexto',
         icon: Clock3,
-        headline: 'Si el paciente ya existe, veras su contexto antes de grabar',
-        body: 'Antes de empezar tendras un resumen corto para retomar el caso rapido y no entrar a la sesion en frio.',
+        headline: 'Si el paciente ya existe, no empiezas de cero',
+        body: 'Antes de grabar veras un resumen muy corto para retomar el caso rapido y entrar a la sesion con el contexto fresco.',
         accent: 'teal'
     },
     {
         icon: FileText,
         id: 'historial',
-        headline: 'En Historial entiendes el caso completo',
-        body: 'Tienes una vista unica por paciente con resumen del caso y linea temporal para releer la evolucion sin perderte.',
+        headline: 'En Historial lo ves todo mas claro',
+        body: 'Cada paciente tiene su propia vista, con una vision general del caso y una linea temporal para seguir la evolucion sin perderte.',
         accent: 'sunrise'
     },
     {
         id: 'aprende',
         icon: Brain,
-        headline: 'Cuando corriges, Maria aprende tu estilo',
-        body: 'Si cambias una seccion, la app se va acercando a tu manera real de escribir y revisar la historia clinica.',
+        headline: 'Y cuando corriges, Maria se adapta a ti',
+        body: 'Cada ajuste ayuda a que la app se acerque mas a tu forma real de escribir, revisar y cerrar la historia clinica.',
         accent: 'paper'
     }
 ];
@@ -111,7 +111,7 @@ export const OnboardingModal = ({
                 {/* Greeting */}
                 <p className="onboarding-tunnel-kicker">
                     {isPsychology
-                        ? `Hola ${name}, bienvenida a Maria Notes`
+                        ? `Hola ${name}, te acompano en los primeros pasos`
                         : 'Guia rapida de Maria Notes'}
                 </p>
 

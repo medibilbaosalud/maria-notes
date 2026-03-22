@@ -202,32 +202,32 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     {
         id: 'intro',
         duration: 4200,
-        caption: 'Bienvenida, {{clinicianName}}. Vamos a recorrer el flujo real de Maria Notes para que puedas usarlo desde el primer dia.'
+        caption: 'Bienvenida, {{clinicianName}}. Vamos a verlo juntas paso a paso para que te sientas comoda desde el primer momento.'
     },
     {
         id: 'move_to_input',
         targetId: 'patient-name-input',
         duration: 2600,
-        caption: 'Siempre empiezas en Consulta. Aqui escribes el nombre del paciente.'
+        caption: 'Todo empieza en Consulta. Aqui escribes el nombre del paciente y Maria te acompana desde el primer clic.'
     },
     {
         id: 'type_patient_name',
         targetId: 'patient-name-input',
         duration: 4200,
         action: () => typeIntoInput('patient-name-input', 'Paciente Demo Psicologia (Simulacion)', 75),
-        caption: 'Si el paciente ya existe, Maria reconoce el caso y recupera su contexto.'
+        caption: 'Si el paciente ya existe, Maria reconoce el caso y te devuelve el contexto sin hacerte perder tiempo.'
     },
     {
         id: 'wait_for_briefing',
         targetId: 'recorder-context-card',
         duration: 4200,
-        caption: 'Antes de grabar, ves un briefing corto con lo ultimo importante para retomar la sesion sin releer todo.'
+        caption: 'Antes de grabar, tienes un resumen muy corto con lo ultimo importante para retomar la sesion con tranquilidad.'
     },
     {
         id: 'move_to_history',
         targetId: 'recorder-open-history-btn',
         duration: 3000,
-        caption: 'Si necesitas mas detalle, abres el historial completo desde aqui.'
+        caption: 'Y si quieres un poco mas de detalle, puedes abrir el historial completo desde aqui.'
     },
     {
         id: 'click_history',
@@ -239,25 +239,25 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
         id: 'move_to_demo_patient',
         targetId: 'history-patient-card-0',
         duration: 3200,
-        caption: 'En Historial tienes una vista unica por paciente. No hace falta buscar entre notas sueltas.'
+        caption: 'En Historial lo ves todo por paciente. Asi no tienes que ir saltando entre notas sueltas.'
     },
     {
         id: 'focus_case_hub',
         targetId: 'history-case-hub',
         duration: 4200,
-        caption: 'Arriba ves el resumen util del caso: foco principal, acuerdos abiertos y quien lo ha visto.'
+        caption: 'Arriba tienes una vista general del caso con lo que mas te ayuda a situarte rapido.'
     },
     {
         id: 'focus_timeline',
         targetId: 'history-timeline-panel',
         duration: 3800,
-        caption: 'Debajo tienes la linea temporal del caso para releer la evolucion cuando lo necesites.'
+        caption: 'Y debajo tienes la linea temporal del caso, por si quieres volver a leer la evolucion con calma.'
     },
     {
         id: 'move_to_use_context',
         targetId: 'history-use-context-btn',
         duration: 2800,
-        caption: 'Y cuando ya tienes el contexto claro, vuelves a Consulta con un clic.'
+        caption: 'Cuando ya lo tienes claro, vuelves a Consulta con un solo clic.'
     },
     {
         id: 'click_use_context',
@@ -269,7 +269,7 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
         id: 'move_to_record',
         targetId: 'main-record-btn',
         duration: 2800,
-        caption: 'De vuelta en Consulta, ya puedes empezar la sesion con todo lo importante fresco.'
+        caption: 'De vuelta en Consulta, ya puedes empezar con todo lo importante fresco.'
     },
     {
         id: 'click_record',
@@ -280,18 +280,18 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     {
         id: 'processing_1',
         duration: 5400,
-        caption: 'Mientras tu te centras en la conversacion, Maria transcribe y estructura la historia.'
+        caption: 'Mientras tu te centras en la conversacion, Maria va ordenando la informacion por detras.'
     },
     {
         id: 'processing_2',
         duration: 5400,
-        caption: 'Despues valida el borrador para que partas de una nota segura y revisable.'
+        caption: 'Despues te deja una nota clara y revisable para que partas de una buena base.'
     },
     {
         id: 'wait_for_highlight',
         targetId: 'uncertainty-highlight-0',
         duration: 4600,
-        caption: 'Si detecta una duda importante, la resalta para que la revises con evidencia.'
+        caption: 'Si detecta una duda importante, te la marca para que la revises con calma y con evidencia.'
     },
     {
         id: 'click_highlight',
@@ -304,7 +304,7 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
         id: 'wait_for_modal',
         targetId: 'evidence-modal-confirm-btn',
         duration: 4600,
-        caption: 'Tu sigues teniendo la ultima palabra sobre lo que se guarda en la historia clinica.'
+        caption: 'La ultima palabra sigue siendo tuya sobre lo que entra en la historia clinica.'
     },
     {
         id: 'click_confirm',
@@ -316,7 +316,7 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
         id: 'move_to_edit',
         targetId: 'edit-mode-btn',
         duration: 2800,
-        caption: 'Si quieres, ajustas la redaccion con tu propio criterio terapeutico.'
+        caption: 'Y si quieres, ajustas la redaccion para que quede totalmente a tu manera.'
     },
     {
         id: 'click_edit',
@@ -328,7 +328,7 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
         id: 'simulate_typing',
         targetId: 'save-edit-btn',
         duration: 5200,
-        caption: 'Cada correccion ayuda a que Maria se adapte mejor a tu estilo clinico.'
+        caption: 'Cada correccion ayuda a que Maria aprenda un poco mas de tu estilo.'
     },
     {
         id: 'click_save',
@@ -339,20 +339,20 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     {
         id: 'finish_learning',
         duration: 5600,
-        caption: 'Y asi queda preparado el caso para la proxima sesion: contexto claro, historial vivo y una nota cada vez mas tuya.'
+        caption: 'Y asi queda listo el caso para la proxima sesion: contexto claro, historial vivo y una nota cada vez mas tuya.'
     },
     {
         id: 'move_to_feedback',
         targetId: 'feedback-score-10',
         duration: 2800,
-        caption: 'Solo queda valorar el resultado.'
+        caption: 'Ya solo queda valorar el resultado.'
     },
     {
         id: 'submit_feedback',
         targetId: 'feedback-submit-btn',
         duration: 2400,
         action: () => clickById('feedback-submit-btn'),
-        caption: 'Con esto queda cerrada la demo completa.'
+        caption: 'Y con esto queda cerrada la demo.'
     },
     {
         id: 'finish'
