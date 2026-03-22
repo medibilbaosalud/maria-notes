@@ -11,10 +11,12 @@
   border: 1px solid rgba(255, 255, 255, 0.5);
   width: 100%;
   max-width: 860px;
+  min-height: 720px;
   /* More contained */
-  margin: 0.5rem auto;
+  margin: 2.25rem auto 0.75rem;
   position: relative;
   overflow: hidden;
+  display: flex;
   /* For pulse effects inside */
 }
 
@@ -23,6 +25,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
+  min-height: 100%;
   gap: 1.9rem;
   position: relative;
   z-index: 10;
@@ -619,11 +623,11 @@
 /* Vertical Responsiveness for Laptops */
 @media (max-height: 800px) {
   .recorder-card {
-    padding: 1.5rem 2rem;
-    margin: 0 auto;
-    border-radius: 24px;
-    max-width: 700px;
-  }
+      padding: 1.5rem 2rem;
+      margin: 1.25rem auto 0;
+      border-radius: 24px;
+      max-width: 700px;
+    }
 
   .recorder-centered-layout {
     gap: 1.5rem;
@@ -641,9 +645,10 @@
 
 @media (max-width: 640px) {
   .recorder-card {
-    padding: 1.5rem 1rem;
-    border-radius: 20px;
-  }
+      padding: 1.5rem 1rem;
+      margin: 0.75rem auto 0;
+      border-radius: 20px;
+    }
 
   .timer-display-large {
     font-size: 3.5rem;

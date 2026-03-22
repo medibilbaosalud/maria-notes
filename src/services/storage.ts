@@ -232,6 +232,36 @@ const compactSentence = (text: string, maxLength: number): string => {
     return `${cleaned.slice(0, maxLength).trim()}...`;
 };
 
+const splitListLikeText = (text: string): string[] => {
+    const cleaned = cleanText(text);
+    if (!cleaned) return [];
+
+    return cleaned
+        .replace(/\s*[•·]\s*/g, '|')
+        .replace(/\s+-\s+/g, '|')
+        .replace(/\s*;\s*/g, '|')
+        .split('|')
+        .map((part) => cleanText(part.replace(/^\d+[\.\)]\s*/, '')))
+        .filter(Boolean);
+};
+
+const uniqueCompactSnippets = (values: string[], maxLength: number, maxItems: number): string[] => {
+    const seen = new Set<string>();
+    const output: string[] = [];
+
+    for (const value of values) {
+        const compacted = compactSentence(value, maxLength);
+        if (!compacted) continue;
+        const key = normalizeKey(compacted);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        output.push(compacted);
+        if (output.length >= maxItems) break;
+    }
+
+    return output;
+};
+
 const findExplicitFocus = (text: string): string => {
     const candidates = [
         extractSnippetAfterLabel(text, 'Motivo de consulta:'),
@@ -244,6 +274,37 @@ const findExplicitFocus = (text: string): string => {
         .map((value) => compactSentence(value, 220))
         .filter(Boolean);
     return candidates[0] || '';
+};
+
+const buildMainFocusFromLatest = (text: string, recurringTopics: string[]): string => {
+    const focusCandidates = [
+        extractSnippetAfterLabel(text, 'Motivo de consulta:'),
+        extractSnippetAfterLabel(text, 'MOTIVO DE CONSULTA'),
+        extractSnippetAfterLabel(text, 'Acude a consulta por'),
+        extractSnippetAfterLabel(text, 'Situación actual:'),
+        extractSnippetAfterLabel(text, 'Situacion actual:'),
+        extractSnippetAfterLabel(text, 'Síntomas:'),
+        extractSnippetAfterLabel(text, 'Sintomas:'),
+        extractSnippetAfterLabel(text, 'Sintomatología actual:'),
+        extractSnippetAfterLabel(text, 'Sintomatologia actual:'),
+        extractSnippetAfterLabel(text, 'OT:'),
+        extractSnippetAfterLabel(text, 'Objetivos terapéuticos:'),
+        extractSnippetAfterLabel(text, 'Objetivos terapeuticos:')
+    ]
+        .map(stripSectionNoise)
+        .flatMap((value) => {
+            const parts = splitListLikeText(value);
+            return parts.length > 0 ? parts : [value];
+        })
+        .filter(Boolean);
+
+    const segments = uniqueCompactSnippets(focusCandidates, 150, 2);
+    const joined = cleanText(segments.join(' · '));
+    if (joined) {
+        return compactSentence(joined, 300);
+    }
+
+    return recurringTopics[0] || 'Sin foco claro en la nota';
 };
 
 const TOPIC_KEYWORDS: Array<{ topic: string; keywords: string[] }> = [
@@ -299,7 +360,11 @@ const getOpenItems = (text: string): string[] => {
         extractSnippetAfterLabel(raw, 'Plan terapeutico:'),
         extractSnippetAfterLabel(raw, 'OT:')
     ].map(stripSectionNoise)
-        .map((value) => compactSentence(value, 140))
+        .flatMap((value) => {
+            const parts = splitListLikeText(value);
+            return parts.length > 0 ? parts : [value];
+        })
+        .map((value) => compactSentence(value, 95))
         .filter(Boolean);
     return Array.from(new Set(candidates)).slice(0, 5);
 };
@@ -349,7 +414,7 @@ const isBriefingCurrent = (briefing: PatientBriefing, latestConsultationAt: stri
 };
 
 const createBriefingClient = () => new AIService();
-const CURRENT_BRIEFING_VERSION = 'briefing_v2';
+const CURRENT_BRIEFING_VERSION = 'briefing_v3';
 const withBriefingVersion = (model: string) => {
     const cleaned = cleanText(model || '');
     if (!cleaned) return `groq:briefing:${CURRENT_BRIEFING_VERSION}`;
@@ -400,7 +465,9 @@ const buildCaseSummaryFromTimeline = (patientName: string, items: PatientTimelin
         .slice(0, 4);
 
     const latestFocus = latest ? findExplicitFocus(latest.medicalHistory) : '';
-    const mainFocus = latestFocus || recurringTopics[0] || 'Sin foco claro en la nota';
+    const mainFocus = latest
+        ? buildMainFocusFromLatest(latest.medicalHistory, recurringTopics)
+        : latestFocus || recurringTopics[0] || 'Sin foco claro en la nota';
 
     return {
         patientName,
