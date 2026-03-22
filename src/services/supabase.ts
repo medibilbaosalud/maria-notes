@@ -5,6 +5,8 @@ import { buildSupabaseFetch } from './net';
 // For now, we'll use placeholders that the user needs to fill
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const SUPABASE_AUTOLOGIN_EMAIL = import.meta.env.VITE_SUPABASE_AUTOLOGIN_EMAIL || '';
+const SUPABASE_AUTOLOGIN_PASSWORD = import.meta.env.VITE_SUPABASE_AUTOLOGIN_PASSWORD || '';
 
 // Create a dummy client or null if config is missing to prevent crash
 export const supabase = (SUPABASE_URL && SUPABASE_KEY && SUPABASE_URL !== 'YOUR_SUPABASE_URL')
@@ -37,6 +39,8 @@ let authSnapshot: SupabaseAuthSnapshot = {
     userEmail: null
 };
 
+let autoLoginAttempted = false;
+
 const authListeners = new Set<(snapshot: SupabaseAuthSnapshot) => void>();
 
 const emitAuthSnapshot = () => {
@@ -59,11 +63,15 @@ if (supabase) {
             isAuthenticated: Boolean(session),
             userEmail: session?.user?.email || null
         });
+        if (!session) {
+            void ensureSupabaseAutologin();
+        }
     }).catch(() => {
         setAuthSnapshot({
             isAuthenticated: false,
             userEmail: null
         });
+        void ensureSupabaseAutologin();
     });
 
     supabase.auth.onAuthStateChange((_event, session) => {
@@ -73,6 +81,37 @@ if (supabase) {
         });
     });
 }
+
+export const isSupabaseAutologinConfigured = (): boolean =>
+    Boolean(
+        supabase
+        && String(SUPABASE_AUTOLOGIN_EMAIL).trim()
+        && String(SUPABASE_AUTOLOGIN_PASSWORD).trim()
+    );
+
+export const ensureSupabaseAutologin = async (): Promise<boolean> => {
+    if (!supabase || hasSupabaseSession()) return true;
+    if (!isSupabaseAutologinConfigured()) return false;
+    if (autoLoginAttempted) return false;
+
+    autoLoginAttempted = true;
+    try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email: String(SUPABASE_AUTOLOGIN_EMAIL).trim(),
+            password: String(SUPABASE_AUTOLOGIN_PASSWORD).trim()
+        });
+        if (error) throw error;
+        const session = data.session;
+        setAuthSnapshot({
+            isAuthenticated: Boolean(session),
+            userEmail: session?.user?.email || null
+        });
+        return Boolean(session);
+    } catch (error) {
+        console.warn('[Supabase] Automatic sign-in failed:', error);
+        return false;
+    }
+};
 
 export const getSupabaseAuthSnapshot = (): SupabaseAuthSnapshot => authSnapshot;
 

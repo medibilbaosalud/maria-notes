@@ -15,6 +15,7 @@ import { useCloudSync } from '../hooks/useCloudSync';
 import { syncFromCloud } from '../services/storage';
 import { useSimulation } from './Simulation/SimulationContext';
 import { motionTransitions } from '../features/ui/motion-tokens';
+import { isSupabaseAutologinConfigured } from '../services/supabase';
 
 interface SettingsProps {
   apiKey: string;
@@ -28,6 +29,7 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
   const [backupStatus, setBackupStatus] = useState<'idle' | 'exporting' | 'importing' | 'success' | 'error'>('idle');
   const [backupMessage, setBackupMessage] = useState('');
   const { isCloudEnabled, isCloudAuthenticated, cloudUserEmail } = useCloudSync();
+  const hasSupabaseAutologin = isSupabaseAutologinConfigured();
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [cloudSyncMessage, setCloudSyncMessage] = useState('');
   const { startSimulation } = useSimulation();
@@ -222,7 +224,9 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
                       {isCloudEnabled
                         ? (isCloudAuthenticated
                           ? `Los datos se guardan localmente y en Supabase como ${cloudUserEmail || 'usuario autenticado'}`
-                          : 'La app esta protegida por contrasena de acceso. Si no hay sesion cloud, el modo autenticado de Supabase no esta activo.')
+                          : (hasSupabaseAutologin
+                            ? 'La app intentara iniciar la sesion cloud automaticamente al arrancar.'
+                            : 'La app esta protegida por contrasena de acceso. Si no hay sesion cloud, el modo autenticado de Supabase no esta activo.'))
                         : 'Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY para activar sync'}
                     </span>
                   </div>
@@ -251,7 +255,9 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
                   </div>
                   <p className="settings-help-text settings-help-tight">
                     La puerta principal de la aplicacion ya se valida con la contrasena definida en Vercel.
-                    La autenticacion propia de Supabase sigue siendo un mecanismo aparte.
+                    {hasSupabaseAutologin
+                      ? ' Supabase tambien esta configurado para iniciar sesion automaticamente.'
+                      : ' La autenticacion propia de Supabase sigue siendo un mecanismo aparte.'}
                   </p>
                 </div>
               )}

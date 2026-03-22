@@ -22,6 +22,7 @@ import {
     syncFromCloud
 } from './services/storage';
 import {
+    ensureSupabaseAutologin,
     getSupabaseAuthSnapshot,
     getTranscriptChunksBySession,
     logError,
@@ -343,6 +344,10 @@ const AppContent = () => {
     useEffect(() => {
         safeSetLocalStorage(PSYCHOLOGY_CLINICIAN_STORAGE_KEY, psychologyClinicianName);
     }, [psychologyClinicianName]);
+
+    useEffect(() => {
+        void ensureSupabaseAutologin();
+    }, []);
 
     useEffect(() => {
         if (!isCloudEnabled || !isCloudAuthenticated) return;
