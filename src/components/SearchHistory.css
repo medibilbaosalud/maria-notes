@@ -646,6 +646,25 @@
   margin-bottom: 0.9rem;
 }
 
+.timeline-panel-toggle {
+  background: transparent;
+  border: none;
+  width: 100%;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+  font-family: inherit;
+}
+
+.timeline-chevron {
+  transition: transform 0.2s ease;
+  color: var(--text-tertiary);
+}
+
+.timeline-chevron.expanded {
+  transform: rotate(90deg);
+}
+
 .case-hub-kicker {
   font-size: 0.72rem;
   font-weight: 800;

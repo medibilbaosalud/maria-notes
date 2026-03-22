@@ -554,13 +554,12 @@ export const Recorder: React.FC<RecorderProps> = ({
               <>
                 <div className="recorder-context-header">
                   <div>
-                    <div className="recorder-context-kicker">Resumen 30s</div>
-                    <h3>Preparación rápida del caso</h3>
+                    <div className="recorder-context-kicker">Antes de empezar</div>
+                    <h3>Contexto del caso</h3>
                   </div>
-                  <div className="recorder-context-meta">Contexto listo</div>
                 </div>
                 <div className="recorder-context-main briefing-context-main">
-                  {briefing.summary_text.split('\n').map((line, index) => (
+                  {briefing.summary_text.split('\n').filter(l => l.trim()).map((line, index) => (
                     <p key={`${index}-${line}`} className="recorder-context-line">{line}</p>
                   ))}
                 </div>
@@ -578,7 +577,7 @@ export const Recorder: React.FC<RecorderProps> = ({
                       setCaseSummary(null);
                     }}
                   >
-                    Iniciar sin contexto
+                    Ocultar
                   </button>
                 </div>
               </>
@@ -588,28 +587,18 @@ export const Recorder: React.FC<RecorderProps> = ({
               <>
                 <div className="recorder-context-header">
                   <div>
-                    <div className="recorder-context-kicker">Contexto previo</div>
-                    <h3>Continuidad del caso</h3>
+                    <div className="recorder-context-kicker">Antes de empezar</div>
+                    <h3>Contexto del caso</h3>
                   </div>
                   <div className="recorder-context-meta">{caseSummary.sessionCount} sesiones</div>
                 </div>
-                <div className="recorder-context-grid">
-                  <div>
-                    <span className="recorder-context-label">Ultima sesion</span>
-                    <p>{new Date(caseSummary.latestConsultationAt).toLocaleDateString()}</p>
-                  </div>
-                  <div>
-                    <span className="recorder-context-label">Profesionales</span>
-                    <p>{caseSummary.clinicians.length > 0 ? caseSummary.clinicians.join(', ') : 'Sin dato'}</p>
-                  </div>
-                </div>
                 <div className="recorder-context-main">
-                  <span className="recorder-context-label">Foco principal</span>
-                  <p>{caseSummary.mainFocus}</p>
+                  <p>Última sesión: {new Date(caseSummary.latestConsultationAt).toLocaleDateString()}</p>
+                  <p>Foco: {caseSummary.mainFocus}</p>
                 </div>
                 {caseSummary.recurringTopics.length > 0 && (
                   <div className="recorder-context-bullets">
-                    {caseSummary.recurringTopics.slice(0, 4).map((topic) => (
+                    {caseSummary.recurringTopics.slice(0, 3).map((topic) => (
                       <span key={topic} className="recorder-context-chip">{topic}</span>
                     ))}
                   </div>
@@ -625,7 +614,7 @@ export const Recorder: React.FC<RecorderProps> = ({
                     className="recorder-context-link secondary"
                     onClick={() => setCaseSummary(null)}
                   >
-                    Iniciar sin contexto
+                    Ocultar
                   </button>
                 </div>
               </>
@@ -635,38 +624,44 @@ export const Recorder: React.FC<RecorderProps> = ({
 
         {!isRecording && (
           <motion.div
-            className="microphone-health-card"
+            className={`microphone-health-card ${micState === 'detecting' || micState === 'ready' ? 'compact' : ''}`}
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={motionTransitions.normal}
             data-mic-state={micState}
           >
             <div className="microphone-health-header">
-              <span className="microphone-health-title">Comprobacion del microfono</span>
+              <span className="microphone-health-title">
+                {micState === 'detecting' ? 'Micrófono listo' : micState === 'ready' ? 'Micrófono' : micState === 'error' ? 'Problema con el micrófono' : 'Activando micrófono...'}
+              </span>
               <span className={`microphone-health-badge ${micState}`}>
                 {micState === 'detecting' ? 'OK' : micState === 'ready' ? 'Listo' : micState === 'error' ? 'Revisar' : 'Activando'}
               </span>
             </div>
-            <div className="microphone-visualizer" aria-hidden="true">
-              {micBars.map((bar) => {
-                const threshold = (bar + 1) / micBars.length;
-                const active = micLevel >= threshold * 0.92;
-                const scaledHeight = 12 + Math.max(0, micLevel * 54 - bar * 1.8);
-                return (
-                  <span
-                    key={bar}
-                    className={`microphone-bar ${active ? 'active' : ''}`}
-                    style={{
-                      height: `${Math.max(10, Math.min(60, scaledHeight))}px`,
-                      opacity: active ? 1 : 0.35
-                    }}
-                  />
-                );
-              })}
-            </div>
-            <p className={`microphone-health-message ${micState === 'detecting' ? 'success' : micState === 'error' ? 'error' : ''}`}>
-              {micStatusMessage}
-            </p>
+            {(micState === 'error' || micState === 'requesting') && (
+              <>
+                <div className="microphone-visualizer" aria-hidden="true">
+                  {micBars.map((bar) => {
+                    const threshold = (bar + 1) / micBars.length;
+                    const active = micLevel >= threshold * 0.92;
+                    const scaledHeight = 12 + Math.max(0, micLevel * 54 - bar * 1.8);
+                    return (
+                      <span
+                        key={bar}
+                        className={`microphone-bar ${active ? 'active' : ''}`}
+                        style={{
+                          height: `${Math.max(10, Math.min(60, scaledHeight))}px`,
+                          opacity: active ? 1 : 0.35
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+                <p className={`microphone-health-message ${micState === 'error' ? 'error' : ''}`}>
+                  {micStatusMessage}
+                </p>
+              </>
+            )}
           </motion.div>
         )}
 

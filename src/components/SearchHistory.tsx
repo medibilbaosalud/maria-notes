@@ -93,6 +93,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const [caseSummary, setCaseSummary] = useState<PatientCaseSummary | null>(null);
   const [caseSummaryLoading, setCaseSummaryLoading] = useState(false);
   const [briefing, setBriefing] = useState<PatientBriefing | null>(null);
+  const [timelineExpanded, setTimelineExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportContent, setReportContent] = useState('');
@@ -312,6 +313,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
 
   const selectGroup = useCallback((group: PatientTimelineGroup) => {
     setSelectedGroup(group);
+    setTimelineExpanded(false);
     const nextItem = selectBestItem(group);
     setSelectedItem(nextItem);
     setSelectedRecord(null);
@@ -403,7 +405,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   return (
     <div className="history-container">
       <div className="search-section">
-        <h2 className="section-title">Historial unificado de Psicologia</h2>
+        <h2 className="section-title">Historial de pacientes</h2>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -556,16 +558,12 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   <div id="history-briefing-card" className="briefing-card">
                     <div className="case-hub-header">
                       <div>
-                        <div className="case-hub-kicker">Resumen 30s</div>
-                        <h2>Preparación rápida del caso</h2>
-                      </div>
-                      <div className="case-hub-meta">
-                        <Sparkles size={14} />
-                        Contexto listo
+                        <div className="case-hub-kicker">Contexto del caso</div>
+                        <h2>Antes de la sesión</h2>
                       </div>
                     </div>
                     <div className="briefing-lines">
-                      {briefing.summary_text.split('\n').map((line, index) => (
+                      {briefing.summary_text.split('\n').filter(l => l.trim()).map((line, index) => (
                         <p key={`${index}-${line}`} className="briefing-line">{line}</p>
                       ))}
                     </div>
@@ -635,10 +633,16 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                 </div>
 
                 <div id="history-timeline-panel" className="timeline-panel">
-                  <div className="timeline-panel-header">
-                    <h3>Línea temporal del caso</h3>
-                    <span>{selectedGroup.items.length} entradas</span>
-                  </div>
+                  <button
+                    type="button"
+                    className="timeline-panel-header timeline-panel-toggle"
+                    onClick={() => setTimelineExpanded((prev) => !prev)}
+                    aria-expanded={timelineExpanded}
+                  >
+                    <h3>Sesiones anteriores ({selectedGroup.items.length})</h3>
+                    <ChevronRight size={16} className={`timeline-chevron ${timelineExpanded ? 'expanded' : ''}`} />
+                  </button>
+                  {timelineExpanded && (
                   <div className="timeline-list">
                     {selectedGroup.items.map((item, index) => {
                       const active = selectedItem.id === item.id;
@@ -686,6 +690,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                       );
                     })}
                   </div>
+                  )}
                 </div>
 
                 <div className="detail-scroll-area">
@@ -725,7 +730,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   <FileText size={48} />
                 </div>
                 <h3>Selecciona un paciente</h3>
-                <p>Su historial y su contexto aparecerán aquí</p>
+                <p>Su historial y contexto aparecerán aquí</p>
               </div>
             )}
           </AnimatePresence>

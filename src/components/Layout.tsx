@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Settings, Mic, FileText, FileBarChart, FlaskConical, Lightbulb, BookOpen } from 'lucide-react';
+import { Settings, Mic, FileBarChart, Lightbulb, BookOpen, Users } from 'lucide-react';
 import { MBSLogo } from './MBSLogo';
 import { motionTransitions } from '../features/ui/motion-tokens';
 import type { ClinicalSpecialtyId } from '../clinical/specialties';
@@ -83,28 +83,18 @@ export const Layout: React.FC<LayoutProps> = ({
           />
           <NavItem
             id="nav-history-btn"
-            icon={<FileText size={20} />}
-            label="Historial"
+            icon={<Users size={20} />}
+            label="Pacientes"
             isActive={currentView === 'history'}
             onClick={() => onNavigate('history')}
-          />
-          <NavItem
-            id="nav-reports-btn"
-            icon={<FileBarChart size={20} />}
-            label="Informes"
-            isActive={currentView === 'reports'}
-            onClick={() => onNavigate('reports')}
-          />
-          <NavItem
-            id="nav-test-lab-btn"
-            icon={<FlaskConical size={20} />}
-            label="Zona Test"
-            isActive={currentView === 'test-lab'}
-            onClick={() => onNavigate('test-lab')}
           />
         </nav>
 
         <div className="sidebar-footer">
+          <button className="settings-btn" onClick={() => onNavigate('reports')} aria-label="Informes">
+            <FileBarChart size={20} />
+            <span>Informes</span>
+          </button>
           {onOpenGuide && activeSpecialty === 'psicologia' && (
             <button className="settings-btn guide-btn" onClick={onOpenGuide} aria-label={`Abrir guia de ${psychologyClinicianName}`}>
               <BookOpen size={20} />

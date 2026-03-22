@@ -1084,42 +1084,25 @@ ${String(transcription || '').slice(0, 18000)}
 HISTORIA ACTUAL:
 ${String(currentHistory || '').slice(0, 12000)}`;
 
-const BRIEFING_SECTION_LABELS = ['Ultima sesion', 'Foco actual', 'Pendiente', 'Cuidado', 'Profesional'];
-
 const cleanBriefingLine = (value) => cleanText(String(value || '').replace(/^[-*•]+\s*/, ''));
 
-const extractBriefingValue = (text, label) => {
-    const normalizedLabel = `${label.toLowerCase()}:`;
-    const lines = String(text || '').split(/\r?\n/).map((line) => cleanBriefingLine(line)).filter(Boolean);
-    for (const line of lines) {
-        const lowerLine = line.toLowerCase();
-        if (lowerLine.startsWith(normalizedLabel)) {
-            return cleanBriefingLine(line.slice(label.length + 1));
-        }
-        const dashMatch = lowerLine.startsWith(label.toLowerCase())
-            ? line.slice(label.length).replace(/^[:\-\s]+/, '')
-            : '';
-        if (dashMatch) return cleanBriefingLine(dashMatch);
-    }
-    const regex = new RegExp(`${label}\\s*[:\\-]\\s*([^\\n]+)`, 'i');
-    const match = String(text || '').match(regex);
-    return match ? cleanBriefingLine(match[1]) : '';
-};
-
 const normalizeBriefingText = (rawText) => {
-    const sections = new Map(BRIEFING_SECTION_LABELS.map((label) => [label, '']));
-    for (const label of BRIEFING_SECTION_LABELS) {
-        sections.set(label, extractBriefingValue(rawText, label));
-    }
+    const text = String(rawText || '').trim();
+    if (!text) return '';
 
-    const hasMeaningfulContent = Array.from(sections.values()).some((value) => value && value.toLowerCase() !== 'no consta');
-    if (!hasMeaningfulContent) {
-        return '';
-    }
+    const lines = text
+        .split(/\r?\n/)
+        .map((line) => cleanBriefingLine(line))
+        .filter((line) => {
+            if (!line) return false;
+            const lower = line.toLowerCase();
+            if (lower === 'no consta' || lower === 'no consta.') return false;
+            if (/^[^:]+:\s*no consta\.?$/i.test(line)) return false;
+            return true;
+        });
 
-    return BRIEFING_SECTION_LABELS
-        .map((label) => `${label}: ${sections.get(label) || 'No consta'}`)
-        .join('\n');
+    if (!lines.length) return '';
+    return lines.slice(0, 5).join('\n');
 };
 
 const buildBriefingPrompt = ({ patientName, consultationType, clinicianName, timelineItems }) => {
@@ -1141,26 +1124,28 @@ const buildBriefingPrompt = ({ patientName, consultationType, clinicianName, tim
         })
         .join('\n\n');
 
-    return `Eres un asistente clinico de psicologia. Redacta un briefing de 30 segundos para la psicologa que va a ver este caso.
-Reglas:
-- Usa SOLO informacion explicitamente presente en el historial.
-- No inventes diagnosticos, gravedad, riesgos, ni próximos pasos.
-- Si un dato no consta, escribe "No consta".
-- Mantente breve: maximo 4 a 5 lineas.
-- Devuelve exactamente estas etiquetas y en este orden:
-Ultima sesion: ...
-Foco actual: ...
-Pendiente: ...
-Cuidado: ...
-Profesional: ...
-- Si no hay profesional claro, escribe "No consta".
+    return `Eres un asistente clinico de psicologia. Redacta un briefing ultra-breve para la psicologa que va a ver este caso.
+El objetivo es que la psicologa lo lea en 15 segundos antes de que entre la paciente y recuerde lo esencial.
+
+Resume en maximo 3-4 lineas concretas:
+1. Que se trabajo en la ultima sesion (fecha y tema concreto).
+2. Que tareas, compromisos o pendientes quedaron (solo si constan explicitamente).
+3. Si hay algun dato sensible o importante que no deba olvidarse (solo si consta explicitamente).
+
+Reglas estrictas:
+- Usa SOLO informacion explicitamente presente en las notas.
+- No inventes diagnosticos, gravedad, riesgos, ni proximos pasos.
+- Si no hay informacion suficiente para un punto, OMITELO. No escribas "No consta".
+- Prioriza lo concreto: fechas, temas, tareas, datos literales. No prosa generica.
+- Tono: como una nota rapida pegada en la carpeta del paciente. Breve, directa, util.
+- No repitas informacion entre lineas.
 
 Paciente: ${patientName || 'Paciente'}
 Especialidad: ${specialty}
-Clinica/o de referencia: ${clinicianName || 'No consta'}
+Profesional de referencia: ${clinicianName || 'No especificado'}
 
-TIMELINE MERGADO:
-${timelineText || 'No consta'}`;
+HISTORIAL CLINICO:
+${timelineText || 'Sin historial disponible'}`;
 };
 
 const buildProvisionalHistory = (reason, consultationType) => getSpecialtyConfig(consultationType).provisionalHistory(reason);
