@@ -1536,6 +1536,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
+                id="feedback-card"
                 className="doctor-feedback-card"
               >
                 <div className="feedback-header">

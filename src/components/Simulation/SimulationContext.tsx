@@ -305,13 +305,13 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     },
     {
         id: 'processing_2',
-        duration: 4200,
+        duration: 3400,
         caption: 'Despues te deja una nota clara y revisable para que partas de una buena base.'
     },
     {
         id: 'wait_for_highlight',
         targetId: 'uncertainty-highlight-0',
-        duration: 4200,
+        duration: 3600,
         caption: 'Mira, aqui Maria ha marcado una duda importante para que puedas revisarla con la evidencia original.'
     },
     {
@@ -359,13 +359,13 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     },
     {
         id: 'finish_learning',
-        duration: 3600,
+        duration: 2600,
         caption: 'Y con esto dejas el caso listo para la proxima sesion y la nota cada vez mas a tu manera.'
     },
     {
         id: 'move_to_feedback',
-        targetId: 'feedback-score-10',
-        duration: 2200,
+        targetId: 'feedback-card',
+        duration: 1800,
         caption: 'Ya solo queda valorar el resultado.'
     },
     {
