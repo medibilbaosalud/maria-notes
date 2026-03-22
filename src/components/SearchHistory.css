@@ -398,19 +398,11 @@
 
 .paper-document .document-header {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
-  margin-bottom: 1rem;
-  padding-bottom: 0.75rem;
-  border-bottom: 1px solid #f1f5f9;
-}
-
-.doc-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-tertiary);
+  margin-bottom: 0.5rem;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .edit-actions {
@@ -604,6 +596,10 @@
   border: 1px solid rgba(0, 0, 0, 0.05);
   box-shadow: var(--shadow-sm);
   padding: 1rem 1.1rem;
+}
+
+.timeline-panel {
+  margin-top: 0.25rem;
 }
 
 .briefing-card {

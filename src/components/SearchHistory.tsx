@@ -637,71 +637,9 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   )}
                 </div>
 
-                <div id="history-timeline-panel" className="timeline-panel">
-                  <button
-                    type="button"
-                    className="timeline-panel-header timeline-panel-toggle"
-                    onClick={() => setTimelineExpanded((prev) => !prev)}
-                    aria-expanded={timelineExpanded}
-                  >
-                    <h3>Sesiones anteriores ({selectedGroup.items.length})</h3>
-                    <ChevronRight size={16} className={`timeline-chevron ${timelineExpanded ? 'expanded' : ''}`} />
-                  </button>
-                  {timelineExpanded && (
-                  <div className="timeline-list">
-                    {selectedGroup.items.map((item, index) => {
-                      const active = selectedItem.id === item.id;
-                      return (
-                        <div
-                          key={item.id}
-                          id={`history-timeline-item-${index}`}
-                          className={`timeline-entry ${active ? 'active' : ''}`}
-                          onClick={() => {
-                            selectTimelineItem(item);
-                          }}
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault();
-                              selectTimelineItem(item);
-                            }
-                          }}
-                          data-timeline-index={String(index)}
-                          data-source={item.source}
-                          data-clinician={item.clinicianName || item.clinicianProfile || 'Sin profesional'}
-                        >
-                          <div className="timeline-entry-main">
-                            <div className="timeline-entry-top">
-                              <span className="timeline-entry-date">{new Date(item.consultationAt).toLocaleDateString()}</span>
-                              <span className={`timeline-entry-badge ${item.source}`}>{item.sourceLabel}</span>
-                            </div>
-                            <div className="timeline-entry-title">{item.clinicianName || item.clinicianProfile || 'Sin profesional'}</div>
-                            <div className="timeline-entry-snippet">{renderTimelineSnippet(item)}</div>
-                          </div>
-                          {item.source === 'current' && onLoadRecord && (
-                            <button
-                              type="button"
-                              className="timeline-entry-action"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void handleLoadCurrentRecord(item);
-                              }}
-                            >
-                              Abrir
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  )}
-                </div>
-
                 <div ref={detailScrollRef} className="detail-scroll-area">
                   <div className="paper-document">
                     <div className="document-header">
-                      <span className="doc-label">{isLegacySelection ? 'Historial importado' : 'Historia Medica'}</span>
                       <div className="doc-actions">
                         <button className="search-icon-btn copy-doc" onClick={() => void handleCopy(selectedContent)} title="Copiar" aria-label="Copiar historia" data-ui-state={copied ? 'success' : 'idle'}>
                           {copied ? <Copy size={16} /> : <Copy size={16} />}
@@ -727,6 +665,67 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                       </div>
                     </div>
                   )}
+
+                  <div id="history-timeline-panel" className="timeline-panel">
+                    <button
+                      type="button"
+                      className="timeline-panel-header timeline-panel-toggle"
+                      onClick={() => setTimelineExpanded((prev) => !prev)}
+                      aria-expanded={timelineExpanded}
+                    >
+                      <h3>Sesiones anteriores ({selectedGroup.items.length})</h3>
+                      <ChevronRight size={16} className={`timeline-chevron ${timelineExpanded ? 'expanded' : ''}`} />
+                    </button>
+                    {timelineExpanded && (
+                    <div className="timeline-list">
+                      {selectedGroup.items.map((item, index) => {
+                        const active = selectedItem.id === item.id;
+                        return (
+                          <div
+                            key={item.id}
+                            id={`history-timeline-item-${index}`}
+                            className={`timeline-entry ${active ? 'active' : ''}`}
+                            onClick={() => {
+                              selectTimelineItem(item);
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                selectTimelineItem(item);
+                              }
+                            }}
+                            data-timeline-index={String(index)}
+                            data-source={item.source}
+                            data-clinician={item.clinicianName || item.clinicianProfile || 'Sin profesional'}
+                          >
+                            <div className="timeline-entry-main">
+                              <div className="timeline-entry-top">
+                                <span className="timeline-entry-date">{new Date(item.consultationAt).toLocaleDateString()}</span>
+                                <span className={`timeline-entry-badge ${item.source}`}>{item.sourceLabel}</span>
+                              </div>
+                              <div className="timeline-entry-title">{item.clinicianName || item.clinicianProfile || 'Sin profesional'}</div>
+                              <div className="timeline-entry-snippet">{renderTimelineSnippet(item)}</div>
+                            </div>
+                            {item.source === 'current' && onLoadRecord && (
+                              <button
+                                type="button"
+                                className="timeline-entry-action"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleLoadCurrentRecord(item);
+                                }}
+                              >
+                                Abrir
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    )}
+                  </div>
                 </div>
               </motion.div>
             ) : (
