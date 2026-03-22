@@ -32,28 +32,28 @@ const PSYCHOLOGY_SLIDES: TunnelSlide[] = [
         id: 'consulta',
         icon: Mic,
         headline: 'Siempre empiezas en Consulta',
-        body: 'Escribes el nombre del paciente, pulsas grabar y te centras en la sesion. Maria te ayuda a dejar la historia preparada para revisarla con calma.',
+        body: 'Escribes el nombre del paciente, pulsas grabar y te centras en la sesion. Maria prepara la nota para que luego la revises con calma.',
         accent: 'sunrise'
     },
     {
         id: 'contexto',
         icon: Clock3,
         headline: 'Si el paciente ya existe, no empiezas de cero',
-        body: 'Antes de grabar veras un resumen muy corto para retomar el caso rapido y entrar a la sesion con el contexto fresco.',
+        body: 'Antes de grabar ves un resumen muy corto para volver a situarte rapido y entrar en la sesion sin empezar en frio.',
         accent: 'teal'
     },
     {
         icon: FileText,
         id: 'historial',
         headline: 'En Historial lo ves todo mas claro',
-        body: 'Cada paciente tiene su propia vista, con una vision general del caso y una linea temporal para seguir la evolucion sin perderte.',
+        body: 'Cada paciente tiene su propio espacio, con lo importante del caso a mano y la evolucion lista para consultarla cuando la necesites.',
         accent: 'sunrise'
     },
     {
         id: 'aprende',
         icon: Brain,
         headline: 'Y cuando corriges, Maria se adapta a ti',
-        body: 'Cada ajuste ayuda a que la app se acerque mas a tu forma real de escribir, revisar y cerrar la historia clinica.',
+        body: 'Cada ajuste ayuda a que Maria se acerque mas a tu manera real de escribir, revisar y cerrar la historia clinica.',
         accent: 'paper'
     }
 ];
@@ -111,7 +111,7 @@ export const OnboardingModal = ({
                 {/* Greeting */}
                 <p className="onboarding-tunnel-kicker">
                     {isPsychology
-                        ? `Hola ${name}, te acompano en los primeros pasos`
+                        ? `Hola ${name}, vamos a verlo juntas en un minuto`
                         : 'Guia rapida de Maria Notes'}
                 </p>
 

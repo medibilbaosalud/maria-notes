@@ -28,6 +28,7 @@ type SimulationStepId =
     | 'click_save'
     | 'finish_learning'
     | 'move_to_feedback'
+    | 'click_feedback_score'
     | 'submit_feedback'
     | 'finish';
 
@@ -83,6 +84,26 @@ const clickById = (id: string) => {
     if (el instanceof HTMLElement) {
         el.click();
     }
+};
+
+const positionCursorOnTarget = (
+    targetId: string,
+    setCursorPosition: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>
+) => {
+    const el = document.getElementById(targetId);
+    if (!el) return;
+
+    el.scrollIntoView({ behavior: 'auto', block: 'center' });
+
+    window.setTimeout(() => {
+        const target = document.getElementById(targetId);
+        if (!target) return;
+        const rect = target.getBoundingClientRect();
+        setCursorPosition({
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2
+        });
+    }, 80);
 };
 
 const OTORRINO_SCRIPT: SimulationStep[] = [
@@ -187,6 +208,12 @@ const OTORRINO_SCRIPT: SimulationStep[] = [
         caption: 'Solo queda valorar el resultado.'
     },
     {
+        id: 'click_feedback_score',
+        targetId: 'feedback-score-10',
+        duration: 1200,
+        action: () => clickById('feedback-score-10')
+    },
+    {
         id: 'submit_feedback',
         targetId: 'feedback-submit-btn',
         duration: 2200,
@@ -201,33 +228,33 @@ const OTORRINO_SCRIPT: SimulationStep[] = [
 const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     {
         id: 'intro',
-        duration: 4200,
-        caption: 'Bienvenida, {{clinicianName}}. Vamos a verlo juntas paso a paso para que te sientas comoda desde el primer momento.'
+        duration: 3200,
+        caption: 'Bienvenida, {{clinicianName}}. Vamos a ver el flujo completo de una forma muy sencilla.'
     },
     {
         id: 'move_to_input',
         targetId: 'patient-name-input',
-        duration: 2600,
-        caption: 'Todo empieza en Consulta. Aqui escribes el nombre del paciente y Maria te acompana desde el primer clic.'
+        duration: 2200,
+        caption: 'Todo empieza en Consulta. Aqui escribes el nombre del paciente y ya puedes arrancar.'
     },
     {
         id: 'type_patient_name',
         targetId: 'patient-name-input',
-        duration: 4200,
+        duration: 3600,
         action: () => typeIntoInput('patient-name-input', 'Paciente Demo Psicologia (Simulacion)', 75),
-        caption: 'Si el paciente ya existe, Maria reconoce el caso y te devuelve el contexto sin hacerte perder tiempo.'
+        caption: 'Si ese paciente ya existe, Maria reconoce el caso y no te hace empezar de cero.'
     },
     {
         id: 'wait_for_briefing',
         targetId: 'recorder-context-card',
-        duration: 4200,
-        caption: 'Antes de grabar, tienes un resumen muy corto con lo ultimo importante para retomar la sesion con tranquilidad.'
+        duration: 3600,
+        caption: 'Antes de grabar, tienes un resumen muy corto para volver a situarte en segundos y entrar en la sesion sin empezar en frio.'
     },
     {
         id: 'move_to_history',
         targetId: 'recorder-open-history-btn',
-        duration: 3000,
-        caption: 'Y si quieres un poco mas de detalle, puedes abrir el historial completo desde aqui.'
+        duration: 2600,
+        caption: 'Y si quieres un poco mas de contexto, puedes abrir el historial completo desde aqui.'
     },
     {
         id: 'click_history',
@@ -238,25 +265,19 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     {
         id: 'move_to_demo_patient',
         targetId: 'history-patient-card-0',
-        duration: 3200,
-        caption: 'En Historial lo ves todo por paciente. Asi no tienes que ir saltando entre notas sueltas.'
+        duration: 2800,
+        caption: 'En Historial lo ves todo por paciente. Asi el caso vive en un solo sitio y no en notas sueltas.'
     },
     {
         id: 'focus_case_hub',
         targetId: 'history-case-hub',
-        duration: 4200,
-        caption: 'Arriba tienes una vista general del caso con lo que mas te ayuda a situarte rapido.'
-    },
-    {
-        id: 'focus_timeline',
-        targetId: 'history-timeline-panel',
-        duration: 3800,
-        caption: 'Y debajo tienes la linea temporal del caso, por si quieres volver a leer la evolucion con calma.'
+        duration: 3600,
+        caption: 'Aqui ves rapido lo importante del caso y, si hace falta, tienes debajo la evolucion para volver a leerla con calma.'
     },
     {
         id: 'move_to_use_context',
         targetId: 'history-use-context-btn',
-        duration: 2800,
+        duration: 2400,
         caption: 'Cuando ya lo tienes claro, vuelves a Consulta con un solo clic.'
     },
     {
@@ -268,8 +289,8 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     {
         id: 'move_to_record',
         targetId: 'main-record-btn',
-        duration: 2800,
-        caption: 'De vuelta en Consulta, ya puedes empezar con todo lo importante fresco.'
+        duration: 2400,
+        caption: 'De vuelta en Consulta, ya puedes empezar con el contexto fresco.'
     },
     {
         id: 'click_record',
@@ -279,32 +300,32 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     },
     {
         id: 'processing_1',
-        duration: 5400,
-        caption: 'Mientras tu te centras en la conversacion, Maria va ordenando la informacion por detras.'
+        duration: 4400,
+        caption: 'Mientras tu te centras en la conversacion, Maria va preparando la nota por detras.'
     },
     {
         id: 'processing_2',
-        duration: 5400,
+        duration: 4200,
         caption: 'Despues te deja una nota clara y revisable para que partas de una buena base.'
     },
     {
         id: 'wait_for_highlight',
         targetId: 'uncertainty-highlight-0',
-        duration: 4600,
-        caption: 'Si detecta una duda importante, te la marca para que la revises con calma y con evidencia.'
+        duration: 4200,
+        caption: 'Mira, aqui Maria ha marcado una duda importante para que puedas revisarla con la evidencia original.'
     },
     {
         id: 'click_highlight',
         targetId: 'uncertainty-highlight-0',
         duration: 1400,
         action: () => clickById('uncertainty-highlight-0'),
-        caption: 'Abrimos la evidencia original.'
+        caption: 'La abrimos y compruebas enseguida si la sertralina era esa o no.'
     },
     {
         id: 'wait_for_modal',
         targetId: 'evidence-modal-confirm-btn',
-        duration: 4600,
-        caption: 'La ultima palabra sigue siendo tuya sobre lo que entra en la historia clinica.'
+        duration: 4000,
+        caption: 'Asi decides tu, con calma, que entra en la historia clinica y que no.'
     },
     {
         id: 'click_confirm',
@@ -315,7 +336,7 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     {
         id: 'move_to_edit',
         targetId: 'edit-mode-btn',
-        duration: 2800,
+        duration: 2400,
         caption: 'Y si quieres, ajustas la redaccion para que quede totalmente a tu manera.'
     },
     {
@@ -327,7 +348,7 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     {
         id: 'simulate_typing',
         targetId: 'save-edit-btn',
-        duration: 5200,
+        duration: 4200,
         caption: 'Cada correccion ayuda a que Maria aprenda un poco mas de tu estilo.'
     },
     {
@@ -338,19 +359,25 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     },
     {
         id: 'finish_learning',
-        duration: 5600,
-        caption: 'Y asi queda listo el caso para la proxima sesion: contexto claro, historial vivo y una nota cada vez mas tuya.'
+        duration: 3600,
+        caption: 'Y con esto dejas el caso listo para la proxima sesion y la nota cada vez mas a tu manera.'
     },
     {
         id: 'move_to_feedback',
         targetId: 'feedback-score-10',
-        duration: 2800,
+        duration: 2200,
         caption: 'Ya solo queda valorar el resultado.'
+    },
+    {
+        id: 'click_feedback_score',
+        targetId: 'feedback-score-10',
+        duration: 1200,
+        action: () => clickById('feedback-score-10')
     },
     {
         id: 'submit_feedback',
         targetId: 'feedback-submit-btn',
-        duration: 2400,
+        duration: 1800,
         action: () => clickById('feedback-submit-btn'),
         caption: 'Y con esto queda cerrada la demo.'
     },
@@ -406,15 +433,7 @@ export const SimulationProvider: React.FC<{ children: ReactNode }> = ({ children
         }
 
         if (step.targetId) {
-            const el = document.getElementById(step.targetId);
-            if (el) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                const rect = el.getBoundingClientRect();
-                setCursorPosition({
-                    x: rect.left + rect.width / 2,
-                    y: rect.top + rect.height / 2
-                });
-            }
+            positionCursorOnTarget(step.targetId, setCursorPosition);
         }
 
         timeoutRef.current = setTimeout(() => {

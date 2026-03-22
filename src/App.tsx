@@ -435,6 +435,7 @@ const AppContent = () => {
             'click_save',
             'finish_learning',
             'move_to_feedback',
+            'click_feedback_score',
             'submit_feedback'
         ];
 
