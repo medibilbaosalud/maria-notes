@@ -13,8 +13,7 @@
     background:
         radial-gradient(circle at 30% 20%, rgba(245, 158, 11, 0.14), transparent 40%),
         radial-gradient(circle at 70% 80%, rgba(45, 212, 191, 0.12), transparent 40%),
-        rgba(15, 23, 42, 0.58);
-    backdrop-filter: blur(12px);
+        rgba(15, 23, 42, 0.68);
 }
 
 .onboarding-tunnel-card {
@@ -25,9 +24,11 @@
     display: grid;
     gap: 1.6rem;
     text-align: center;
-    box-shadow: 0 32px 80px rgba(15, 23, 42, 0.34);
+    box-shadow: 0 22px 52px rgba(15, 23, 42, 0.26);
     overflow: hidden;
     transition: background 0.3s ease;
+    will-change: transform, opacity;
+    contain: layout paint style;
 }
 
 /* Accent-based backgrounds */
@@ -69,6 +70,7 @@
     justify-items: center;
     min-height: 180px;
     align-content: center;
+    will-change: transform, opacity;
 }
 
 .onboarding-tunnel-icon-ring {
@@ -148,7 +150,7 @@
     font-weight: 700;
     color: #ffffff;
     background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%);
-    box-shadow: 0 12px 32px rgba(15, 118, 110, 0.28);
+    box-shadow: 0 10px 24px rgba(15, 118, 110, 0.24);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -159,7 +161,7 @@
 
 .onboarding-tunnel-cta:hover {
     transform: translateY(-2px);
-    box-shadow: 0 16px 40px rgba(15, 118, 110, 0.35);
+    box-shadow: 0 14px 30px rgba(15, 118, 110, 0.28);
 }
 
 .onboarding-tunnel-cta:active {

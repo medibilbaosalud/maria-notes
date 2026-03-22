@@ -205,6 +205,33 @@ const stripSectionNoise = (text: string): string => cleanText(text)
     .replace(/^situacion actual:\s*/i, '')
     .replace(/^situación actual:\s*/i, '');
 
+const compactSentence = (text: string, maxLength: number): string => {
+    const cleaned = cleanText(text).replace(/\s+/g, ' ').trim();
+    if (!cleaned) return '';
+    if (cleaned.length <= maxLength) return cleaned;
+
+    const punctuationMatch = cleaned.slice(0, maxLength).match(/.*[.!?](?=\s|$)/);
+    if (punctuationMatch?.[0]) {
+        return punctuationMatch[0].trim();
+    }
+
+    const lastBreak = Math.max(
+        cleaned.lastIndexOf('. ', maxLength),
+        cleaned.lastIndexOf('; ', maxLength),
+        cleaned.lastIndexOf(', ', maxLength)
+    );
+    if (lastBreak > Math.floor(maxLength * 0.55)) {
+        return `${cleaned.slice(0, lastBreak).trim()}...`;
+    }
+
+    const softBreak = cleaned.lastIndexOf(' ', maxLength);
+    if (softBreak > Math.floor(maxLength * 0.6)) {
+        return `${cleaned.slice(0, softBreak).trim()}...`;
+    }
+
+    return `${cleaned.slice(0, maxLength).trim()}...`;
+};
+
 const findExplicitFocus = (text: string): string => {
     const candidates = [
         extractSnippetAfterLabel(text, 'Motivo de consulta:'),
@@ -213,7 +240,9 @@ const findExplicitFocus = (text: string): string => {
         extractSnippetAfterLabel(text, 'OT:'),
         extractSnippetAfterLabel(text, 'Objetivos terapéuticos:'),
         extractSnippetAfterLabel(text, 'Objetivos terapeuticos:')
-    ].map(stripSectionNoise).filter(Boolean);
+    ].map(stripSectionNoise)
+        .map((value) => compactSentence(value, 220))
+        .filter(Boolean);
     return candidates[0] || '';
 };
 
@@ -269,7 +298,9 @@ const getOpenItems = (text: string): string[] => {
         extractSnippetAfterLabel(raw, 'Plan terapéutico:'),
         extractSnippetAfterLabel(raw, 'Plan terapeutico:'),
         extractSnippetAfterLabel(raw, 'OT:')
-    ].map(stripSectionNoise).filter(Boolean);
+    ].map(stripSectionNoise)
+        .map((value) => compactSentence(value, 140))
+        .filter(Boolean);
     return Array.from(new Set(candidates)).slice(0, 5);
 };
 
