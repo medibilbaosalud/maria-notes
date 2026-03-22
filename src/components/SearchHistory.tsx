@@ -99,6 +99,8 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const queryRef = useRef('');
   const syncingRef = useRef(false);
   const cloudReadyRef = useRef(false);
+  const detailTopRef = useRef<HTMLDivElement | null>(null);
+  const detailScrollRef = useRef<HTMLDivElement | null>(null);
   const { isCloudEnabled, isCloudAuthenticated, cloudAccessMode } = useCloudSync();
   const { isPlaying, demoData } = useSimulation();
   const demoContinuity = isPlaying
@@ -218,6 +220,15 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
 
   useEffect(() => {
     selectedGroupRef.current = selectedGroup;
+  }, [selectedGroup]);
+
+  useEffect(() => {
+    if (!selectedGroup) return;
+    const frame = window.requestAnimationFrame(() => {
+      detailScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+      detailTopRef.current?.scrollIntoView({ block: 'start', behavior: 'auto' });
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [selectedGroup]);
 
   useEffect(() => {
@@ -475,7 +486,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                     </div>
                     <h3 className="card-name">{group.patientName}</h3>
                     <div className="card-type">
-                      {group.sessionCount} sesiones Â· {group.sourceCounts.current} actual Â· {group.sourceCounts.legacy} legado
+                      {group.sessionCount} sesiones · {group.sourceCounts.current} actual · {group.sourceCounts.legacy} legado
                     </div>
                     {group.clinicians.length > 0 && (
                       <div className="card-tags">
@@ -499,6 +510,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
             {selectedGroup && selectedItem ? (
               <motion.div
                 key={selectedGroup.normalizedPatientName}
+                ref={detailTopRef}
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
@@ -542,7 +554,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                       </button>
                     )}
                     {canOpenCurrent && (
-                      <button className="search-history-btn-secondary" onClick={handleOpenReport} title="Generar informe mÃ©dico">
+                      <button className="search-history-btn-secondary" onClick={handleOpenReport} title="Generar informe médico">
                         <FileText size={16} />
                         <span>Informe</span>
                       </button>
@@ -624,7 +636,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                       )}
                     </div>
                   ) : (
-                    <div className="case-hub-loading">TodavÃ­a no hay suficiente contexto histÃ³rico para resumir el caso.</div>
+                    <div className="case-hub-loading">Todavía no hay suficiente contexto histórico para resumir el caso.</div>
                   )}
                 </div>
 
@@ -689,7 +701,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   )}
                 </div>
 
-                <div className="detail-scroll-area">
+                <div ref={detailScrollRef} className="detail-scroll-area">
                   <div className="paper-document">
                     <div className="document-header">
                       <span className="doc-label">{isLegacySelection ? 'Historial importado' : 'Historia Medica'}</span>
@@ -726,7 +738,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   <FileText size={48} />
                 </div>
                 <h3>Selecciona un paciente</h3>
-                <p>Su historial y contexto aparecerÃ¡n aquÃ­</p>
+                <p>Su historial y contexto aparecerán aquí</p>
               </div>
             )}
           </AnimatePresence>
