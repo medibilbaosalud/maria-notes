@@ -106,6 +106,135 @@
   /* Above actions */
 }
 
+.recorder-context-card {
+  width: 100%;
+  max-width: 500px;
+  padding: 1rem 1.1rem;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(240, 253, 250, 0.96) 0%, rgba(255, 255, 255, 0.98) 100%);
+  border: 1px solid rgba(13, 148, 136, 0.14);
+  box-shadow: 0 18px 38px -28px rgba(15, 23, 42, 0.32);
+}
+
+.recorder-context-loading {
+  font-size: 0.94rem;
+  color: #0f766e;
+  font-weight: 600;
+}
+
+.recorder-context-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.recorder-context-kicker {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #0f766e;
+  margin-bottom: 0.2rem;
+}
+
+.recorder-context-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.recorder-context-meta {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #0f766e;
+  background: rgba(13, 148, 136, 0.1);
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.recorder-context-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin-bottom: 0.9rem;
+}
+
+.recorder-context-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 0.3rem;
+}
+
+.recorder-context-grid p,
+.recorder-context-main p {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+
+.recorder-context-main {
+  margin-bottom: 0.8rem;
+}
+
+.briefing-context-main {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.recorder-context-line {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+
+.recorder-context-bullets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+
+.recorder-context-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.1);
+  color: #0f766e;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.recorder-context-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.recorder-context-link {
+  border: none;
+  background: transparent;
+  color: #0f766e;
+  font-size: 0.84rem;
+  font-weight: 800;
+  padding: 0;
+  cursor: pointer;
+}
+
+.recorder-context-link.secondary {
+  color: var(--text-secondary);
+}
+
 .microphone-health-card {
   width: 100%;
   max-width: 500px;
@@ -519,7 +648,7 @@
     border-radius: 20px;
   }
 
-  .timer-display {
+  .timer-display-large {
     font-size: 3.5rem;
   }
 

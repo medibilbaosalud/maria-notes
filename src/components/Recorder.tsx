@@ -4,7 +4,7 @@ import { Mic, Square, Stethoscope } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { MBSLogo } from './MBSLogo';
-import { getPatientNameSuggestions, type PatientNameSuggestion } from '../services/storage';
+import { buildPsychologyCaseSummary, getPatientBriefing, getPatientNameSuggestions, type PatientNameSuggestion, type PatientCaseSummary, type PatientBriefing } from '../services/storage';
 import { fadeSlideInSmall, motionEase, motionTransitions, softScaleTap, statusPulseSoft } from '../features/ui/motion-tokens';
 import type { ClinicalSpecialtyId } from '../clinical/specialties';
 import './Recorder.css';
@@ -14,36 +14,47 @@ type ActiveEngine = 'whisper' | 'gemini' | 'groq' | 'llm' | 'storage' | 'idle';
 interface RecorderProps {
   onRecordingComplete: (blob: Blob, patientName: string, specialty: ClinicalSpecialtyId, isPartialBatch?: boolean, batchIndex?: number) => Promise<void> | void;
   onConsultationStart?: (sessionId: string, patientName: string, specialty: ClinicalSpecialtyId) => void;
+  initialPatientName?: string;
+  onOpenHistory?: () => void;
   canStart?: boolean;
   startBlockReason?: string;
   processingLabel?: string;
   activeEngine?: ActiveEngine;
   activeModel?: string;
   selectedSpecialty: ClinicalSpecialtyId;
+  psychologyClinicianName?: 'Ainhoa' | 'June';
 }
 
 export const Recorder: React.FC<RecorderProps> = ({
   onRecordingComplete,
   onConsultationStart,
+  initialPatientName = '',
+  onOpenHistory,
   canStart = true,
   startBlockReason = '',
   processingLabel = 'Listo para grabar',
   activeEngine = 'idle',
   activeModel = '',
-  selectedSpecialty
+  selectedSpecialty,
+  psychologyClinicianName = 'Ainhoa'
 }) => {
   const turboBatchIntervalMs = Number(import.meta.env.VITE_TURBO_RECORDER_BATCH_INTERVAL_MS || 600_000);
   const listboxId = useId();
-  const [patientName, setPatientName] = useState('');
+  const [patientName, setPatientName] = useState(initialPatientName);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [suggestions, setSuggestions] = useState<PatientNameSuggestion[]>([]);
   const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false);
   const [highlightedSuggestion, setHighlightedSuggestion] = useState(-1);
+  const [briefing, setBriefing] = useState<PatientBriefing | null>(null);
+  const [caseSummary, setCaseSummary] = useState<PatientCaseSummary | null>(null);
+  const [caseSummaryLoading, setCaseSummaryLoading] = useState(false);
   const patientNameRef = useRef(patientName);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const blurTimeoutRef = useRef<number | null>(null);
   const suggestionRequestRef = useRef(0);
   const isInputFocusedRef = useRef(false);
+  const briefingRequestRef = useRef(0);
+  const caseSummaryRequestRef = useRef(0);
   const previewStreamRef = useRef<MediaStream | null>(null);
   const previewAudioContextRef = useRef<AudioContext | null>(null);
   const previewAnalyserRef = useRef<AnalyserNode | null>(null);
@@ -56,6 +67,10 @@ export const Recorder: React.FC<RecorderProps> = ({
   useEffect(() => {
     patientNameRef.current = patientName;
   }, [patientName]);
+
+  useEffect(() => {
+    setPatientName(initialPatientName);
+  }, [initialPatientName]);
 
   useEffect(() => {
     return () => {
@@ -219,6 +234,76 @@ export const Recorder: React.FC<RecorderProps> = ({
 
     return () => window.clearTimeout(timer);
   }, [patientName, isRecording]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const trimmed = patientName.trim();
+    if (selectedSpecialty !== 'psicologia' || trimmed.length < 2) {
+      setCaseSummary(null);
+      setCaseSummaryLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const currentRequest = ++caseSummaryRequestRef.current;
+    setCaseSummaryLoading(true);
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const summary = await buildPsychologyCaseSummary(trimmed, psychologyClinicianName);
+          if (cancelled || currentRequest !== caseSummaryRequestRef.current) return;
+          setCaseSummary(summary);
+        } catch (error) {
+          console.warn('[RecorderUI] Failed to load case summary:', error);
+          if (!cancelled && currentRequest === caseSummaryRequestRef.current) {
+            setCaseSummary(null);
+          }
+        } finally {
+          if (!cancelled && currentRequest === caseSummaryRequestRef.current) {
+            setCaseSummaryLoading(false);
+          }
+        }
+      })();
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [patientName, psychologyClinicianName, selectedSpecialty]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const trimmed = patientName.trim();
+    if (selectedSpecialty !== 'psicologia' || trimmed.length < 2) {
+      setBriefing(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const currentRequest = ++briefingRequestRef.current;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const existing = await getPatientBriefing(trimmed, 'psicologia', psychologyClinicianName);
+          if (cancelled || currentRequest !== briefingRequestRef.current) return;
+          setBriefing(existing);
+        } catch (error) {
+          console.warn('[RecorderUI] Failed to load briefing:', error);
+          if (!cancelled && currentRequest === briefingRequestRef.current) {
+            setBriefing(null);
+          }
+        }
+      })();
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [patientName, psychologyClinicianName, selectedSpecialty]);
 
   const patientNameValid = patientNameRef.current.trim().length >= 2;
   const canStartRecording = canStart && patientNameValid && !isFinalizing;
@@ -432,6 +517,96 @@ export const Recorder: React.FC<RecorderProps> = ({
             </div>
           </div>
         </div>
+
+        {selectedSpecialty === 'psicologia' && patientName.trim().length >= 2 && (
+          <motion.div
+            className="recorder-context-card"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={motionTransitions.normal}
+          >
+            {briefing ? (
+              <>
+                <div className="recorder-context-header">
+                  <div>
+                    <div className="recorder-context-kicker">Briefing 30s</div>
+                    <h3>Preparacion rapida del caso</h3>
+                  </div>
+                  <div className="recorder-context-meta">Groq</div>
+                </div>
+                <div className="recorder-context-main briefing-context-main">
+                  {briefing.summary_text.split('\n').map((line, index) => (
+                    <p key={`${index}-${line}`} className="recorder-context-line">{line}</p>
+                  ))}
+                </div>
+                <div className="recorder-context-actions">
+                  {onOpenHistory && (
+                    <button type="button" className="recorder-context-link" onClick={onOpenHistory}>
+                      Ver historial completo
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="recorder-context-link secondary"
+                    onClick={() => {
+                      setBriefing(null);
+                      setCaseSummary(null);
+                    }}
+                  >
+                    Iniciar sin contexto
+                  </button>
+                </div>
+              </>
+            ) : caseSummaryLoading && !caseSummary ? (
+              <div className="recorder-context-loading">Buscando contexto clinico...</div>
+            ) : caseSummary ? (
+              <>
+                <div className="recorder-context-header">
+                  <div>
+                    <div className="recorder-context-kicker">Contexto previo</div>
+                    <h3>Ya has visto a este paciente</h3>
+                  </div>
+                  <div className="recorder-context-meta">{caseSummary.sessionCount} sesiones</div>
+                </div>
+                <div className="recorder-context-grid">
+                  <div>
+                    <span className="recorder-context-label">Ultima sesion</span>
+                    <p>{new Date(caseSummary.latestConsultationAt).toLocaleDateString()}</p>
+                  </div>
+                  <div>
+                    <span className="recorder-context-label">Profesionales</span>
+                    <p>{caseSummary.clinicians.length > 0 ? caseSummary.clinicians.join(', ') : 'Sin dato'}</p>
+                  </div>
+                </div>
+                <div className="recorder-context-main">
+                  <span className="recorder-context-label">Foco principal</span>
+                  <p>{caseSummary.mainFocus}</p>
+                </div>
+                {caseSummary.recurringTopics.length > 0 && (
+                  <div className="recorder-context-bullets">
+                    {caseSummary.recurringTopics.slice(0, 4).map((topic) => (
+                      <span key={topic} className="recorder-context-chip">{topic}</span>
+                    ))}
+                  </div>
+                )}
+                <div className="recorder-context-actions">
+                  {onOpenHistory && (
+                    <button type="button" className="recorder-context-link" onClick={onOpenHistory}>
+                      Ver historial completo
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="recorder-context-link secondary"
+                    onClick={() => setCaseSummary(null)}
+                  >
+                    Iniciar sin contexto
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </motion.div>
+        )}
 
         {!isRecording && (
           <motion.div

@@ -13,7 +13,8 @@ export type TaskType =
     | 'semantic_check'
     | 'prompt_guard'
     | 'rule_categorization'
-    | 'quality_triage';
+    | 'quality_triage'
+    | 'patient_briefing';
 
 export type ModelProvider = 'groq' | 'gemini';
 export type ThinkingMode = 'low' | 'medium';
@@ -108,10 +109,10 @@ const GROQ_PROMPT_GUARD: ModelCandidate[] = [
 const DEFAULT_TASK_MODEL_PREFERENCES: Record<TaskType, ModelCandidate[]> = {
     extraction: [...GEMINI_TEXT_CHAIN_LOW, ...GROQ_CORE_FALLBACK],
     single_shot_history: [...GEMINI_TEXT_CHAIN_MEDIUM, ...GROQ_CORE_FALLBACK],
-    generation: [...GEMINI_TEXT_CHAIN_MEDIUM, ...GROQ_CORE_FALLBACK],
+    generation: [...GROQ_REVIEW_PRIMARY, ...GROQ_CORE_FALLBACK],
     merge: [...GEMINI_TEXT_CHAIN_LOW, ...GROQ_CORE_FALLBACK],
     classification: [...GEMINI_TEXT_CHAIN_LOW, ...GROQ_CORE_FALLBACK],
-    report: [...GEMINI_TEXT_CHAIN_MEDIUM, ...GROQ_CORE_FALLBACK],
+    report: [...GROQ_REVIEW_PRIMARY, ...GROQ_CORE_FALLBACK],
     memory: [...GEMINI_TEXT_CHAIN_LOW, ...GROQ_CORE_FALLBACK],
     json_repair: [...GEMINI_TEXT_CHAIN_LOW, ...GROQ_CORE_FALLBACK],
 
@@ -127,7 +128,13 @@ const DEFAULT_TASK_MODEL_PREFERENCES: Record<TaskType, ModelCandidate[]> = {
     rule_categorization: [...GROQ_REVIEW_PRIMARY, ...GEMINI_TEXT_CHAIN_LOW],
     quality_triage: [...GROQ_REVIEW_PRIMARY, ...GEMINI_TEXT_CHAIN_LOW],
 
-    prompt_guard: [...GROQ_PROMPT_GUARD]
+    prompt_guard: [...GROQ_PROMPT_GUARD],
+    patient_briefing: [
+        candidate('groq', 'llama-3.3-70b-versatile'),
+        candidate('groq', 'qwen/qwen3-32b'),
+        candidate('groq', 'meta-llama/llama-4-scout-17b-16e-instruct'),
+        candidate('groq', 'llama-3.1-8b-instant')
+    ]
 };
 
 const DEFAULT_ALLOWED_CANDIDATES: ModelCandidate[] = [

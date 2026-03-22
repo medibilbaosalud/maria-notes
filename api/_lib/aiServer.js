@@ -1084,6 +1084,85 @@ ${String(transcription || '').slice(0, 18000)}
 HISTORIA ACTUAL:
 ${String(currentHistory || '').slice(0, 12000)}`;
 
+const BRIEFING_SECTION_LABELS = ['Ultima sesion', 'Foco actual', 'Pendiente', 'Cuidado', 'Profesional'];
+
+const cleanBriefingLine = (value) => cleanText(String(value || '').replace(/^[-*•]+\s*/, ''));
+
+const extractBriefingValue = (text, label) => {
+    const normalizedLabel = `${label.toLowerCase()}:`;
+    const lines = String(text || '').split(/\r?\n/).map((line) => cleanBriefingLine(line)).filter(Boolean);
+    for (const line of lines) {
+        const lowerLine = line.toLowerCase();
+        if (lowerLine.startsWith(normalizedLabel)) {
+            return cleanBriefingLine(line.slice(label.length + 1));
+        }
+        const dashMatch = lowerLine.startsWith(label.toLowerCase())
+            ? line.slice(label.length).replace(/^[:\-\s]+/, '')
+            : '';
+        if (dashMatch) return cleanBriefingLine(dashMatch);
+    }
+    const regex = new RegExp(`${label}\\s*[:\\-]\\s*([^\\n]+)`, 'i');
+    const match = String(text || '').match(regex);
+    return match ? cleanBriefingLine(match[1]) : '';
+};
+
+const normalizeBriefingText = (rawText) => {
+    const sections = new Map(BRIEFING_SECTION_LABELS.map((label) => [label, '']));
+    for (const label of BRIEFING_SECTION_LABELS) {
+        sections.set(label, extractBriefingValue(rawText, label));
+    }
+
+    const hasMeaningfulContent = Array.from(sections.values()).some((value) => value && value.toLowerCase() !== 'no consta');
+    if (!hasMeaningfulContent) {
+        return '';
+    }
+
+    return BRIEFING_SECTION_LABELS
+        .map((label) => `${label}: ${sections.get(label) || 'No consta'}`)
+        .join('\n');
+};
+
+const buildBriefingPrompt = ({ patientName, consultationType, clinicianName, timelineItems }) => {
+    const specialty = normalizeConsultationType(consultationType);
+    const items = Array.isArray(timelineItems) ? timelineItems : [];
+    const timelineText = items
+        .slice(0, 12)
+        .map((item, index) => {
+            const consultationAt = String(item?.consultationAt || item?.consultation_at || '').trim();
+            const clinician = String(item?.clinicianName || item?.clinician_profile || clinicianName || '').trim() || 'Sin profesional';
+            const source = String(item?.source || '').trim() || 'current';
+            const history = String(item?.medicalHistory || item?.medical_history || '').trim().slice(0, 1800);
+            return [
+                `${index + 1}. Fecha: ${consultationAt || 'No consta'}`,
+                `   Fuente: ${source}`,
+                `   Profesional: ${clinician}`,
+                `   Nota: ${history || 'No consta'}`
+            ].join('\n');
+        })
+        .join('\n\n');
+
+    return `Eres un asistente clinico de psicologia. Redacta un briefing de 30 segundos para la psicologa que va a ver este caso.
+Reglas:
+- Usa SOLO informacion explicitamente presente en el historial.
+- No inventes diagnosticos, gravedad, riesgos, ni próximos pasos.
+- Si un dato no consta, escribe "No consta".
+- Mantente breve: maximo 4 a 5 lineas.
+- Devuelve exactamente estas etiquetas y en este orden:
+Ultima sesion: ...
+Foco actual: ...
+Pendiente: ...
+Cuidado: ...
+Profesional: ...
+- Si no hay profesional claro, escribe "No consta".
+
+Paciente: ${patientName || 'Paciente'}
+Especialidad: ${specialty}
+Clinica/o de referencia: ${clinicianName || 'No consta'}
+
+TIMELINE MERGADO:
+${timelineText || 'No consta'}`;
+};
+
 const buildProvisionalHistory = (reason, consultationType) => getSpecialtyConfig(consultationType).provisionalHistory(reason);
 
 export const generateMedicalHistoryPayload = async ({ transcription, patientName, consultationType, learningContext, clinicianName }) => {
@@ -1292,38 +1371,47 @@ export const extractMedicalDataPayload = async ({ transcription, consultationTyp
 };
 
 export const generateMedicalReportPayload = async ({ transcription, patientName, consultationType, learningContext, clinicianName }) => {
-    const response = await callPreferredTextModel({
+    const response = await callGroqChat({
         prompt: buildReportPrompt(transcription, patientName, consultationType, learningContext, clinicianName),
         jsonMode: false,
         temperature: 0.2,
         maxTokens: 1800,
-        includeThoughts: true
     });
     return {
         text: response.text.trim(),
         model: response.model,
-        audit_trace: {
-            thought_summary: response.thought_summary,
-            thought_signature: response.thought_signature
-        }
+        audit_trace: {}
     };
 };
 
 export const regenerateHistorySectionPayload = async (params) => {
-    const response = await callPreferredTextModel({
+    const response = await callGroqChat({
         prompt: buildSectionPrompt(params),
         jsonMode: false,
         temperature: 0.1,
-        maxTokens: 900,
-        includeThoughts: true
+        maxTokens: 900
     });
     return {
         text: response.text.trim(),
         model: response.model,
-        audit_trace: {
-            thought_summary: response.thought_summary,
-            thought_signature: response.thought_signature
-        }
+        audit_trace: {}
+    };
+};
+
+export const generatePatientBriefingPayload = async ({ patientName, consultationType, clinicianName, timelineItems }) => {
+    const response = await callGroqChat({
+        prompt: buildBriefingPrompt({ patientName, consultationType, clinicianName, timelineItems }),
+        jsonMode: false,
+        temperature: 0.15,
+        maxTokens: 450
+    });
+    const normalizedText = normalizeBriefingText(response.text);
+    if (!normalizedText) {
+        throw new Error('briefing_empty_response');
+    }
+    return {
+        text: normalizedText,
+        model: response.model
     };
 };
 

@@ -8,6 +8,8 @@ import { saveLabTestLog } from './services/storage';
 import {
     saveMedicalRecord,
     updateMedicalRecord,
+    ensurePatientBriefing,
+    markPatientBriefingStale,
     upsertPipelineJob,
     upsertConsultationSession,
     saveSegment,
@@ -15,7 +17,8 @@ import {
     resumeSession,
     getRecoverableSessions,
     finalizeSession,
-    purgeExpiredPipelineArtifacts
+    purgeExpiredPipelineArtifacts,
+    syncFromCloud
 } from './services/storage';
 import {
     getSupabaseAuthSnapshot,
@@ -51,6 +54,7 @@ import { useSessionRecovery } from './features/pipeline/useSessionRecovery';
 import { fadeSlideInSmall } from './features/ui/motion-tokens';
 import { withTimeout } from './utils/asyncTimeout';
 import { safeGetLocalStorage, safeSetLocalStorage } from './utils/safeBrowser';
+import { isCloudSyncEnabled } from './hooks/useCloudSync';
 import type { PipelineUiError } from './types/pipeline';
 import type { ClinicalSpecialtyId } from './clinical/specialties';
 import {
@@ -266,6 +270,7 @@ const AppContent = () => {
     const [showWelcomeModal, setShowWelcomeModal] = useState(false);
     const [showWhatsNew, setShowWhatsNew] = useState(false);
     const [currentRecordId, setCurrentRecordId] = useState<string | null>(null);
+    const [historyFocusedPatientName, setHistoryFocusedPatientName] = useState<string>('');
     const [livePipelineState, setLivePipelineState] = useState<
         'idle'
         | 'recovering'
@@ -313,6 +318,22 @@ const AppContent = () => {
         return normalizePsychologyClinician(psychologyClinicianName).toLowerCase();
     }, [psychologyClinicianName]);
 
+    const refreshPsychologyBriefing = useCallback(async (
+        patientName: string,
+        specialty: ClinicalSpecialtyId,
+        clinicianName?: string
+    ) => {
+        if (normalizeClinicalSpecialty(specialty) !== 'psicologia') return;
+        try {
+            await markPatientBriefingStale(patientName, specialty, clinicianName);
+            void ensurePatientBriefing(patientName, specialty, clinicianName).catch((error) => {
+                console.warn('[App] Failed to generate psychology briefing:', error);
+            });
+        } catch (error) {
+            console.warn('[App] Failed to mark psychology briefing stale:', error);
+        }
+    }, []);
+
     useEffect(() => {
         contextSpecialtyRef.current = contextSpecialty;
     }, [contextSpecialty]);
@@ -320,6 +341,13 @@ const AppContent = () => {
     useEffect(() => {
         safeSetLocalStorage(PSYCHOLOGY_CLINICIAN_STORAGE_KEY, psychologyClinicianName);
     }, [psychologyClinicianName]);
+
+    useEffect(() => {
+        if (!isCloudSyncEnabled()) return;
+        void syncFromCloud().catch((error) => {
+            console.warn('[App] Initial cloud sync failed:', error);
+        });
+    }, []);
 
     const { isPlaying, demoData, startSimulation, currentStep } = useSimulation();
 
@@ -1394,6 +1422,11 @@ const AppContent = () => {
                 await updateMedicalRecord(currentRecordId, {
                     medical_history: newContent
                 });
+                void refreshPsychologyBriefing(
+                    currentPatientName,
+                    contextSpecialtyRef.current,
+                    resolveClinicianNameForSpecialty(contextSpecialtyRef.current)
+                );
             } catch (error) {
                 console.error('[App] Error updating medical record:', error);
                 if (!options?.autosave) {
@@ -2177,6 +2210,11 @@ const AppContent = () => {
                 outputTier,
                 recordId: savedRecord?.record_uuid
             });
+            void refreshPsychologyBriefing(
+                patientName,
+                contextSpecialtyRef.current,
+                resolveClinicianNameForSpecialty(contextSpecialtyRef.current)
+            );
             if (QUALITY_TRIAGE_ENABLED && savedRecord?.record_uuid) {
                 void upsertConsultationQualitySummary({
                     record_id: savedRecord.record_uuid,
@@ -2246,6 +2284,11 @@ const AppContent = () => {
                             outputTier: hardenedOutputTier,
                             recordId: promotedRecord?.record_uuid
                         });
+                        void refreshPsychologyBriefing(
+                            patientName,
+                            hardenedSpecialty,
+                            resolveClinicianNameForSpecialty(hardenedSpecialty)
+                        );
 
                         setHistory(hardenedResult.data);
                         setOriginalHistory(hardenedResult.data);
@@ -3328,12 +3371,18 @@ const AppContent = () => {
                     <Recorder
                         onRecordingComplete={handleRecordingComplete}
                         onConsultationStart={handleConsultationStart}
+                        initialPatientName={currentPatientName}
+                        onOpenHistory={() => {
+                            setHistoryFocusedPatientName(currentPatientName);
+                            setCurrentView('history');
+                        }}
                         canStart={canStartConsultation}
                         startBlockReason={startBlockReason}
                         processingLabel={processingLabel}
                         activeEngine={activeEngine}
                         activeModel={activeModel}
                         selectedSpecialty={activeSpecialty}
+                        psychologyClinicianName={psychologyClinicianName}
                     />
                     <PipelineStageTracker
                         state={pipelineStatusVm.state}
@@ -3354,6 +3403,8 @@ const AppContent = () => {
                 <Suspense fallback={<div className="view-loading">Cargando historial...</div>}>
                     <SearchHistory
                         apiKey={apiKey}
+                        focusedPatientName={historyFocusedPatientName}
+                        psychologyClinicianName={psychologyClinicianName}
                         onLoadRecord={(record) => {
                             setHistory(record.medical_history);
                             setOriginalHistory(record.original_medical_history || record.medical_history);
@@ -3367,6 +3418,29 @@ const AppContent = () => {
                             setPipelineMetadata(undefined);
                             lockContextSpecialty(normalizeClinicalSpecialty(record.specialty || record.consultation_type));
                             setCurrentView('result');
+                        }}
+                        onUseAsContext={({ patientName, specialty, clinicianProfile, clinicianName }) => {
+                            setHistory('');
+                            setOriginalHistory('');
+                            setTranscription('');
+                            setCurrentPatientName(patientName);
+                            setCurrentRecordId(null);
+                            setPipelineMetadata(undefined);
+                            setProcessingError(null);
+                            activeSessionIdRef.current = null;
+                            setProcessingStatus('Listo para grabar');
+                            setActiveEngine('idle');
+                            setActiveModel('');
+                            const normalizedSpecialty = normalizeClinicalSpecialty(specialty);
+                            setActiveSpecialty(normalizedSpecialty);
+                            lockContextSpecialty(normalizedSpecialty);
+                            setHistoryFocusedPatientName(patientName);
+                            if (normalizedSpecialty === 'psicologia' && clinicianProfile) {
+                                setPsychologyClinicianName(normalizePsychologyClinician(clinicianProfile));
+                            } else if (normalizedSpecialty === 'psicologia' && clinicianName) {
+                                setPsychologyClinicianName(normalizePsychologyClinician(clinicianName));
+                            }
+                            setCurrentView('record');
                         }}
                     />
                 </Suspense>

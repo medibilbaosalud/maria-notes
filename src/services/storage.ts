@@ -1,6 +1,8 @@
 import {
     db,
     type MedicalRecord,
+    type LegacyClinicalRecord,
+    type PatientBriefing,
     type LabTestLog,
     type PipelineJob,
     type ConsultationSession,
@@ -11,12 +13,15 @@ import {
     type AiLearningEvent,
     type AiImprovementLesson
 } from './db';
+import { AIService } from './ai';
 import { hasSupabaseSession, supabase } from './supabase';
 import { isCloudSyncEnabled } from '../hooks/useCloudSync';
 import type { ConsultationClassification, ExtractionMeta, ExtractionResult } from './groq';
 import { normalizeClinicalSpecialty } from '../clinical/specialties';
 
 export type { MedicalRecord };
+export type { LegacyClinicalRecord };
+export type { PatientBriefing };
 export interface PatientNameSuggestion {
     name: string;
     normalized: string;
@@ -25,20 +30,91 @@ export interface PatientNameSuggestion {
     score: number;
 }
 
+export interface PatientTimelineItem {
+    id: string;
+    source: 'current' | 'legacy';
+    patientName: string;
+    specialty: string;
+    clinicianProfile?: string;
+    clinicianName?: string;
+    consultationAt: string;
+    medicalHistory: string;
+    isEditable: boolean;
+    sourceLabel: 'Consulta actual' | 'Historico importado';
+    sourceEmail?: string;
+    recordUuid?: string;
+    rawRow?: Record<string, unknown> | null;
+}
+
+export interface PatientTimelineGroup {
+    patientName: string;
+    normalizedPatientName: string;
+    latestConsultationAt: string;
+    sessionCount: number;
+    clinicians: string[];
+    specialties: string[];
+    sourceCounts: { current: number; legacy: number };
+    items: PatientTimelineItem[];
+}
+
+export interface PatientCaseSummary {
+    patientName: string;
+    latestConsultationAt: string;
+    sessionCount: number;
+    clinicians: string[];
+    mainFocus: string;
+    recurringTopics: string[];
+    openItems: string[];
+    sensitiveFlags: string[];
+}
+
 const PIPELINE_ARTIFACT_RETENTION_MS = 24 * 60 * 60 * 1000;
 const nowIso = () => new Date().toISOString();
 
 const getCloudClient = () => (supabase && isCloudSyncEnabled() && hasSupabaseSession() ? supabase : null);
 
-const normalizePatientName = (value: string): string =>
-    value
-        .trim()
-        .replace(/\s+/g, ' ')
-        .toLowerCase();
+const normalizeKey = (value: string): string => value
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+const normalizePatientName = (value: string): string => normalizeKey(value);
 
 const isTechnicalPatientName = (value: string): boolean => {
     const normalized = normalizePatientName(value).toUpperCase();
     return normalized.startsWith('TEST_LAB_') || normalized.startsWith('DIAG_');
+};
+
+const displayPsychologyClinician = (value?: string | null): string | undefined => {
+    if (!value) return undefined;
+    if (value.toLowerCase() === 'ainhoa') return 'Ainhoa';
+    if (value.toLowerCase() === 'june') return 'June';
+    return value;
+};
+
+const normalizePsychologyClinicianProfile = (value?: string | null): string | undefined => {
+    const normalized = normalizeKey(String(value || ''));
+    if (normalized === 'ainhoa') return 'ainhoa';
+    if (normalized === 'june') return 'june';
+    return undefined;
+};
+
+const getNormalizedTimelineClinician = (item: Pick<PatientTimelineItem, 'clinicianProfile' | 'clinicianName'>): string | undefined => {
+    return normalizePsychologyClinicianProfile(item.clinicianProfile || item.clinicianName || undefined);
+};
+
+const toIsoString = (value?: string | null): string => {
+    const candidate = String(value || '').trim();
+    return candidate || nowIso();
+};
+
+const cleanText = (value?: string | null): string => String(value || '').replace(/\s+/g, ' ').trim();
+
+const safeRecord = (value: unknown): Record<string, unknown> | null => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value as Record<string, unknown>;
 };
 
 const generateUuid = (): string => {
@@ -46,6 +122,255 @@ const generateUuid = (): string => {
         return crypto.randomUUID();
     }
     return `uuid_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+};
+
+const mapCurrentRecordToTimelineItem = (record: MedicalRecord): PatientTimelineItem => ({
+    id: record.record_uuid,
+    source: 'current',
+    patientName: record.patient_name,
+    specialty: normalizeClinicalSpecialty(record.specialty || record.consultation_type),
+    clinicianProfile: record.clinician_profile || undefined,
+    clinicianName: displayPsychologyClinician(record.clinician_profile),
+    consultationAt: toIsoString(record.updated_at || record.created_at),
+    medicalHistory: cleanText(record.medical_history),
+    isEditable: true,
+    sourceLabel: 'Consulta actual',
+    recordUuid: record.record_uuid,
+    rawRow: null
+});
+
+const mapLegacyRecordToTimelineItem = (record: LegacyClinicalRecord): PatientTimelineItem => ({
+    id: record.id,
+    source: 'legacy',
+    patientName: record.patient_name,
+    specialty: normalizeClinicalSpecialty(record.specialty || 'psicologia'),
+    clinicianProfile: record.clinician_profile || undefined,
+    clinicianName: displayPsychologyClinician(record.specialist_name || record.clinician_profile),
+    consultationAt: toIsoString(record.consultation_at || record.updated_at || record.created_at),
+    medicalHistory: cleanText(record.medical_history),
+    isEditable: false,
+    sourceLabel: 'Historico importado',
+    sourceEmail: record.source_email || undefined,
+    rawRow: safeRecord(record.raw_row)
+});
+
+const getTimelineSourceDate = (item: PatientTimelineItem): string => toIsoString(item.consultationAt);
+
+const extractSnippetAfterLabel = (text: string, label: string): string => {
+    const normalizedText = String(text || '');
+    const lower = normalizedText.toLowerCase();
+    const index = lower.indexOf(label.toLowerCase());
+    if (index < 0) return '';
+    const start = index + label.length;
+    const remainder = normalizedText.slice(start);
+    const nextLabelMatch = remainder.search(/(?:\n\s*\n|##\s|motivo de consulta:|antecedentes relevantes:|antecedentes:|observaciones clinicas:|impresion clinica:|plan terapeutico:|proxima sesion:|próxima sesión:|ot:)/i);
+    const snippet = nextLabelMatch > 0 ? remainder.slice(0, nextLabelMatch) : remainder;
+    return cleanText(snippet.replace(/^[:\-\s]+/, ''));
+};
+
+const stripSectionNoise = (text: string): string => cleanText(text)
+    .replace(/^motivo de consulta:\s*/i, '')
+    .replace(/^situacion actual:\s*/i, '')
+    .replace(/^situación actual:\s*/i, '');
+
+const findExplicitFocus = (text: string): string => {
+    const candidates = [
+        extractSnippetAfterLabel(text, 'Motivo de consulta:'),
+        extractSnippetAfterLabel(text, 'MOTIVO DE CONSULTA'),
+        extractSnippetAfterLabel(text, 'Acude a consulta por'),
+        extractSnippetAfterLabel(text, 'OT:'),
+        extractSnippetAfterLabel(text, 'Objetivos terapéuticos:'),
+        extractSnippetAfterLabel(text, 'Objetivos terapeuticos:')
+    ].map(stripSectionNoise).filter(Boolean);
+    return candidates[0] || '';
+};
+
+const TOPIC_KEYWORDS: Array<{ topic: string; keywords: string[] }> = [
+    { topic: 'ansiedad', keywords: ['ansiedad', 'ataque de panico', 'pánico', 'panico', 'nerviosismo'] },
+    { topic: 'autoestima', keywords: ['autoestima', 'inseguridad', 'inseguridades', 'autoconcepto', 'autovalor'] },
+    { topic: 'pareja', keywords: ['pareja', 'relacion', 'relación', 'novio', 'novia', 'divorcio', 'ruptura'] },
+    { topic: 'familia', keywords: ['familia', 'madre', 'padre', 'hermana', 'hermano', 'hijo', 'hija'] },
+    { topic: 'duelo', keywords: ['duelo', 'fallecio', 'falleció', 'muerte', 'perdida', 'pérdida'] },
+    { topic: 'trabajo', keywords: ['trabajo', 'laboral', 'empresa', 'empleo', 'liderando', 'autonomo', 'autónomo'] },
+    { topic: 'sueño', keywords: ['sueño', 'sueno', 'insomnio', 'dormir', 'descanso'] },
+    { topic: 'consumo', keywords: ['cannabis', 'alcohol', 'cocaína', 'cocaina', 'oh ', 'drog', 'consumo'] },
+    { topic: 'regulacion emocional', keywords: ['regulacion emocional', 'regulación emocional', 'gestión emocional', 'gestion emocional'] },
+    { topic: 'autocuidado', keywords: ['autocuidado', 'autocuid', 'skincare', 'higiene'] },
+    { topic: 'trauma', keywords: ['abuso', 'violencia', 'agres', 'autoles', 'suicid', 'ideac', 'trauma'] }
+];
+
+const getMatchedTopics = (text: string): string[] => {
+    const lower = normalizeKey(text);
+    return TOPIC_KEYWORDS
+        .filter(({ keywords }) => keywords.some((keyword) => lower.includes(normalizeKey(keyword))))
+        .map(({ topic }) => topic);
+};
+
+const getSensitiveFlags = (text: string): string[] => {
+    const lower = normalizeKey(text);
+    const flags = new Set<string>();
+    const addIf = (needle: string, label: string) => {
+        if (lower.includes(normalizeKey(needle))) flags.add(label);
+    };
+    addIf('ideación suicida', 'Ideación suicida');
+    addIf('ideacion suicida', 'Ideación suicida');
+    addIf('autolesión', 'Autolesión');
+    addIf('autolesion', 'Autolesión');
+    addIf('abuso sexual', 'Abuso sexual');
+    addIf('violencia intrafamiliar', 'Violencia intrafamiliar');
+    addIf('cocaína', 'Consumo de cocaína');
+    addIf('cocaina', 'Consumo de cocaína');
+    addIf('cannabis', 'Consumo de cannabis');
+    addIf('alcohol', 'Consumo de alcohol');
+    addIf('agresiones verbales', 'Agresiones verbales');
+    return Array.from(flags);
+};
+
+const getOpenItems = (text: string): string[] => {
+    const raw = cleanText(text);
+    const candidates = [
+        extractSnippetAfterLabel(raw, 'Próxima sesión:'),
+        extractSnippetAfterLabel(raw, 'Proxima sesion:'),
+        extractSnippetAfterLabel(raw, 'Próximas sesiones:'),
+        extractSnippetAfterLabel(raw, 'Objetivos terapéuticos:'),
+        extractSnippetAfterLabel(raw, 'Objetivos terapeuticos:'),
+        extractSnippetAfterLabel(raw, 'Plan terapéutico:'),
+        extractSnippetAfterLabel(raw, 'Plan terapeutico:'),
+        extractSnippetAfterLabel(raw, 'OT:')
+    ].map(stripSectionNoise).filter(Boolean);
+    return Array.from(new Set(candidates)).slice(0, 5);
+};
+
+const getBriefingSourceKind = (items: PatientTimelineItem[]): 'current' | 'legacy' | 'mixed' => {
+    const hasCurrent = items.some((item) => item.source === 'current');
+    const hasLegacy = items.some((item) => item.source === 'legacy');
+    if (hasCurrent && hasLegacy) return 'mixed';
+    if (hasLegacy) return 'legacy';
+    return 'current';
+};
+
+const getBriefingRecordIds = (items: PatientTimelineItem[]): string[] => {
+    return items
+        .map((item) => item.recordUuid || item.id)
+        .filter((value, index, array): value is string => Boolean(value) && array.indexOf(value) === index);
+};
+
+const getPatientBriefingCandidates = async (
+    patientName: string,
+    specialty?: string,
+    clinician?: string
+): Promise<PatientBriefing[]> => {
+    const normalizedName = normalizePatientName(patientName || '');
+    if (!normalizedName) return [];
+
+    const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
+    const normalizedClinician = normalizePsychologyClinicianProfile(clinician);
+    const rows = await db.patient_briefings
+        .where('normalized_patient_name')
+        .equals(normalizedName)
+        .toArray();
+
+    return rows.filter((briefing) => {
+        if (normalizedSpecialty && normalizeClinicalSpecialty(briefing.specialty) !== normalizedSpecialty) return false;
+        const briefingClinician = normalizePsychologyClinicianProfile(briefing.clinician_profile || undefined);
+        if (normalizedClinician && briefingClinician !== normalizedClinician) return false;
+        return true;
+    });
+};
+
+const isBriefingCurrent = (briefing: PatientBriefing, latestConsultationAt: string): boolean => {
+    if (!latestConsultationAt) return briefing.status === 'ready';
+    return toIsoString(briefing.latest_consultation_at || '') >= toIsoString(latestConsultationAt);
+};
+
+const createBriefingClient = () => new AIService();
+
+const mapTimelineForBriefing = (items: PatientTimelineItem[]) => items.slice(0, 12).map((item) => ({
+    id: item.id,
+    source: item.source,
+    patientName: item.patientName,
+    specialty: item.specialty,
+    clinicianProfile: item.clinicianProfile,
+    clinicianName: item.clinicianName,
+    consultationAt: item.consultationAt,
+    medicalHistory: item.medicalHistory
+}));
+
+const normalizeBriefingSummaryText = (value: string): string => String(value || '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n');
+
+const buildCaseSummaryFromTimeline = (patientName: string, items: PatientTimelineItem[]): PatientCaseSummary => {
+    const sorted = [...items].sort((a, b) => getTimelineSourceDate(b).localeCompare(getTimelineSourceDate(a)));
+    const latest = sorted[0];
+    const topicCounter = new Map<string, number>();
+    const openItemSet = new Set<string>();
+    const sensitiveSet = new Set<string>();
+    const clinicians = new Set<string>();
+
+    sorted.forEach((item) => {
+        if (item.clinicianName) clinicians.add(item.clinicianName);
+        const topics = getMatchedTopics(item.medicalHistory);
+        topics.forEach((topic) => {
+            topicCounter.set(topic, (topicCounter.get(topic) || 0) + 1);
+        });
+        getOpenItems(item.medicalHistory).forEach((value) => openItemSet.add(value));
+        getSensitiveFlags(item.medicalHistory).forEach((value) => sensitiveSet.add(value));
+    });
+
+    const recurringTopics = Array.from(topicCounter.entries())
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .map(([topic]) => topic)
+        .slice(0, 4);
+
+    const latestFocus = latest ? findExplicitFocus(latest.medicalHistory) : '';
+    const mainFocus = latestFocus || recurringTopics[0] || 'Sin foco claro en la nota';
+
+    return {
+        patientName,
+        latestConsultationAt: latest ? latest.consultationAt : '',
+        sessionCount: sorted.length,
+        clinicians: Array.from(clinicians),
+        mainFocus,
+        recurringTopics,
+        openItems: Array.from(openItemSet).slice(0, 5),
+        sensitiveFlags: Array.from(sensitiveSet).slice(0, 5)
+    };
+};
+
+const buildPatientGroups = (items: PatientTimelineItem[]): PatientTimelineGroup[] => {
+    const groups = new Map<string, PatientTimelineGroup>();
+
+    items.forEach((item) => {
+        const normalizedPatientName = normalizePatientName(item.patientName);
+        if (!normalizedPatientName) return;
+        const existing = groups.get(normalizedPatientName);
+        const nextItems = existing ? [...existing.items, item] : [item];
+        const sortedItems = nextItems.sort((a, b) => getTimelineSourceDate(b).localeCompare(getTimelineSourceDate(a)));
+        const clinicians = new Set<string>(existing?.clinicians || []);
+        const specialties = new Set<string>(existing?.specialties || []);
+        if (item.clinicianName) clinicians.add(item.clinicianName);
+        specialties.add(item.specialty);
+
+        const sourceCounts = existing?.sourceCounts || { current: 0, legacy: 0 };
+        sourceCounts[item.source] += 1;
+
+        groups.set(normalizedPatientName, {
+            patientName: sortedItems[0]?.patientName || item.patientName,
+            normalizedPatientName,
+            latestConsultationAt: sortedItems[0]?.consultationAt || item.consultationAt,
+            sessionCount: sortedItems.length,
+            clinicians: Array.from(clinicians),
+            specialties: Array.from(specialties),
+            sourceCounts,
+            items: sortedItems
+        });
+    });
+
+    return Array.from(groups.values()).sort((a, b) => b.latestConsultationAt.localeCompare(a.latestConsultationAt));
 };
 
 // Map Dexie MedicalRecord fields to Supabase column names.
@@ -202,6 +527,233 @@ export const saveMedicalRecord = async (
     }
 };
 
+const upsertPatientBriefingToCloud = async (briefing: PatientBriefing): Promise<void> => {
+    const client = getCloudClient();
+    if (!client) return;
+
+    const { owner_user_id: _ownerUserId, ...payload } = briefing;
+    const { error } = await client
+        .from('patient_briefings')
+        .upsert([payload], {
+            onConflict: 'owner_user_id,normalized_patient_name,specialty,clinician_scope'
+        });
+    if (error) {
+        console.error('[Cloud Sync] patient_briefings upsert error:', error.message);
+    }
+};
+
+const normalizeBriefingRow = (briefing: PatientBriefing): PatientBriefing => ({
+    ...briefing,
+    normalized_patient_name: normalizePatientName(briefing.normalized_patient_name || briefing.patient_name),
+    patient_name: cleanText(briefing.patient_name) || 'Sin nombre',
+    specialty: normalizeClinicalSpecialty(briefing.specialty || 'psicologia'),
+    clinician_profile: normalizePsychologyClinicianProfile(briefing.clinician_profile || undefined) || briefing.clinician_profile || null,
+    clinician_name: displayPsychologyClinician(briefing.clinician_name || briefing.clinician_profile || undefined) || briefing.clinician_name || null,
+    source_kind: briefing.source_kind === 'legacy' || briefing.source_kind === 'mixed' ? briefing.source_kind : 'current',
+    summary_text: normalizeBriefingSummaryText(briefing.summary_text || ''),
+    latest_consultation_at: toIsoString(briefing.latest_consultation_at),
+    generated_from_count: Math.max(0, Number(briefing.generated_from_count || 0) || 0),
+    generated_from_record_ids: Array.isArray(briefing.generated_from_record_ids)
+        ? Array.from(new Set(briefing.generated_from_record_ids.map((value) => String(value || '').trim()).filter(Boolean)))
+        : [],
+    model: cleanText(briefing.model || '') || 'unknown',
+    status: briefing.status === 'failed' || briefing.status === 'stale' ? briefing.status : 'ready',
+    created_at: toIsoString(briefing.created_at),
+    updated_at: toIsoString(briefing.updated_at || briefing.created_at)
+});
+
+export const savePatientBriefing = async (briefing: PatientBriefing): Promise<PatientBriefing | null> => {
+    try {
+        const now = nowIso();
+        const normalized = normalizeBriefingRow({
+            ...briefing,
+            created_at: briefing.created_at || now,
+            updated_at: now
+        });
+        await db.patient_briefings.put(normalized);
+        await upsertPatientBriefingToCloud(normalized);
+        return normalized;
+    } catch (error) {
+        console.error('Error saving patient briefing:', error);
+        return null;
+    }
+};
+
+export const getPatientBriefing = async (
+    patientName: string,
+    specialty?: string,
+    clinician?: string
+): Promise<PatientBriefing | null> => {
+    try {
+        const normalizedName = normalizePatientName(patientName || '');
+        if (!normalizedName) return null;
+
+        const timeline = await getPatientTimeline(patientName, specialty, clinician);
+        const latestConsultationAt = timeline[0]?.consultationAt || '';
+        const candidates = await getPatientBriefingCandidates(patientName, specialty, clinician);
+        const readyCandidates = candidates
+            .filter((briefing) => briefing.status === 'ready')
+            .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+        const current = readyCandidates.find((briefing) => isBriefingCurrent(briefing, latestConsultationAt));
+        return current || null;
+    } catch (error) {
+        console.error('Error getting patient briefing:', error);
+        return null;
+    }
+};
+
+export const getMedicalRecordByUuid = async (recordUuid: string): Promise<MedicalRecord | null> => {
+    try {
+        if (!recordUuid) return null;
+        return await db.medical_records.where('record_uuid').equals(recordUuid).first() || null;
+    } catch (error) {
+        console.error('Error getting medical record by uuid:', error);
+        return null;
+    }
+};
+
+export const markPatientBriefingStale = async (
+    patientName: string,
+    specialty?: string,
+    clinician?: string
+): Promise<PatientBriefing | null> => {
+    try {
+        const timeline = await getPatientTimeline(patientName, specialty, clinician);
+        if (!timeline.length) return null;
+
+        const normalizedName = normalizePatientName(patientName || '');
+        const latestConsultationAt = timeline[0]?.consultationAt || nowIso();
+        const sourceKind = getBriefingSourceKind(timeline);
+        const recordIds = getBriefingRecordIds(timeline);
+        const candidates = await getPatientBriefingCandidates(patientName, specialty, clinician);
+        const existing = candidates.sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+        const staleRow: PatientBriefing = normalizeBriefingRow({
+            id: existing?.id || generateUuid(),
+            owner_user_id: existing?.owner_user_id || null,
+            normalized_patient_name: normalizedName,
+            patient_name: timeline[0]?.patientName || patientName,
+            specialty: normalizeClinicalSpecialty(specialty || timeline[0]?.specialty || 'psicologia'),
+            clinician_profile: normalizePsychologyClinicianProfile(clinician || timeline[0]?.clinicianProfile || undefined) || existing?.clinician_profile || null,
+            clinician_name: displayPsychologyClinician(clinician || timeline[0]?.clinicianName || existing?.clinician_name || undefined) || existing?.clinician_name || null,
+            source_kind: sourceKind,
+            summary_text: existing?.summary_text || '',
+            latest_consultation_at: latestConsultationAt,
+            generated_from_count: timeline.length,
+            generated_from_record_ids: recordIds,
+            model: existing?.model || 'pending',
+            status: 'stale',
+            created_at: existing?.created_at || nowIso(),
+            updated_at: nowIso()
+        });
+
+        await db.patient_briefings.put(staleRow);
+        await upsertPatientBriefingToCloud(staleRow);
+        return staleRow;
+    } catch (error) {
+        console.error('Error marking patient briefing stale:', error);
+        return null;
+    }
+};
+
+export const ensurePatientBriefing = async (
+    patientName: string,
+    specialty?: string,
+    clinician?: string
+): Promise<PatientBriefing | null> => {
+    try {
+        const timeline = await getPatientTimeline(patientName, specialty, clinician);
+        if (!timeline.length) return null;
+
+        const latestConsultationAt = timeline[0]?.consultationAt || '';
+        const candidates = await getPatientBriefingCandidates(patientName, specialty, clinician);
+        const latestCandidate = candidates.sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+        if (latestCandidate?.status === 'failed') {
+            return null;
+        }
+
+        const currentReady = candidates
+            .filter((briefing) => briefing.status === 'ready')
+            .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+            .find((briefing) => isBriefingCurrent(briefing, latestConsultationAt));
+        if (currentReady) {
+            return currentReady;
+        }
+
+        const sourceKind = getBriefingSourceKind(timeline);
+        const shouldGenerate = Boolean(
+            sourceKind === 'legacy'
+            || candidates.some((briefing) => briefing.status === 'stale')
+            || (latestCandidate && latestCandidate.status === 'ready' && !isBriefingCurrent(latestCandidate, latestConsultationAt))
+        );
+        if (!shouldGenerate) {
+            return null;
+        }
+
+        const aiService = createBriefingClient();
+        const briefingResult = await aiService.generatePatientBriefing(
+            timeline[0]?.patientName || patientName,
+            normalizeClinicalSpecialty(specialty || timeline[0]?.specialty || 'psicologia'),
+            clinician || timeline[0]?.clinicianProfile || timeline[0]?.clinicianName,
+            mapTimelineForBriefing(timeline)
+        );
+
+        const generated: PatientBriefing = normalizeBriefingRow({
+            id: latestCandidate?.id || generateUuid(),
+            owner_user_id: latestCandidate?.owner_user_id || null,
+            normalized_patient_name: normalizePatientName(patientName || timeline[0]?.patientName || ''),
+            patient_name: timeline[0]?.patientName || patientName || 'Sin nombre',
+            specialty: normalizeClinicalSpecialty(specialty || timeline[0]?.specialty || 'psicologia'),
+            clinician_profile: normalizePsychologyClinicianProfile(clinician || timeline[0]?.clinicianProfile || undefined) || latestCandidate?.clinician_profile || null,
+            clinician_name: displayPsychologyClinician(clinician || timeline[0]?.clinicianName || latestCandidate?.clinician_name || undefined) || latestCandidate?.clinician_name || null,
+            source_kind: sourceKind,
+            summary_text: briefingResult.data,
+            latest_consultation_at: latestConsultationAt,
+            generated_from_count: timeline.length,
+            generated_from_record_ids: getBriefingRecordIds(timeline),
+            model: briefingResult.model,
+            status: 'ready',
+            created_at: latestCandidate?.created_at || nowIso(),
+            updated_at: nowIso()
+        });
+
+        await db.patient_briefings.put(generated);
+        await upsertPatientBriefingToCloud(generated);
+        return generated;
+    } catch (error) {
+        try {
+            const timeline = await getPatientTimeline(patientName, specialty, clinician);
+            if (!timeline.length) return null;
+            const latestConsultationAt = timeline[0]?.consultationAt || nowIso();
+            const candidates = await getPatientBriefingCandidates(patientName, specialty, clinician);
+            const latestCandidate = candidates.sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+            const failedRow: PatientBriefing = normalizeBriefingRow({
+                id: latestCandidate?.id || generateUuid(),
+                owner_user_id: latestCandidate?.owner_user_id || null,
+                normalized_patient_name: normalizePatientName(patientName || timeline[0]?.patientName || ''),
+                patient_name: timeline[0]?.patientName || patientName || 'Sin nombre',
+                specialty: normalizeClinicalSpecialty(specialty || timeline[0]?.specialty || 'psicologia'),
+                clinician_profile: normalizePsychologyClinicianProfile(clinician || timeline[0]?.clinicianProfile || undefined) || latestCandidate?.clinician_profile || null,
+                clinician_name: displayPsychologyClinician(clinician || timeline[0]?.clinicianName || latestCandidate?.clinician_name || undefined) || latestCandidate?.clinician_name || null,
+                source_kind: getBriefingSourceKind(timeline),
+                summary_text: '',
+                latest_consultation_at: latestConsultationAt,
+                generated_from_count: timeline.length,
+                generated_from_record_ids: getBriefingRecordIds(timeline),
+                model: 'groq:briefing',
+                status: 'failed',
+                created_at: latestCandidate?.created_at || nowIso(),
+                updated_at: nowIso()
+            });
+            await db.patient_briefings.put(failedRow);
+            await upsertPatientBriefingToCloud(failedRow);
+        } catch (secondaryError) {
+            console.error('Error storing failed patient briefing:', secondaryError);
+        }
+        console.error('Error ensuring patient briefing:', error);
+        return null;
+    }
+};
+
 export const searchMedicalRecords = async (query: string): Promise<MedicalRecord[]> => {
     try {
         const lowerQuery = query.toLowerCase();
@@ -218,23 +770,118 @@ export const searchMedicalRecords = async (query: string): Promise<MedicalRecord
     }
 };
 
+const getAllUnifiedTimelineItems = async (): Promise<PatientTimelineItem[]> => {
+    const [currentRecords, legacyRecords] = await Promise.all([
+        db.medical_records.orderBy('updated_at').reverse().toArray(),
+        db.legacy_clinical_records.orderBy('updated_at').reverse().toArray()
+    ]);
+
+    return [
+        ...currentRecords.map(mapCurrentRecordToTimelineItem),
+        ...legacyRecords.map(mapLegacyRecordToTimelineItem)
+    ].filter((item) => Boolean(cleanText(item.patientName)));
+};
+
+export const searchPatientTimeline = async (query: string, specialty?: string, clinician?: string): Promise<PatientTimelineGroup[]> => {
+    try {
+        const normalizedQuery = normalizePatientName(query || '');
+        const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
+        const normalizedClinician = clinician ? normalizePsychologyClinicianProfile(clinician) : undefined;
+        const allItems = await getAllUnifiedTimelineItems();
+        const filteredItems = allItems.filter((item) => {
+            if (normalizedSpecialty && normalizeClinicalSpecialty(item.specialty) !== normalizedSpecialty) {
+                return false;
+            }
+            if (normalizedClinician && normalizedSpecialty === 'psicologia') {
+                const itemClinician = getNormalizedTimelineClinician(item);
+                if (itemClinician !== normalizedClinician) return false;
+            }
+            if (!normalizedQuery) return true;
+            const haystack = normalizeKey([
+                item.patientName,
+                item.medicalHistory,
+                item.clinicianName || '',
+                item.sourceEmail || ''
+            ].join(' '));
+            return haystack.includes(normalizedQuery);
+        });
+
+        return buildPatientGroups(filteredItems);
+    } catch (error) {
+        console.error('Error searching patient timeline:', error);
+        return [];
+    }
+};
+
+export const getPatientTimeline = async (
+    patientName: string,
+    specialty?: string,
+    clinician?: string
+): Promise<PatientTimelineItem[]> => {
+    try {
+        const normalizedName = normalizePatientName(patientName || '');
+        if (!normalizedName) return [];
+        const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
+        const normalizedClinician = clinician ? normalizePatientName(clinician) : '';
+        const items = await getAllUnifiedTimelineItems();
+        return items
+            .filter((item) => {
+                if (normalizePatientName(item.patientName) !== normalizedName) return false;
+                if (normalizedSpecialty && normalizeClinicalSpecialty(item.specialty) !== normalizedSpecialty) {
+                    return false;
+                }
+                if (normalizedClinician && normalizedSpecialty === 'psicologia') {
+                    const itemClinician = getNormalizedTimelineClinician(item);
+                    if (itemClinician !== normalizedClinician) return false;
+                }
+                return true;
+            })
+            .sort((a, b) => {
+                const dateComparison = getTimelineSourceDate(b).localeCompare(getTimelineSourceDate(a));
+                if (dateComparison !== 0) return dateComparison;
+                if (!normalizedClinician) return 0;
+                const aMatch = normalizePatientName(a.clinicianName || '') === normalizedClinician;
+                const bMatch = normalizePatientName(b.clinicianName || '') === normalizedClinician;
+                if (aMatch === bMatch) return 0;
+                return bMatch ? 1 : -1;
+            });
+    } catch (error) {
+        console.error('Error getting patient timeline:', error);
+        return [];
+    }
+};
+
+export const buildPsychologyCaseSummary = async (
+    patientName: string,
+    clinician?: string
+): Promise<PatientCaseSummary | null> => {
+    try {
+        const timeline = await getPatientTimeline(patientName, 'psicologia', clinician);
+        if (!timeline.length) return null;
+        return buildCaseSummaryFromTimeline(patientName, timeline);
+    } catch (error) {
+        console.error('Error building psychology case summary:', error);
+        return null;
+    }
+};
+
 export const getPatientNameSuggestions = async (
     query: string,
     limit: number = 8
 ): Promise<PatientNameSuggestion[]> => {
     try {
         const normalizedQuery = normalizePatientName(query);
-        const rows = await db.medical_records.orderBy('updated_at').reverse().toArray();
+        const rows = await getAllUnifiedTimelineItems();
         const buckets = new Map<string, PatientNameSuggestion>();
 
         rows.forEach((record, index) => {
-            const rawName = (record.patient_name || '').trim();
+            const rawName = (record.patientName || '').trim();
             if (!rawName || isTechnicalPatientName(rawName)) return;
 
             const normalizedName = normalizePatientName(rawName);
             if (!normalizedName) return;
 
-            const lastUsedAt = record.updated_at || record.created_at || nowIso();
+            const lastUsedAt = record.consultationAt || nowIso();
             const recencyBonus = Math.max(0, 80 - index);
             const baseScore = normalizedQuery
                 ? normalizedName === normalizedQuery
@@ -329,7 +976,7 @@ export const syncFromCloud = async (): Promise<number> => {
 
     try {
         console.log('[Cloud Sync] Checking for new records...');
-        const [medicalResult, historyResult] = await Promise.all([
+        const [medicalResult, historyResult, legacyResult, briefingResult] = await Promise.all([
             client
                 .from('medical_records')
                 .select('*')
@@ -337,11 +984,21 @@ export const syncFromCloud = async (): Promise<number> => {
             client
                 .from('consultation_histories')
                 .select('*')
-                .order('created_at', { ascending: false })
+                .order('created_at', { ascending: false }),
+            client
+                .from('legacy_clinical_records')
+                .select('*')
+                .order('consultation_at', { ascending: false }),
+            client
+                .from('patient_briefings')
+                .select('*')
+                .order('updated_at', { ascending: false })
         ]);
 
         const cloudRecords = medicalResult.data || [];
         const cloudHistories = historyResult.data || [];
+        const cloudLegacyRecords = legacyResult.data || [];
+        const cloudBriefings = briefingResult.data || [];
 
         if (medicalResult.error) {
             console.error('[Cloud Sync] Fetch failed:', medicalResult.error);
@@ -350,12 +1007,24 @@ export const syncFromCloud = async (): Promise<number> => {
         if (historyResult.error) {
             console.warn('[Cloud Sync] consultation_histories fetch failed:', historyResult.error.message);
         }
+        if (legacyResult.error) {
+            console.warn('[Cloud Sync] legacy_clinical_records fetch failed:', legacyResult.error.message);
+        }
+        if (briefingResult.error) {
+            console.warn('[Cloud Sync] patient_briefings fetch failed:', briefingResult.error.message);
+        }
 
         const localRecords = await db.medical_records.toArray();
         const localByUuid = new Map(localRecords.map(r => [r.record_uuid, r]));
         const knownAuditIds = new Set(localRecords.map((record) => String(record.audit_id || '').trim()).filter(Boolean));
+        const localLegacyRecords = await db.legacy_clinical_records.toArray();
+        const localLegacyById = new Map(localLegacyRecords.map((record) => [record.id, record]));
+        const localBriefings = await db.patient_briefings.toArray();
+        const localBriefingsById = new Map(localBriefings.map((record) => [record.id, record]));
 
         const newRecords: any[] = [];
+        const newLegacyRecords: LegacyClinicalRecord[] = [];
+        const newBriefings: PatientBriefing[] = [];
         let addedCount = 0;
 
         for (const cloudRec of cloudRecords) {
@@ -433,9 +1102,102 @@ export const syncFromCloud = async (): Promise<number> => {
             addedCount++;
         }
 
+        for (const legacy of cloudLegacyRecords) {
+            const legacyId = String(legacy.id || legacy.dedupe_key || '').trim();
+            if (!legacyId) continue;
+            const consultationAt = String(legacy.consultation_at || legacy.created_at || legacy.updated_at || nowIso());
+            const updatedAt = String(legacy.updated_at || legacy.created_at || consultationAt || nowIso());
+            const normalizedLegacy: LegacyClinicalRecord = {
+                id: legacyId,
+                dedupe_key: String(legacy.dedupe_key || legacyId),
+                source_csv: legacy.source_csv || null,
+                import_batch: legacy.import_batch || null,
+                source_row_id: typeof legacy.source_row_id === 'number' ? legacy.source_row_id : Number(legacy.source_row_id || 0) || null,
+                source_email: legacy.source_email || null,
+                specialist_name: legacy.specialist_name || null,
+                clinician_profile: legacy.clinician_profile || null,
+                specialty: legacy.specialty || null,
+                external_contact_id: legacy.external_contact_id || null,
+                patient_name: String(legacy.patient_name || 'Sin nombre').trim() || 'Sin nombre',
+                consultation_at: consultationAt,
+                medical_history: String(legacy.medical_history || ''),
+                original_medical_history: legacy.original_medical_history || legacy.medical_history || '',
+                raw_row: safeRecord(legacy.raw_row) || legacy.raw_row || null,
+                created_at: String(legacy.created_at || consultationAt),
+                updated_at: updatedAt
+            };
+            const localLegacy = localLegacyById.get(legacyId);
+            if (!localLegacy) {
+                newLegacyRecords.push(normalizedLegacy);
+                localLegacyById.set(legacyId, normalizedLegacy);
+                addedCount++;
+                continue;
+            }
+            const existingUpdatedAt = localLegacy.updated_at || localLegacy.consultation_at || '';
+            if (updatedAt > existingUpdatedAt) {
+                await db.legacy_clinical_records.put(normalizedLegacy);
+                localLegacyById.set(legacyId, normalizedLegacy);
+            }
+        }
+
+        for (const briefing of cloudBriefings) {
+            const briefingId = String(briefing.id || '').trim();
+            if (!briefingId) continue;
+
+            const normalizedBriefing = normalizeBriefingRow({
+                id: briefingId,
+                owner_user_id: briefing.owner_user_id || null,
+                normalized_patient_name: briefing.normalized_patient_name || briefing.patient_name || '',
+                patient_name: briefing.patient_name || 'Sin nombre',
+                specialty: briefing.specialty || 'psicologia',
+                clinician_profile: briefing.clinician_profile || null,
+                clinician_name: briefing.clinician_name || null,
+                source_kind: briefing.source_kind || 'current',
+                summary_text: briefing.summary_text || '',
+                latest_consultation_at: briefing.latest_consultation_at || briefing.updated_at || briefing.created_at || nowIso(),
+                generated_from_count: typeof briefing.generated_from_count === 'number'
+                    ? briefing.generated_from_count
+                    : Number(briefing.generated_from_count || 0) || 0,
+                generated_from_record_ids: Array.isArray(briefing.generated_from_record_ids)
+                    ? briefing.generated_from_record_ids
+                        .map((value: string) => String(value || '').trim())
+                        .filter(Boolean)
+                    : [],
+                model: briefing.model || 'unknown',
+                status: briefing.status || 'ready',
+                created_at: briefing.created_at || briefing.updated_at || nowIso(),
+                updated_at: briefing.updated_at || briefing.created_at || nowIso()
+            });
+
+            const localBriefing = localBriefingsById.get(briefingId);
+            if (!localBriefing) {
+                newBriefings.push(normalizedBriefing);
+                localBriefingsById.set(briefingId, normalizedBriefing);
+                addedCount++;
+                continue;
+            }
+
+            const existingUpdatedAt = localBriefing.updated_at || localBriefing.created_at || '';
+            if ((normalizedBriefing.updated_at || '') > existingUpdatedAt) {
+                await db.patient_briefings.put(normalizedBriefing);
+                localBriefingsById.set(briefingId, normalizedBriefing);
+            }
+        }
+
         if (newRecords.length > 0) {
             await db.medical_records.bulkAdd(newRecords);
-            console.log(`[Cloud Sync] Imported ${addedCount} records from cloud.`);
+        }
+
+        if (newLegacyRecords.length > 0) {
+            await db.legacy_clinical_records.bulkPut(newLegacyRecords);
+        }
+
+        if (newBriefings.length > 0) {
+            await db.patient_briefings.bulkPut(newBriefings);
+        }
+
+        if (newRecords.length > 0 || newLegacyRecords.length > 0 || newBriefings.length > 0) {
+            console.log(`[Cloud Sync] Imported ${newRecords.length} records, ${newLegacyRecords.length} legacy records and ${newBriefings.length} briefings from cloud.`);
         } else {
             console.log('[Cloud Sync] Local DB is up to date.');
         }

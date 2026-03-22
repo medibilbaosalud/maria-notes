@@ -23,6 +23,45 @@ export interface MedicalRecord {
     updated_at?: string; // Used for ordering and cloud conflict resolution
 }
 
+export interface LegacyClinicalRecord {
+    id: string;
+    dedupe_key: string;
+    source_csv?: string | null;
+    import_batch?: string | null;
+    source_row_id?: number | null;
+    source_email?: string | null;
+    specialist_name?: string | null;
+    clinician_profile?: string | null;
+    specialty?: string | null;
+    external_contact_id?: string | null;
+    patient_name: string;
+    consultation_at?: string | null;
+    medical_history: string;
+    original_medical_history?: string | null;
+    raw_row?: Record<string, unknown> | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface PatientBriefing {
+    id: string;
+    owner_user_id?: string | null;
+    normalized_patient_name: string;
+    patient_name: string;
+    specialty: string;
+    clinician_profile?: string | null;
+    clinician_name?: string | null;
+    source_kind: 'current' | 'legacy' | 'mixed';
+    summary_text: string;
+    latest_consultation_at: string;
+    generated_from_count: number;
+    generated_from_record_ids: string[];
+    model: string;
+    status: 'ready' | 'failed' | 'stale';
+    created_at: string;
+    updated_at: string;
+}
+
 export interface LabTestLog {
     id?: number;
     test_name: string;
@@ -324,6 +363,8 @@ export interface AiImprovementLesson {
 
 const db = new Dexie('MariaNotesDB') as Dexie & {
     medical_records: EntityTable<MedicalRecord, 'id'>;
+    legacy_clinical_records: EntityTable<LegacyClinicalRecord, 'id'>;
+    patient_briefings: EntityTable<PatientBriefing, 'id'>;
     lab_test_logs: EntityTable<LabTestLog, 'id'>;
     pipeline_jobs: EntityTable<PipelineJob, 'id'>;
     audit_outbox: EntityTable<AuditOutboxItem, 'id'>;
@@ -399,6 +440,37 @@ db.version(6).stores({
 
 db.version(7).stores({
     medical_records: '++id, record_uuid, idempotency_key, patient_name, output_tier, source_session_id, created_at, updated_at',
+    lab_test_logs: '++id, test_name, created_at',
+    pipeline_jobs: '++id, session_id, status, result_status, next_attempt_at, updated_at',
+    audit_outbox: '++id, status, next_attempt_at, created_at, updated_at',
+    consultation_sessions: '++id, session_id, status, next_attempt_at, updated_at, ttl_expires_at',
+    audio_segments: '++id, [session_id+batch_index], session_id, batch_index, status, is_final, updated_at',
+    transcript_segments: '++id, [session_id+batch_index], session_id, batch_index, status, updated_at',
+    extraction_segments: '++id, [session_id+batch_index], session_id, batch_index, status, updated_at',
+    pipeline_failures: '++id, session_id, stage, created_at',
+    ai_learning_events: '++id, record_id, audit_id, session_id, signature_hash, created_at',
+    ai_improvement_lessons: '++id, record_id, improvement_category, created_at'
+});
+
+db.version(8).stores({
+    medical_records: '++id, record_uuid, idempotency_key, patient_name, output_tier, source_session_id, created_at, updated_at',
+    legacy_clinical_records: 'id, patient_name, specialty, clinician_profile, consultation_at, updated_at, source_email',
+    lab_test_logs: '++id, test_name, created_at',
+    pipeline_jobs: '++id, session_id, status, result_status, next_attempt_at, updated_at',
+    audit_outbox: '++id, status, next_attempt_at, created_at, updated_at',
+    consultation_sessions: '++id, session_id, status, next_attempt_at, updated_at, ttl_expires_at',
+    audio_segments: '++id, [session_id+batch_index], session_id, batch_index, status, is_final, updated_at',
+    transcript_segments: '++id, [session_id+batch_index], session_id, batch_index, status, updated_at',
+    extraction_segments: '++id, [session_id+batch_index], session_id, batch_index, status, updated_at',
+    pipeline_failures: '++id, session_id, stage, created_at',
+    ai_learning_events: '++id, record_id, audit_id, session_id, signature_hash, created_at',
+    ai_improvement_lessons: '++id, record_id, improvement_category, created_at'
+});
+
+db.version(9).stores({
+    medical_records: '++id, record_uuid, idempotency_key, patient_name, output_tier, source_session_id, created_at, updated_at',
+    legacy_clinical_records: 'id, patient_name, specialty, clinician_profile, consultation_at, updated_at, source_email',
+    patient_briefings: 'id, normalized_patient_name, specialty, clinician_profile, latest_consultation_at, updated_at, status',
     lab_test_logs: '++id, test_name, created_at',
     pipeline_jobs: '++id, session_id, status, result_status, next_attempt_at, updated_at',
     audit_outbox: '++id, status, next_attempt_at, created_at, updated_at',

@@ -110,6 +110,17 @@ type TranscriptionOptions = {
     clinicianName?: string;
 };
 
+type BriefingTimelineItem = {
+    id: string;
+    source: 'current' | 'legacy';
+    patientName: string;
+    specialty: string;
+    clinicianProfile?: string;
+    clinicianName?: string;
+    consultationAt: string;
+    medicalHistory: string;
+};
+
 type TranscriptionDebugStep = {
     name: string;
     started_at: string;
@@ -136,6 +147,8 @@ type InvocationCounters = {
 };
 
 const SERVER_TEXT_MODEL = 'gemini:gemini-3-flash-preview';
+const SERVER_GROQ_TEXT_MODEL = 'groq:chat';
+const SERVER_GROQ_BRIEFING_MODEL = 'groq:briefing';
 const SERVER_TRANSCRIPTION_MODEL = 'groq:whisper-large-v3-turbo';
 const AUDIO_BLOB_UPLOAD_ENABLED = String(import.meta.env.VITE_AUDIO_BLOB_UPLOAD_ENABLED || 'true').toLowerCase() === 'true';
 const BLOB_UPLOAD_TIMEOUT_MS = 45_000;
@@ -624,7 +637,7 @@ export class AIService {
         specialty: ClinicalSpecialtyId = 'otorrino',
         clinicianName?: string
     ): Promise<AIResult<string>> {
-        this.emitInvocation('report', 'report_generation', 'start', SERVER_TEXT_MODEL);
+        this.emitInvocation('report', 'report_generation', 'start', SERVER_GROQ_TEXT_MODEL);
         try {
             const learningContext = await buildLearningPayload(specialty, 'medical_report', 'generation');
             const result = await postJson<{
@@ -651,9 +664,47 @@ export class AIService {
             });
             return { data: result.text, model: result.model };
         } catch (error) {
-            this.emitInvocation('report', 'report_generation', 'error', SERVER_TEXT_MODEL, error, {
+            this.emitInvocation('report', 'report_generation', 'error', SERVER_GROQ_TEXT_MODEL, error, {
                 specialty,
                 artifact_type: 'medical_report'
+            });
+            throw error;
+        }
+    }
+
+    async generatePatientBriefing(
+        patientName: string,
+        specialty: ClinicalSpecialtyId,
+        clinicianName: string | undefined,
+        timelineItems: BriefingTimelineItem[],
+        signal?: AbortSignal
+    ): Promise<AIResult<string>> {
+        this.emitInvocation('patient_briefing', 'briefing_generation', 'start', SERVER_GROQ_BRIEFING_MODEL);
+        try {
+            const result = await postJson<{
+                text: string;
+                model: string;
+                audit_trace?: {
+                    thought_summary?: string;
+                    thought_signature?: string;
+                };
+            }>('/api/ai/generate-briefing', {
+                patientName,
+                consultationType: specialty,
+                clinicianName,
+                timelineItems
+            }, signal);
+            this.emitInvocation('patient_briefing', 'briefing_generation', 'success', result.model, undefined, {
+                specialty,
+                artifact_type: 'patient_briefing',
+                response_preview: result.text.slice(0, 240),
+                estimated_tokens: this.estimateTokens(result.text)
+            });
+            return { data: result.text, model: result.model };
+        } catch (error) {
+            this.emitInvocation('patient_briefing', 'briefing_generation', 'error', SERVER_GROQ_BRIEFING_MODEL, error, {
+                specialty,
+                artifact_type: 'patient_briefing'
             });
             throw error;
         }
@@ -667,7 +718,7 @@ export class AIService {
         specialty: ClinicalSpecialtyId = 'otorrino',
         clinicianName?: string
     ): Promise<AIResult<string>> {
-        this.emitInvocation('generation', 'section_regeneration', 'start', SERVER_TEXT_MODEL);
+        this.emitInvocation('generation', 'section_regeneration', 'start', SERVER_GROQ_TEXT_MODEL);
         try {
             const learningContext = await buildLearningPayload(specialty, 'medical_history', sectionTitle || 'generation');
             const result = await postJson<{
@@ -699,7 +750,7 @@ export class AIService {
                 model: result.model
             };
         } catch (error) {
-            this.emitInvocation('generation', 'section_regeneration', 'error', SERVER_TEXT_MODEL, error, {
+            this.emitInvocation('generation', 'section_regeneration', 'error', SERVER_GROQ_TEXT_MODEL, error, {
                 specialty,
                 artifact_type: 'medical_history'
             });
