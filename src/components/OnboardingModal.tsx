@@ -5,7 +5,6 @@ import {
     Clock3,
     ChevronRight,
     FileText,
-    Layers3,
     Mic,
     PlayCircle
 } from 'lucide-react';
@@ -30,38 +29,31 @@ interface TunnelSlide {
 
 const PSYCHOLOGY_SLIDES: TunnelSlide[] = [
     {
-        id: 'captura',
+        id: 'consulta',
         icon: Mic,
-        headline: 'Habla con tu paciente, Maria Notes escucha por ti',
-        body: 'Pulsa grabar, centra tu atencion en la sesion y al terminar tendras la historia psicologica organizada y lista para revisar.',
+        headline: 'Siempre empiezas en Consulta',
+        body: 'Escribes el nombre del paciente y pulsas grabar. Maria Notes escucha por ti y al terminar te deja la historia lista para revisar.',
         accent: 'sunrise'
     },
     {
-        id: 'briefing',
+        id: 'contexto',
         icon: Clock3,
-        headline: 'Antes de empezar, tendras un briefing de 30 segundos',
-        body: 'Si el paciente ya ha pasado por consulta, veras un resumen breve con ultima sesion, foco actual, puntos pendientes y alertas explicitas para retomar rapido el caso.',
+        headline: 'Si el paciente ya existe, veras su contexto antes de grabar',
+        body: 'Antes de empezar tendras un resumen corto para retomar el caso rapido y no entrar a la sesion en frio.',
         accent: 'teal'
     },
     {
-        id: 'timeline',
-        icon: Layers3,
-        headline: 'Ahora el historial es una linea temporal real del caso',
-        body: 'Hemos unido las consultas actuales con el historico importado para que puedas entender la evolucion del paciente sin releer notas sueltas una por una.',
-        accent: 'paper'
-    },
-    {
-        id: 'hub',
         icon: FileText,
-        headline: 'Case Hub: foco, temas recurrentes y acuerdos abiertos',
-        body: 'Al abrir un paciente veras continuidad clinica util de verdad: foco principal, temas recurrentes, tareas pendientes y profesionales que lo han visto.',
+        id: 'historial',
+        headline: 'En Historial entiendes el caso completo',
+        body: 'Tienes una vista unica por paciente con resumen del caso y linea temporal para releer la evolucion sin perderte.',
         accent: 'sunrise'
     },
     {
         id: 'aprende',
         icon: Brain,
-        headline: 'Cada correccion que haces afina el estilo de la app',
-        body: 'Si editas una seccion, Maria Notes aprende tu criterio clinico y se acerca mas a tu forma real de escribir y estructurar la historia.',
+        headline: 'Cuando corriges, Maria aprende tu estilo',
+        body: 'Si cambias una seccion, la app se va acercando a tu manera real de escribir y revisar la historia clinica.',
         accent: 'paper'
     }
 ];

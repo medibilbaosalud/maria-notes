@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { getSimulationDataForSpecialty, simulationData, type SimulationPayload } from './simulationData.ts';
+import { getSimulationDataForSpecialty, simulationData, type SimulationPayload } from './simulationData';
 import type { ClinicalSpecialtyId } from '../../clinical/specialties';
 
 type SimulationStepId =
@@ -10,10 +10,8 @@ type SimulationStepId =
     | 'move_to_history'
     | 'click_history'
     | 'move_to_demo_patient'
-    | 'focus_briefing_card'
     | 'focus_case_hub'
     | 'focus_timeline'
-    | 'select_legacy_timeline_item'
     | 'move_to_use_context'
     | 'click_use_context'
     | 'move_to_record'
@@ -60,7 +58,7 @@ export const useSimulation = () => {
     return context;
 };
 
-const typeIntoInput = (inputId: string, value: string, intervalMs = 80) => {
+const typeIntoInput = (inputId: string, value: string, intervalMs = 85) => {
     const el = document.getElementById(inputId) as HTMLInputElement | null;
     if (!el) return;
     let index = 0;
@@ -82,7 +80,7 @@ const typeIntoInput = (inputId: string, value: string, intervalMs = 80) => {
 
 const clickById = (id: string) => {
     const el = document.getElementById(id);
-    if (el) {
+    if (el instanceof HTMLElement) {
         el.click();
     }
 };
@@ -96,21 +94,21 @@ const OTORRINO_SCRIPT: SimulationStep[] = [
     {
         id: 'move_to_input',
         targetId: 'patient-name-input',
-        duration: 2000,
+        duration: 2200,
         caption: 'Primero identificamos al paciente.'
     },
     {
         id: 'type_patient_name',
         targetId: 'patient-name-input',
-        duration: 3500,
-        action: () => typeIntoInput('patient-name-input', 'Paciente Demo (Simulación)', 80),
-        caption: 'Escribimos el nombre del paciente...'
+        duration: 3600,
+        action: () => typeIntoInput('patient-name-input', 'Paciente Demo (Simulacion)', 80),
+        caption: 'Escribimos el nombre del paciente.'
     },
     {
         id: 'move_to_record',
         targetId: 'main-record-btn',
-        duration: 2000,
-        caption: 'Iniciamos la consulta para que Maria Notes empiece a escuchar.'
+        duration: 2200,
+        caption: 'Empezamos la consulta y Maria Notes se pone a escuchar.'
     },
     {
         id: 'click_record',
@@ -121,82 +119,79 @@ const OTORRINO_SCRIPT: SimulationStep[] = [
     {
         id: 'processing_1',
         duration: 5000,
-        caption: '1. Procesando audio: la IA transcribe y estructura los datos médicos al instante.'
+        caption: 'La IA transcribe y estructura los datos medicos en segundo plano.'
     },
     {
         id: 'processing_2',
         duration: 5000,
-        caption: '2. Validación clínica: el sistema audita el resultado buscando alucinaciones o errores.'
+        caption: 'Despues valida el borrador para que partas de una nota segura y editable.'
     },
     {
         id: 'wait_for_highlight',
         targetId: 'uncertainty-highlight-0',
-        duration: 4000,
-        caption: "3. Detección de dudas: la IA marca en amarillo un dato ambiguo para tu revisión."
+        duration: 4200,
+        caption: 'Si detecta una duda, la resalta para que la confirmes con evidencia.'
     },
     {
         id: 'click_highlight',
         targetId: 'uncertainty-highlight-0',
-        duration: 1500,
+        duration: 1400,
         action: () => clickById('uncertainty-highlight-0'),
-        caption: 'Hacemos clic para ver la evidencia original...'
+        caption: 'Abrimos la evidencia original.'
     },
     {
         id: 'wait_for_modal',
         targetId: 'evidence-modal-confirm-btn',
-        duration: 5000,
-        caption: 'Aquí ves la transcripción exacta. Tú tienes la última palabra sobre qué guardar.'
+        duration: 4200,
+        caption: 'Tu sigues teniendo la ultima palabra sobre lo que se guarda.'
     },
     {
         id: 'click_confirm',
         targetId: 'evidence-modal-confirm-btn',
-        duration: 1500,
-        action: () => clickById('evidence-modal-confirm-btn'),
-        caption: 'Validamos el dato correcto.'
+        duration: 1200,
+        action: () => clickById('evidence-modal-confirm-btn')
     },
     {
         id: 'move_to_edit',
         targetId: 'edit-mode-btn',
-        duration: 3000,
-        caption: "¿No te gusta el estilo o falta algo? Dale a 'Editar'."
+        duration: 2800,
+        caption: 'Si quieres, ajustas la redaccion con tu propio criterio clinico.'
     },
     {
         id: 'click_edit',
         targetId: 'edit-mode-btn',
-        duration: 1500,
-        action: () => clickById('edit-mode-btn'),
-        caption: 'Entrando en modo edición...'
+        duration: 1200,
+        action: () => clickById('edit-mode-btn')
     },
     {
         id: 'simulate_typing',
         targetId: 'save-edit-btn',
-        duration: 6000,
-        caption: "Modificas el texto... la IA observa cómo prefieres estructurar la nota."
+        duration: 5200,
+        caption: 'Cada correccion ayuda a que Maria se adapte mejor a tu estilo.'
     },
     {
         id: 'click_save',
         targetId: 'save-edit-btn',
-        duration: 2000,
-        action: () => clickById('save-edit-btn'),
-        caption: 'Guardando cambios...'
+        duration: 1400,
+        action: () => clickById('save-edit-btn')
     },
     {
         id: 'finish_learning',
-        duration: 7000,
-        caption: 'Analizando correcciones. La próxima nota usará mejor tu estructura preferida.'
+        duration: 5200,
+        caption: 'La siguiente nota saldra mas cerca de como tu la escribes.'
     },
     {
         id: 'move_to_feedback',
         targetId: 'feedback-score-10',
-        duration: 3000,
-        caption: 'Lo último es valorar la calidad clínica de la nota generada.'
+        duration: 2600,
+        caption: 'Solo queda valorar el resultado.'
     },
     {
         id: 'submit_feedback',
         targetId: 'feedback-submit-btn',
-        duration: 3000,
+        duration: 2200,
         action: () => clickById('feedback-submit-btn'),
-        caption: 'Enviamos la valoración para que el sistema aprenda de tus preferencias.'
+        caption: 'Y con eso queda cerrada la consulta.'
     },
     {
         id: 'finish'
@@ -206,90 +201,75 @@ const OTORRINO_SCRIPT: SimulationStep[] = [
 const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     {
         id: 'intro',
-        duration: 3200,
-        caption: 'Bienvenida, {{clinicianName}}. Vamos a enseñarte cómo Maria Notes te prepara una sesión de Psicología con continuidad real.'
+        duration: 4200,
+        caption: 'Bienvenida, {{clinicianName}}. Vamos a recorrer el flujo real de Maria Notes para que puedas usarlo desde el primer dia.'
     },
     {
         id: 'move_to_input',
         targetId: 'patient-name-input',
-        duration: 2200,
-        caption: 'Primero identificamos al paciente.'
+        duration: 2600,
+        caption: 'Siempre empiezas en Consulta. Aqui escribes el nombre del paciente.'
     },
     {
         id: 'type_patient_name',
         targetId: 'patient-name-input',
-        duration: 3800,
-        action: () => typeIntoInput('patient-name-input', 'Paciente Demo Psicología (Simulación)', 75),
-        caption: 'Escribimos el nombre y Maria Notes reconoce que ya existe contexto previo.'
+        duration: 4200,
+        action: () => typeIntoInput('patient-name-input', 'Paciente Demo Psicologia (Simulacion)', 75),
+        caption: 'Si el paciente ya existe, Maria reconoce el caso y recupera su contexto.'
     },
     {
         id: 'wait_for_briefing',
         targetId: 'recorder-context-card',
-        duration: 3200,
-        caption: 'Antes de grabar, aparece un Briefing 30s con lo último importante del caso.'
+        duration: 4200,
+        caption: 'Antes de grabar, ves un briefing corto con lo ultimo importante para retomar la sesion sin releer todo.'
     },
     {
         id: 'move_to_history',
         targetId: 'recorder-open-history-btn',
-        duration: 2600,
-        caption: 'Si quieres profundizar, puedes abrir el historial completo sin salir del flujo.'
+        duration: 3000,
+        caption: 'Si necesitas mas detalle, abres el historial completo desde aqui.'
     },
     {
         id: 'click_history',
         targetId: 'recorder-open-history-btn',
-        duration: 1400,
-        action: () => clickById('recorder-open-history-btn'),
-        caption: 'Entramos al historial unificado del paciente.'
+        duration: 1200,
+        action: () => clickById('recorder-open-history-btn')
     },
     {
         id: 'move_to_demo_patient',
         targetId: 'history-patient-card-0',
-        duration: 2600,
-        caption: 'Aquí se agrupan juntas la consulta actual y el histórico importado.'
-    },
-    {
-        id: 'focus_briefing_card',
-        targetId: 'history-briefing-card',
         duration: 3200,
-        caption: 'El mismo briefing queda guardado para que la siguiente sesión esté preparada en segundos.'
+        caption: 'En Historial tienes una vista unica por paciente. No hace falta buscar entre notas sueltas.'
     },
     {
         id: 'focus_case_hub',
         targetId: 'history-case-hub',
-        duration: 3400,
-        caption: 'Debajo tienes el Case Hub: foco principal, temas recurrentes, acuerdos y profesionales implicados.'
+        duration: 4200,
+        caption: 'Arriba ves el resumen util del caso: foco principal, acuerdos abiertos y quien lo ha visto.'
     },
     {
         id: 'focus_timeline',
         targetId: 'history-timeline-panel',
-        duration: 3000,
-        caption: 'Y aquí ves el Patient Timeline, mezclando continuidad actual e histórico importado.'
-    },
-    {
-        id: 'select_legacy_timeline_item',
-        targetId: 'history-timeline-item-1',
-        duration: 1500,
-        action: () => clickById('history-timeline-item-1'),
-        caption: 'Seleccionamos una sesión importada para reutilizarla como contexto.'
+        duration: 3800,
+        caption: 'Debajo tienes la linea temporal del caso para releer la evolucion cuando lo necesites.'
     },
     {
         id: 'move_to_use_context',
         targetId: 'history-use-context-btn',
-        duration: 2200,
-        caption: 'Con un clic volvemos a consulta usando ese histórico como memoria clínica.'
+        duration: 2800,
+        caption: 'Y cuando ya tienes el contexto claro, vuelves a Consulta con un clic.'
     },
     {
         id: 'click_use_context',
         targetId: 'history-use-context-btn',
         duration: 1200,
-        action: () => clickById('history-use-context-btn'),
-        caption: 'Volvemos a la grabación con el paciente y el contexto ya listos.'
+        action: () => clickById('history-use-context-btn')
     },
     {
         id: 'move_to_record',
         targetId: 'main-record-btn',
-        duration: 2400,
-        caption: 'Ahora sí, empezamos la consulta con todo el contexto relevante al alcance.'
+        duration: 2800,
+        caption: 'De vuelta en Consulta, ya puedes empezar la sesion con todo lo importante fresco.'
     },
     {
         id: 'click_record',
@@ -299,83 +279,80 @@ const PSYCHOLOGY_SCRIPT: SimulationStep[] = [
     },
     {
         id: 'processing_1',
-        duration: 5200,
-        caption: 'Mientras tú te centras en la conversación, Maria Notes transcribe y estructura la sesión.'
+        duration: 5400,
+        caption: 'Mientras tu te centras en la conversacion, Maria transcribe y estructura la historia.'
     },
     {
         id: 'processing_2',
-        duration: 5200,
-        caption: 'Después valida el borrador clínico para que partas de una nota segura y editable.'
+        duration: 5400,
+        caption: 'Despues valida el borrador para que partas de una nota segura y revisable.'
     },
     {
         id: 'wait_for_highlight',
         targetId: 'uncertainty-highlight-0',
-        duration: 5000,
-        caption: 'Si detecta una duda importante, la resalta para que la confirmes con evidencia.'
+        duration: 4600,
+        caption: 'Si detecta una duda importante, la resalta para que la revises con evidencia.'
     },
     {
         id: 'click_highlight',
         targetId: 'uncertainty-highlight-0',
-        duration: 1500,
+        duration: 1400,
         action: () => clickById('uncertainty-highlight-0'),
         caption: 'Abrimos la evidencia original.'
     },
     {
         id: 'wait_for_modal',
         targetId: 'evidence-modal-confirm-btn',
-        duration: 4500,
-        caption: 'Sigues teniendo la última palabra sobre lo que se guarda en la historia clínica.'
+        duration: 4600,
+        caption: 'Tu sigues teniendo la ultima palabra sobre lo que se guarda en la historia clinica.'
     },
     {
         id: 'click_confirm',
         targetId: 'evidence-modal-confirm-btn',
         duration: 1200,
-        action: () => clickById('evidence-modal-confirm-btn'),
-        caption: 'Confirmamos el dato.'
+        action: () => clickById('evidence-modal-confirm-btn')
     },
     {
         id: 'move_to_edit',
         targetId: 'edit-mode-btn',
-        duration: 2600,
-        caption: 'Si quieres, puedes ajustar la redacción con tu propio criterio terapéutico.'
+        duration: 2800,
+        caption: 'Si quieres, ajustas la redaccion con tu propio criterio terapeutico.'
     },
     {
         id: 'click_edit',
         targetId: 'edit-mode-btn',
-        duration: 1300,
-        action: () => clickById('edit-mode-btn'),
-        caption: 'Entrando en modo edición...'
+        duration: 1200,
+        action: () => clickById('edit-mode-btn')
     },
     {
         id: 'simulate_typing',
         targetId: 'save-edit-btn',
-        duration: 5000,
-        caption: 'Cada corrección ayuda a que Maria Notes se adapte a tu estilo clínico.'
+        duration: 5200,
+        caption: 'Cada correccion ayuda a que Maria se adapte mejor a tu estilo clinico.'
     },
     {
         id: 'click_save',
         targetId: 'save-edit-btn',
         duration: 1400,
-        action: () => clickById('save-edit-btn'),
-        caption: 'Guardamos tus cambios.'
+        action: () => clickById('save-edit-btn')
     },
     {
         id: 'finish_learning',
         duration: 5600,
-        caption: 'La continuidad queda guardada para la próxima sesión: briefing, timeline y contexto clínico del caso.'
+        caption: 'Y asi queda preparado el caso para la proxima sesion: contexto claro, historial vivo y una nota cada vez mas tuya.'
     },
     {
         id: 'move_to_feedback',
         targetId: 'feedback-score-10',
         duration: 2800,
-        caption: 'Solo queda valorar el resultado para seguir afinando el sistema.'
+        caption: 'Solo queda valorar el resultado.'
     },
     {
         id: 'submit_feedback',
         targetId: 'feedback-submit-btn',
-        duration: 2500,
+        duration: 2400,
         action: () => clickById('feedback-submit-btn'),
-        caption: 'Con esto queda cerrada la demo completa de continuidad en Psicología.'
+        caption: 'Con esto queda cerrada la demo completa.'
     },
     {
         id: 'finish'

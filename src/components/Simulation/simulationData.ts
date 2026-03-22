@@ -130,7 +130,7 @@ const psychologyDemoCaseSummary: PatientCaseSummary = {
     patientName: 'Paciente Demo Psicologia (Simulacion)',
     latestConsultationAt: '2026-03-18T17:30:00.000Z',
     sessionCount: 3,
-    clinicians: ['Ainhoa', 'June'],
+    clinicians: ['Ainhoa'],
     mainFocus: 'Ansiedad anticipatoria en el trabajo, dificultades de sueno y necesidad de recuperar sensacion de control sin sobreadaptarse.',
     recurringTopics: ['ansiedad', 'trabajo', 'sueno', 'autoestima'],
     openItems: [
@@ -146,7 +146,7 @@ const psychologyDemoTimelineGroup: PatientTimelineGroup = {
     normalizedPatientName: 'paciente demo psicologia simulacion',
     latestConsultationAt: '2026-03-18T17:30:00.000Z',
     sessionCount: 3,
-    clinicians: ['Ainhoa', 'June'],
+    clinicians: ['Ainhoa'],
     specialties: ['psicologia'],
     sourceCounts: { current: 1, legacy: 2 },
     items: [
@@ -168,13 +168,13 @@ const psychologyDemoTimelineGroup: PatientTimelineGroup = {
             source: 'legacy',
             patientName: 'Paciente Demo Psicologia (Simulacion)',
             specialty: 'psicologia',
-            clinicianProfile: 'june',
-            clinicianName: 'June',
+            clinicianProfile: 'ainhoa',
+            clinicianName: 'Ainhoa',
             consultationAt: '2025-12-05T16:00:00.000Z',
             medicalHistory: 'Primera valoracion importada. Refiere miedo intenso a equivocarse en el trabajo, sueno irregular y tendencia a exigirse por encima de lo sostenible. Objetivo terapeutico: reducir hiperalerta y volver a confiar en su criterio.',
             isEditable: false,
             sourceLabel: 'Historico importado',
-            sourceEmail: 'juneamoressanchez@gmail.com'
+            sourceEmail: 'adelgadopsico@gmail.com'
         },
         {
             id: 'demo-psy-current',

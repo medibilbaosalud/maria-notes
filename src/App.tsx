@@ -386,10 +386,8 @@ const AppContent = () => {
             const historySteps = [
                 'click_history',
                 'move_to_demo_patient',
-                'focus_briefing_card',
                 'focus_case_hub',
                 'focus_timeline',
-                'select_legacy_timeline_item',
                 'move_to_use_context'
             ];
 
