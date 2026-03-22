@@ -223,7 +223,12 @@ export const Recorder: React.FC<RecorderProps> = ({
           setIsSuggestionsOpen(false);
           return;
         }
-        const next = await getPatientNameSuggestions(patientName, 8);
+        const next = await getPatientNameSuggestions(
+          patientName,
+          8,
+          selectedSpecialty,
+          selectedSpecialty === 'psicologia' ? psychologyClinicianName : 'Dra. Gotxi'
+        );
         if (currentRequest !== suggestionRequestRef.current) return;
         setSuggestions(next);
         setHighlightedSuggestion(next.length > 0 ? 0 : -1);
@@ -236,7 +241,7 @@ export const Recorder: React.FC<RecorderProps> = ({
     }, patientName.trim().length > 0 ? 90 : 40);
 
     return () => window.clearTimeout(timer);
-  }, [patientName, isRecording]);
+  }, [patientName, isRecording, psychologyClinicianName, selectedSpecialty]);
 
   useEffect(() => {
     let cancelled = false;

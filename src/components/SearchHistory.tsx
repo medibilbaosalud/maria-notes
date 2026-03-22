@@ -99,6 +99,9 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const briefingRequestRef = useRef(0);
   const selectedGroupRef = useRef<PatientTimelineGroup | null>(null);
+  const queryRef = useRef('');
+  const syncingRef = useRef(false);
+  const cloudReadyRef = useRef(false);
   const { isCloudEnabled, isCloudAuthenticated, cloudAccessMode } = useCloudSync();
   const { isPlaying, demoData } = useSimulation();
   const demoContinuity = isPlaying
@@ -135,10 +138,14 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     );
   }, [demoContinuity]);
 
+  useEffect(() => {
+    queryRef.current = query;
+  }, [query]);
+
   const loadResults = useCallback(async (nextQuery?: string, preferredPatientName?: string) => {
     setIsLoading(true);
     try {
-      const effectiveQuery = typeof nextQuery === 'string' ? nextQuery : query;
+      const effectiveQuery = typeof nextQuery === 'string' ? nextQuery : queryRef.current;
       const groups = demoContinuity
         ? getDemoGroups(effectiveQuery)
         : await searchPatientTimeline(effectiveQuery, 'psicologia', psychologyClinicianName);
@@ -157,10 +164,11 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [demoContinuity, getDemoGroups, psychologyClinicianName, query]);
+  }, [demoContinuity, getDemoGroups, psychologyClinicianName]);
 
   const refreshResults = useCallback(async () => {
-    if (isSyncing) return;
+    if (syncingRef.current) return;
+    syncingRef.current = true;
     setIsSyncing(true);
     try {
       if (!demoContinuity && isCloudSyncEnabled()) {
@@ -168,16 +176,22 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       }
       await loadResults();
     } finally {
+      syncingRef.current = false;
       setIsSyncing(false);
     }
-  }, [demoContinuity, isSyncing, loadResults]);
+  }, [demoContinuity, loadResults]);
 
   useEffect(() => {
     void refreshResults();
-  }, []);
+  }, [refreshResults]);
 
   useEffect(() => {
-    if (!isCloudEnabled || !isCloudAuthenticated || demoContinuity) return;
+    const cloudReady = isCloudEnabled && isCloudAuthenticated && !demoContinuity;
+    if (!cloudReady || cloudReadyRef.current) {
+      cloudReadyRef.current = cloudReady;
+      return;
+    }
+    cloudReadyRef.current = true;
     void refreshResults();
   }, [demoContinuity, isCloudAuthenticated, isCloudEnabled, refreshResults]);
 

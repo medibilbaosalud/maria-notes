@@ -105,6 +105,38 @@ const getNormalizedTimelineClinician = (item: Pick<PatientTimelineItem, 'clinici
     return normalizePsychologyClinicianProfile(item.clinicianProfile || item.clinicianName || undefined);
 };
 
+const getNormalizedScopedClinician = (specialty: string | undefined, clinician?: string): string | undefined => {
+    const normalizedSpecialty = normalizeClinicalSpecialty(specialty || 'otorrino');
+    if (normalizedSpecialty === 'psicologia') {
+        return normalizePsychologyClinicianProfile(clinician);
+    }
+
+    const normalized = normalizeKey(String(clinician || ''));
+    if (!normalized) return undefined;
+    if (normalized.includes('gotxi') || normalized.includes('itziar')) return 'gotxi';
+    return normalized;
+};
+
+const matchesTimelineClinicianScope = (
+    item: Pick<PatientTimelineItem, 'specialty' | 'clinicianProfile' | 'clinicianName'>,
+    specialty?: string,
+    clinician?: string
+): boolean => {
+    const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
+    const scopedClinician = getNormalizedScopedClinician(normalizedSpecialty || item.specialty, clinician);
+    if (!scopedClinician) return true;
+
+    if ((normalizedSpecialty || normalizeClinicalSpecialty(item.specialty)) === 'psicologia') {
+        return getNormalizedTimelineClinician(item) === scopedClinician;
+    }
+
+    const itemClinician = normalizeKey([
+        item.clinicianProfile || '',
+        item.clinicianName || ''
+    ].join(' '));
+    return itemClinician.includes(scopedClinician);
+};
+
 const toIsoString = (value?: string | null): string => {
     const candidate = String(value || '').trim();
     return candidate || nowIso();
@@ -786,15 +818,13 @@ export const searchPatientTimeline = async (query: string, specialty?: string, c
     try {
         const normalizedQuery = normalizePatientName(query || '');
         const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
-        const normalizedClinician = clinician ? normalizePsychologyClinicianProfile(clinician) : undefined;
         const allItems = await getAllUnifiedTimelineItems();
         const filteredItems = allItems.filter((item) => {
             if (normalizedSpecialty && normalizeClinicalSpecialty(item.specialty) !== normalizedSpecialty) {
                 return false;
             }
-            if (normalizedClinician && normalizedSpecialty === 'psicologia') {
-                const itemClinician = getNormalizedTimelineClinician(item);
-                if (itemClinician !== normalizedClinician) return false;
+            if (!matchesTimelineClinicianScope(item, normalizedSpecialty || undefined, clinician)) {
+                return false;
             }
             if (!normalizedQuery) return true;
             const haystack = normalizeKey([
@@ -822,7 +852,6 @@ export const getPatientTimeline = async (
         const normalizedName = normalizePatientName(patientName || '');
         if (!normalizedName) return [];
         const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
-        const normalizedClinician = clinician ? normalizePatientName(clinician) : '';
         const items = await getAllUnifiedTimelineItems();
         return items
             .filter((item) => {
@@ -830,18 +859,18 @@ export const getPatientTimeline = async (
                 if (normalizedSpecialty && normalizeClinicalSpecialty(item.specialty) !== normalizedSpecialty) {
                     return false;
                 }
-                if (normalizedClinician && normalizedSpecialty === 'psicologia') {
-                    const itemClinician = getNormalizedTimelineClinician(item);
-                    if (itemClinician !== normalizedClinician) return false;
+                if (!matchesTimelineClinicianScope(item, normalizedSpecialty || undefined, clinician)) {
+                    return false;
                 }
                 return true;
             })
             .sort((a, b) => {
                 const dateComparison = getTimelineSourceDate(b).localeCompare(getTimelineSourceDate(a));
                 if (dateComparison !== 0) return dateComparison;
+                const normalizedClinician = getNormalizedScopedClinician(normalizedSpecialty || undefined, clinician);
                 if (!normalizedClinician) return 0;
-                const aMatch = normalizePatientName(a.clinicianName || '') === normalizedClinician;
-                const bMatch = normalizePatientName(b.clinicianName || '') === normalizedClinician;
+                const aMatch = matchesTimelineClinicianScope(a, normalizedSpecialty || undefined, clinician);
+                const bMatch = matchesTimelineClinicianScope(b, normalizedSpecialty || undefined, clinician);
                 if (aMatch === bMatch) return 0;
                 return bMatch ? 1 : -1;
             });
@@ -867,16 +896,21 @@ export const buildPsychologyCaseSummary = async (
 
 export const getPatientNameSuggestions = async (
     query: string,
-    limit: number = 8
+    limit: number = 8,
+    specialty?: string,
+    clinician?: string
 ): Promise<PatientNameSuggestion[]> => {
     try {
         const normalizedQuery = normalizePatientName(query);
+        const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
         const rows = await getAllUnifiedTimelineItems();
         const buckets = new Map<string, PatientNameSuggestion>();
 
         rows.forEach((record, index) => {
             const rawName = (record.patientName || '').trim();
             if (!rawName || isTechnicalPatientName(rawName)) return;
+            if (normalizedSpecialty && normalizeClinicalSpecialty(record.specialty) !== normalizedSpecialty) return;
+            if (!matchesTimelineClinicianScope(record, normalizedSpecialty || undefined, clinician)) return;
 
             const normalizedName = normalizePatientName(rawName);
             if (!normalizedName) return;
