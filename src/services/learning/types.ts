@@ -61,6 +61,12 @@ export interface LearningEventMetadata extends Record<string, unknown> {
     is_manual_save?: boolean;
     is_autosave?: boolean;
     manual_weight?: number;
+    doctor_feedback_text?: string;
+    doctor_score?: number | null;
+    pattern_key?: string;
+    evidence_kind?: 'explicit_reason' | 'implicit_edit';
+    example_before?: string;
+    example_after?: string;
 }
 
 export interface StructuredLearningEvent {

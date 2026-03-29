@@ -205,63 +205,6 @@ const stripSectionNoise = (text: string): string => cleanText(text)
     .replace(/^situacion actual:\s*/i, '')
     .replace(/^situación actual:\s*/i, '');
 
-const compactSentence = (text: string, maxLength: number): string => {
-    const cleaned = cleanText(text).replace(/\s+/g, ' ').trim();
-    if (!cleaned) return '';
-    if (cleaned.length <= maxLength) return cleaned;
-
-    const punctuationMatch = cleaned.slice(0, maxLength).match(/.*[.!?](?=\s|$)/);
-    if (punctuationMatch?.[0]) {
-        return punctuationMatch[0].trim();
-    }
-
-    const lastBreak = Math.max(
-        cleaned.lastIndexOf('. ', maxLength),
-        cleaned.lastIndexOf('; ', maxLength),
-        cleaned.lastIndexOf(', ', maxLength)
-    );
-    if (lastBreak > Math.floor(maxLength * 0.55)) {
-        return `${cleaned.slice(0, lastBreak).trim()}...`;
-    }
-
-    const softBreak = cleaned.lastIndexOf(' ', maxLength);
-    if (softBreak > Math.floor(maxLength * 0.6)) {
-        return `${cleaned.slice(0, softBreak).trim()}...`;
-    }
-
-    return `${cleaned.slice(0, maxLength).trim()}...`;
-};
-
-const splitListLikeText = (text: string): string[] => {
-    const cleaned = cleanText(text);
-    if (!cleaned) return [];
-
-    return cleaned
-        .replace(/\s*[•·]\s*/g, '|')
-        .replace(/\s+-\s+/g, '|')
-        .replace(/\s*;\s*/g, '|')
-        .split('|')
-        .map((part) => cleanText(part.replace(/^\d+[\.\)]\s*/, '')))
-        .filter(Boolean);
-};
-
-const uniqueCompactSnippets = (values: string[], maxLength: number, maxItems: number): string[] => {
-    const seen = new Set<string>();
-    const output: string[] = [];
-
-    for (const value of values) {
-        const compacted = compactSentence(value, maxLength);
-        if (!compacted) continue;
-        const key = normalizeKey(compacted);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        output.push(compacted);
-        if (output.length >= maxItems) break;
-    }
-
-    return output;
-};
-
 const findExplicitFocus = (text: string): string => {
     const candidates = [
         extractSnippetAfterLabel(text, 'Motivo de consulta:'),
@@ -270,41 +213,8 @@ const findExplicitFocus = (text: string): string => {
         extractSnippetAfterLabel(text, 'OT:'),
         extractSnippetAfterLabel(text, 'Objetivos terapéuticos:'),
         extractSnippetAfterLabel(text, 'Objetivos terapeuticos:')
-    ].map(stripSectionNoise)
-        .map((value) => compactSentence(value, 220))
-        .filter(Boolean);
+    ].map(stripSectionNoise).filter(Boolean);
     return candidates[0] || '';
-};
-
-const buildMainFocusFromLatest = (text: string, recurringTopics: string[]): string => {
-    const focusCandidates = [
-        extractSnippetAfterLabel(text, 'Motivo de consulta:'),
-        extractSnippetAfterLabel(text, 'MOTIVO DE CONSULTA'),
-        extractSnippetAfterLabel(text, 'Acude a consulta por'),
-        extractSnippetAfterLabel(text, 'Situación actual:'),
-        extractSnippetAfterLabel(text, 'Situacion actual:'),
-        extractSnippetAfterLabel(text, 'Síntomas:'),
-        extractSnippetAfterLabel(text, 'Sintomas:'),
-        extractSnippetAfterLabel(text, 'Sintomatología actual:'),
-        extractSnippetAfterLabel(text, 'Sintomatologia actual:'),
-        extractSnippetAfterLabel(text, 'OT:'),
-        extractSnippetAfterLabel(text, 'Objetivos terapéuticos:'),
-        extractSnippetAfterLabel(text, 'Objetivos terapeuticos:')
-    ]
-        .map(stripSectionNoise)
-        .flatMap((value) => {
-            const parts = splitListLikeText(value);
-            return parts.length > 0 ? parts : [value];
-        })
-        .filter(Boolean);
-
-    const segments = uniqueCompactSnippets(focusCandidates, 150, 2);
-    const joined = cleanText(segments.join(' · '));
-    if (joined) {
-        return compactSentence(joined, 300);
-    }
-
-    return recurringTopics[0] || 'Sin foco claro en la nota';
 };
 
 const TOPIC_KEYWORDS: Array<{ topic: string; keywords: string[] }> = [
@@ -359,13 +269,7 @@ const getOpenItems = (text: string): string[] => {
         extractSnippetAfterLabel(raw, 'Plan terapéutico:'),
         extractSnippetAfterLabel(raw, 'Plan terapeutico:'),
         extractSnippetAfterLabel(raw, 'OT:')
-    ].map(stripSectionNoise)
-        .flatMap((value) => {
-            const parts = splitListLikeText(value);
-            return parts.length > 0 ? parts : [value];
-        })
-        .map((value) => compactSentence(value, 95))
-        .filter(Boolean);
+    ].map(stripSectionNoise).filter(Boolean);
     return Array.from(new Set(candidates)).slice(0, 5);
 };
 
@@ -407,21 +311,11 @@ const getPatientBriefingCandidates = async (
 };
 
 const isBriefingCurrent = (briefing: PatientBriefing, latestConsultationAt: string): boolean => {
-    if (!latestConsultationAt) return briefing.status === 'ready' && hasCurrentBriefingVersion(briefing);
-    return briefing.status === 'ready'
-        && hasCurrentBriefingVersion(briefing)
-        && toIsoString(briefing.latest_consultation_at || '') >= toIsoString(latestConsultationAt);
+    if (!latestConsultationAt) return briefing.status === 'ready';
+    return toIsoString(briefing.latest_consultation_at || '') >= toIsoString(latestConsultationAt);
 };
 
 const createBriefingClient = () => new AIService();
-const CURRENT_BRIEFING_VERSION = 'briefing_v3';
-const withBriefingVersion = (model: string) => {
-    const cleaned = cleanText(model || '');
-    if (!cleaned) return `groq:briefing:${CURRENT_BRIEFING_VERSION}`;
-    if (cleaned.includes(CURRENT_BRIEFING_VERSION)) return cleaned;
-    return `${cleaned}:${CURRENT_BRIEFING_VERSION}`;
-};
-const hasCurrentBriefingVersion = (briefing: PatientBriefing) => cleanText(briefing.model || '').includes(CURRENT_BRIEFING_VERSION);
 
 const mapTimelineForBriefing = (items: PatientTimelineItem[]) => items.slice(0, 12).map((item) => ({
     id: item.id,
@@ -465,9 +359,7 @@ const buildCaseSummaryFromTimeline = (patientName: string, items: PatientTimelin
         .slice(0, 4);
 
     const latestFocus = latest ? findExplicitFocus(latest.medicalHistory) : '';
-    const mainFocus = latest
-        ? buildMainFocusFromLatest(latest.medicalHistory, recurringTopics)
-        : latestFocus || recurringTopics[0] || 'Sin foco claro en la nota';
+    const mainFocus = latestFocus || recurringTopics[0] || 'Sin foco claro en la nota';
 
     return {
         patientName,
@@ -643,7 +535,7 @@ export const saveMedicalRecord = async (
                     updated_at: now
                 });
                 const updated = await db.medical_records.get(existing.id);
-                if (updated) syncToCloud(updated, 'update');
+                if (updated) await syncToCloud(updated, 'update');
                 return updated ? [updated] : null;
             }
         }
@@ -658,7 +550,7 @@ export const saveMedicalRecord = async (
         const saved = await db.medical_records.get(id);
 
         // Cloud sync
-        if (saved) syncToCloud(saved, 'insert');
+        if (saved) await syncToCloud(saved, 'insert');
 
         return saved ? [saved] : null;
     } catch (error) {
@@ -780,7 +672,7 @@ export const markPatientBriefingStale = async (
             latest_consultation_at: latestConsultationAt,
             generated_from_count: timeline.length,
             generated_from_record_ids: recordIds,
-            model: withBriefingVersion(existing?.model || 'pending'),
+            model: existing?.model || 'pending',
             status: 'stale',
             created_at: existing?.created_at || nowIso(),
             updated_at: nowIso()
@@ -850,7 +742,7 @@ export const ensurePatientBriefing = async (
             latest_consultation_at: latestConsultationAt,
             generated_from_count: timeline.length,
             generated_from_record_ids: getBriefingRecordIds(timeline),
-            model: withBriefingVersion(briefingResult.model),
+            model: briefingResult.model,
             status: 'ready',
             created_at: latestCandidate?.created_at || nowIso(),
             updated_at: nowIso()
@@ -879,7 +771,7 @@ export const ensurePatientBriefing = async (
                 latest_consultation_at: latestConsultationAt,
                 generated_from_count: timeline.length,
                 generated_from_record_ids: getBriefingRecordIds(timeline),
-                model: withBriefingVersion('groq:briefing'),
+                model: 'groq:briefing',
                 status: 'failed',
                 created_at: latestCandidate?.created_at || nowIso(),
                 updated_at: nowIso()
@@ -1079,7 +971,7 @@ export const deleteMedicalRecord = async (idOrUuid: string | number): Promise<bo
         if (record?.id) await db.medical_records.delete(record.id);
 
         // Cloud sync
-        if (record) syncToCloud(record, 'delete');
+        if (record) await syncToCloud(record, 'delete');
 
         return true;
     } catch (error) {
@@ -1103,7 +995,7 @@ export const updateMedicalRecord = async (idOrUuid: string | number, updates: Pa
         const updated = await db.medical_records.get(record.id);
 
         // Cloud sync
-        if (updated) syncToCloud(updated, 'update');
+        if (updated) await syncToCloud(updated, 'update');
 
         return updated ? [updated] : null;
     } catch (error) {

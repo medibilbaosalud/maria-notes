@@ -2,14 +2,18 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowRight,
+  Calendar,
   ChevronRight,
+  Clock3,
   Copy,
   FileText,
+  Layers3,
   Printer,
   RefreshCcw,
   Search,
   Shield,
   Sparkles,
+  User,
   X
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -99,16 +103,17 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const queryRef = useRef('');
   const syncingRef = useRef(false);
   const cloudReadyRef = useRef(false);
-  const detailScrollRef = useRef<HTMLDivElement | null>(null);
   const { isCloudEnabled, isCloudAuthenticated, cloudAccessMode } = useCloudSync();
   const { isPlaying, demoData } = useSimulation();
   const demoContinuity = isPlaying
     && demoData?.specialty === 'psicologia'
     && demoData.timelineGroup
+    && demoData.caseSummary
+    && demoData.briefing
     ? {
       timelineGroup: demoData.timelineGroup,
-      caseSummary: demoData.caseSummary ?? null,
-      briefing: demoData.briefing ?? null
+      caseSummary: demoData.caseSummary,
+      briefing: demoData.briefing
     }
     : null;
   const normalizedDemoPatientName = demoData?.patientName?.trim().toLowerCase() || '';
@@ -116,18 +121,13 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const selectedGroupNormalizedName = selectedGroup?.normalizedPatientName || '';
   const selectedGroupLegacyCount = selectedGroup?.sourceCounts.legacy || 0;
   const selectedGroupCurrentCount = selectedGroup?.sourceCounts.current || 0;
-  const normalizedSelectedGroupName = selectedGroupName.trim().toLowerCase();
   const isDemoSelectedGroup = Boolean(
-    isPlaying
-    && demoData?.specialty === 'psicologia'
-    && (
-      (selectedGroupNormalizedName && selectedGroupNormalizedName === normalizedDemoPatientName)
-      || (normalizedSelectedGroupName && normalizedSelectedGroupName === normalizedDemoPatientName)
-    )
+    demoContinuity
+    && selectedGroupNormalizedName
+    && selectedGroupNormalizedName === normalizedDemoPatientName
   );
-  const effectiveCaseSummary = isDemoSelectedGroup ? demoData?.caseSummary ?? null : caseSummary;
+  const effectiveCaseSummary = isDemoSelectedGroup ? demoContinuity?.caseSummary ?? null : caseSummary;
   const effectiveCaseSummaryLoading = isDemoSelectedGroup ? false : caseSummaryLoading;
-  const effectiveBriefing = isDemoSelectedGroup ? demoData?.briefing ?? null : briefing;
 
   const selectedSpecialty = normalizeClinicalSpecialty(selectedItem?.specialty || 'psicologia');
   const selectedBriefingClinician = selectedItem?.clinicianProfile || selectedItem?.clinicianName || selectedGroup?.clinicians[0];
@@ -219,14 +219,6 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
 
   useEffect(() => {
     selectedGroupRef.current = selectedGroup;
-  }, [selectedGroup]);
-
-  useEffect(() => {
-    if (!selectedGroup) return;
-    const frame = window.requestAnimationFrame(() => {
-      detailScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
-    });
-    return () => window.cancelAnimationFrame(frame);
   }, [selectedGroup]);
 
   useEffect(() => {
@@ -480,19 +472,20 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                 >
                   <div className="card-content">
                     <div className="card-top">
+                      <div className="patient-avatar">
+                        <User size={18} />
+                      </div>
                       <span className="card-date">{new Date(group.latestConsultationAt).toLocaleDateString()}</span>
                     </div>
                     <h3 className="card-name">{group.patientName}</h3>
                     <div className="card-type">
                       {group.sessionCount} sesiones · {group.sourceCounts.current} actual · {group.sourceCounts.legacy} legado
                     </div>
-                    {group.clinicians.length > 0 && (
-                      <div className="card-tags">
-                        {group.clinicians.slice(0, 2).map((clinician) => (
-                          <span key={clinician} className="card-tag">{clinician}</span>
-                        ))}
-                      </div>
-                    )}
+                    <div className="card-tags">
+                      {group.clinicians.slice(0, 2).map((clinician) => (
+                        <span key={clinician} className="card-tag">{clinician}</span>
+                      ))}
+                    </div>
                   </div>
                   <div className="card-actions">
                     <ChevronRight size={16} className="chevron" />
@@ -516,13 +509,23 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
               >
                 <div className="detail-header">
                   <div className="header-main">
+                    <div className="patient-badge"><User size={24} /></div>
                     <div className="header-text">
                       <div className="name-display-wrapper">
                         <h1>{selectedGroup.patientName}</h1>
                       </div>
                       <div className="meta-row">
                         <span className="meta-item">
-                          Última sesión: {new Date(selectedGroup.latestConsultationAt).toLocaleDateString()} · {selectedGroup.sessionCount} sesiones · {selectedGroup.clinicians.join(', ')}
+                          <Calendar size={14} />
+                          {new Date(selectedGroup.latestConsultationAt).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                        </span>
+                        <span className="meta-item">
+                          <Layers3 size={14} />
+                          {selectedGroup.sessionCount} sesiones
+                        </span>
+                        <span className="meta-item">
+                          <Clock3 size={14} />
+                          {selectedItem.clinicianName || selectedItem.clinicianProfile || 'Sin profesional'}
                         </span>
                       </div>
                     </div>
@@ -530,9 +533,9 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
 
                   <div className="header-actions">
                     {canOpenCurrent && (
-                      <button className="search-history-btn-secondary" onClick={() => void handleLoadCurrentRecord(selectedItem)} title="Abrir resultado completo">
+                      <button className="search-history-btn-secondary" onClick={() => void handleLoadCurrentRecord(selectedItem)}>
                         <ArrowRight size={16} />
-                        <span>Abrir</span>
+                        <span>Abrir resultado</span>
                       </button>
                     )}
                     {isLegacySelection && onUseAsContext && (
@@ -545,13 +548,12 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                           clinicianProfile: selectedItem.clinicianProfile,
                           clinicianName: selectedItem.clinicianName
                         })}
-                        title="Usar como contexto para nueva consulta"
                       >
-                        <span>Usar como contexto</span>
+                        <span>Usar como contexto para nueva consulta</span>
                       </button>
                     )}
                     {canOpenCurrent && (
-                      <button className="search-history-btn-secondary" onClick={handleOpenReport} title="Generar informe médico">
+                      <button className="search-history-btn-secondary" onClick={handleOpenReport}>
                         <FileText size={16} />
                         <span>Informe</span>
                       </button>
@@ -559,7 +561,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   </div>
                 </div>
 
-                {effectiveBriefing && (
+                {briefing && (
                   <div id="history-briefing-card" className="briefing-card">
                     <div className="case-hub-header">
                       <div>
@@ -568,7 +570,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                       </div>
                     </div>
                     <div className="briefing-lines">
-                      {effectiveBriefing.summary_text.split('\n').filter(l => l.trim()).map((line, index) => (
+                      {briefing.summary_text.split('\n').filter(l => l.trim()).map((line, index) => (
                         <p key={`${index}-${line}`} className="briefing-line">{line}</p>
                       ))}
                     </div>
@@ -637,9 +639,71 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   )}
                 </div>
 
-                <div ref={detailScrollRef} className="detail-scroll-area">
+                <div id="history-timeline-panel" className="timeline-panel">
+                  <button
+                    type="button"
+                    className="timeline-panel-header timeline-panel-toggle"
+                    onClick={() => setTimelineExpanded((prev) => !prev)}
+                    aria-expanded={timelineExpanded}
+                  >
+                    <h3>Sesiones anteriores ({selectedGroup.items.length})</h3>
+                    <ChevronRight size={16} className={`timeline-chevron ${timelineExpanded ? 'expanded' : ''}`} />
+                  </button>
+                  {timelineExpanded && (
+                  <div className="timeline-list">
+                    {selectedGroup.items.map((item, index) => {
+                      const active = selectedItem.id === item.id;
+                      return (
+                        <div
+                          key={item.id}
+                          id={`history-timeline-item-${index}`}
+                          className={`timeline-entry ${active ? 'active' : ''}`}
+                          onClick={() => {
+                            selectTimelineItem(item);
+                          }}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              selectTimelineItem(item);
+                            }
+                          }}
+                          data-timeline-index={String(index)}
+                          data-source={item.source}
+                          data-clinician={item.clinicianName || item.clinicianProfile || 'Sin profesional'}
+                        >
+                          <div className="timeline-entry-main">
+                            <div className="timeline-entry-top">
+                              <span className="timeline-entry-date">{new Date(item.consultationAt).toLocaleDateString()}</span>
+                              <span className={`timeline-entry-badge ${item.source}`}>{item.sourceLabel}</span>
+                            </div>
+                            <div className="timeline-entry-title">{item.clinicianName || item.clinicianProfile || 'Sin profesional'}</div>
+                            <div className="timeline-entry-snippet">{renderTimelineSnippet(item)}</div>
+                          </div>
+                          {item.source === 'current' && onLoadRecord && (
+                            <button
+                              type="button"
+                              className="timeline-entry-action"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleLoadCurrentRecord(item);
+                              }}
+                            >
+                              Abrir
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  )}
+                </div>
+
+                <div className="detail-scroll-area">
                   <div className="paper-document">
                     <div className="document-header">
+                      <span className="doc-label">{isLegacySelection ? 'Historial importado' : 'Historia Medica'}</span>
                       <div className="doc-actions">
                         <button className="search-icon-btn copy-doc" onClick={() => void handleCopy(selectedContent)} title="Copiar" aria-label="Copiar historia" data-ui-state={copied ? 'success' : 'idle'}>
                           {copied ? <Copy size={16} /> : <Copy size={16} />}
@@ -665,67 +729,6 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                       </div>
                     </div>
                   )}
-
-                  <div id="history-timeline-panel" className="timeline-panel">
-                    <button
-                      type="button"
-                      className="timeline-panel-header timeline-panel-toggle"
-                      onClick={() => setTimelineExpanded((prev) => !prev)}
-                      aria-expanded={timelineExpanded}
-                    >
-                      <h3>Sesiones anteriores ({selectedGroup.items.length})</h3>
-                      <ChevronRight size={16} className={`timeline-chevron ${timelineExpanded ? 'expanded' : ''}`} />
-                    </button>
-                    {timelineExpanded && (
-                    <div className="timeline-list">
-                      {selectedGroup.items.map((item, index) => {
-                        const active = selectedItem.id === item.id;
-                        return (
-                          <div
-                            key={item.id}
-                            id={`history-timeline-item-${index}`}
-                            className={`timeline-entry ${active ? 'active' : ''}`}
-                            onClick={() => {
-                              selectTimelineItem(item);
-                            }}
-                            role="button"
-                            tabIndex={0}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                event.preventDefault();
-                                selectTimelineItem(item);
-                              }
-                            }}
-                            data-timeline-index={String(index)}
-                            data-source={item.source}
-                            data-clinician={item.clinicianName || item.clinicianProfile || 'Sin profesional'}
-                          >
-                            <div className="timeline-entry-main">
-                              <div className="timeline-entry-top">
-                                <span className="timeline-entry-date">{new Date(item.consultationAt).toLocaleDateString()}</span>
-                                <span className={`timeline-entry-badge ${item.source}`}>{item.sourceLabel}</span>
-                              </div>
-                              <div className="timeline-entry-title">{item.clinicianName || item.clinicianProfile || 'Sin profesional'}</div>
-                              <div className="timeline-entry-snippet">{renderTimelineSnippet(item)}</div>
-                            </div>
-                            {item.source === 'current' && onLoadRecord && (
-                              <button
-                                type="button"
-                                className="timeline-entry-action"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void handleLoadCurrentRecord(item);
-                                }}
-                              >
-                                Abrir
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    )}
-                  </div>
                 </div>
               </motion.div>
             ) : (
@@ -780,5 +783,3 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
 };
 
 export default SearchHistory;
-
-

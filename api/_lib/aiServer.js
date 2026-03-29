@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { del, get } from '@vercel/blob';
-import { GENERATED_PSYCHOLOGY_STYLE_PROFILES } from './psychologyStyleProfiles.generated.js';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
@@ -79,93 +78,19 @@ const PSYCHOLOGY_JUNE_STYLE_EXAMPLES_SUPPLEMENT = `EJEMPLOS ADICIONALES DE JUNE
 6) Puede usar frases de enlace que den sensacion de continuidad, para conectar familia, trabajo, pareja y antecedentes en un mismo caso.
 7) En casos complejos, el texto puede sonar mas integrado y humano, pero siempre debe seguir siendo util, claro y clinicamente prudente.`;
 
-const PSYCHOLOGY_AINHOA_STYLE_PROFILE_OBSERVED = `REFUERZO OBSERVADO DE AINHOA
-- En notas reales de Ainhoa se ve mucho esta secuencia: motivo de consulta muy breve, ubicacion rapida de la paciente y despues despliegue del malestar por areas utiles.
-- Son muy frecuentes formulas como "Acude a consulta debido a...", "Viene a terapia debido a...", "Me cuenta que...", "Refiere..." y "A dia de hoy...".
-- Suele dar bastante peso a apoyos, rutina, autocuidado, sueno, alimentacion, actividad fisica, hobbies y estrategias previas de afrontamiento cuando constan.
-- Si el caso lo necesita, aparecen referencias internas como "Areas", "Antecedentes", "Dia normal", "Medicacion", "Hobbies", "Objetivos terapeuticos" u "Observaciones", sin que todo se vuelva una lista mecanica.`;
-
-const PSYCHOLOGY_AINHOA_STYLE_EXAMPLES_OBSERVED = `ANCLAJES DE FORMA DE AINHOA
-1) Empieza situando a la persona con edad, residencia, convivencia, trabajo o estudios, y despues desarrolla el caso con frases breves y clinicas.
-2) Si hay sintomas de ansiedad o malestar intenso, concreta frecuencia, duracion, sintomas fisicos, pensamientos asociados e impacto funcional.
-3) Si existen varias areas afectadas, las desgrana con orden practico: familia, pareja, trabajo, amistades, alimentacion, sueno, actividad fisica o dia normal.
-4) El cierre suele recoger objetivos terapeuticos concretos y utiles para seguimiento.`;
-
-const PSYCHOLOGY_AINHOA_LEXICON_OBSERVED = `LEXICO FRECUENTE DE AINHOA
-- Verbos y giros frecuentes que pueden usarse si encajan con la transcripcion: "acude", "viene", "refiere", "me cuenta", "describe", "se encuentra", "mantiene", "presenta", "destaca", "comenta", "a dia de hoy".
-- Formulas habituales: "Motivo de consulta:", "Situacion actual:", "Acude a consulta debido a...", "Viene a terapia debido a...", "Respecto a...", "En cuanto a...", "Un dia normal...", "Objetivos terapeuticos:", "Observaciones:".
-- Prioriza este tipo de lenguaje frente a sinonimos mas artificiales o academicos.`;
-
-const PSYCHOLOGY_JUNE_STYLE_PROFILE_OBSERVED = `REFUERZO OBSERVADO DE JUNE
-- En notas reales de June es muy comun abrir con edad, procedencia, convivencia, ocupacion y motivo de consulta en un mismo bloque compacto.
-- Tambien es frecuente ordenar la informacion con bloques internos como "PAREJA", "FAMILIA", "SOCIAL", "SINTOMAS", "ANTECEDENTES", "OT" o "Proxima sesion".
-- Cuando hay varios frentes abiertos, conecta los bloques entre si para que la historia tenga continuidad y no parezca una plantilla.
-- Si es un caso relacional o de pareja, prioriza patron de interaccion, necesidades no cubiertas, antecedentes y objetivo comun.`;
-
-const PSYCHOLOGY_JUNE_STYLE_EXAMPLES_OBSERVED = `ANCLAJES DE FORMA DE JUNE
-1) Puede abrir con un parrafo compacto que ya ubica a la persona y el conflicto principal antes de desplegar subareas.
-2) En casos complejos, agrupa por bloques como Familia, Pareja, Social, Sintomas, Antecedentes u OT y los enlaza con naturalidad.
-3) Si hay frases literales muy representativas, puede integrarlas entre comillas de forma breve.
-4) "OT:" o "Proxima sesion:" pueden sonar naturales al final si la transcripcion lo sostiene.`;
-
-const PSYCHOLOGY_JUNE_LEXICON_OBSERVED = `LEXICO FRECUENTE DE JUNE
-- Verbos y giros frecuentes que pueden usarse si encajan con la transcripcion: "acude", "refiere", "describe", "destaca", "actualmente", "comenzo", "vive", "trabaja", "lleva", "mantiene", "se siente".
-- Bloques y etiquetas habituales: "PAREJA", "FAMILIA", "SOCIAL", "SINTOMAS", "ANTECEDENTES", "OT:", "Observaciones:", "Proxima sesion:".
-- Prioriza estas formulas cuando ayuden a sonar mas cercana a la redaccion real de June, sin forzarlas si la transcripcion no lo sostiene.`;
-
 const normalizePsychologyClinicianName = (value) => {
-    const normalized = String(value || '')
-        .trim()
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9@._-]/g, '');
-    if (
-        normalized === 'june'
-        || normalized === 'juneamores'
-        || normalized === 'juneamoressanchez'
-        || normalized === 'juneamoressanchez@gmail.com'
-        || normalized.includes('juneamores')
-        || normalized.includes('june')
-    ) return 'June';
-    if (
-        normalized === 'ainhoa'
-        || normalized === 'adelgado'
-        || normalized === 'adelgadopsico'
-        || normalized === 'adelgadopsico@gmail.com'
-        || normalized.includes('ainhoa')
-        || normalized.includes('adelgado')
-    ) return 'Ainhoa';
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'june') return 'June';
     return 'Ainhoa';
-};
-
-const buildGeneratedPsychologyStylePrompt = (clinicianName) => {
-    const normalized = normalizePsychologyClinicianName(clinicianName).toLowerCase();
-    const profile = GENERATED_PSYCHOLOGY_STYLE_PROFILES?.[normalized];
-    if (!profile) return '';
-
-    const verbs = Array.isArray(profile.frequentVerbs) ? profile.frequentVerbs.slice(0, 8) : [];
-    const phrases = Array.isArray(profile.frequentPhrases) ? profile.frequentPhrases.slice(0, 6) : [];
-    const labels = Array.isArray(profile.frequentLabels) ? profile.frequentLabels.slice(0, 8) : [];
-    const terms = Array.isArray(profile.frequentTerms) ? profile.frequentTerms.slice(0, 8) : [];
-
-    return `PATRONES AGREGADOS DE ESTILO OBSERVADOS EN ${String(profile.clinicianName || clinicianName || '').toUpperCase()}
-- Muestras analizadas: ${Number(profile.sampleCount || 0)} notas legacy reales.
-${verbs.length ? `- Verbos/giros frecuentes: ${verbs.join(', ')}.` : ''}
-${phrases.length ? `- Formulas frecuentes: ${phrases.join(', ')}.` : ''}
-${labels.length ? `- Etiquetas o bloques frecuentes: ${labels.join(', ')}.` : ''}
-${terms.length ? `- Terminos recurrentes de contexto clinico: ${terms.join(', ')}.` : ''}
-- Usa estos patrones solo cuando encajen de forma natural con la transcripcion; no los fuerces ni inventes contenido.`;
 };
 
 const getPsychologyClinicianStyle = (clinicianName) => {
     const normalized = normalizePsychologyClinicianName(clinicianName);
-    const generatedStylePrompt = buildGeneratedPsychologyStylePrompt(clinicianName);
     if (normalized === 'June') {
         return {
             name: normalized,
-            historyProfile: `${PSYCHOLOGY_JUNE_STYLE_PROFILE}\n${PSYCHOLOGY_JUNE_STYLE_PROFILE_SUPPLEMENT}\n${PSYCHOLOGY_JUNE_STYLE_PROFILE_OBSERVED}${generatedStylePrompt ? `\n${generatedStylePrompt}` : ''}`,
-            historyExamples: `${PSYCHOLOGY_JUNE_STYLE_EXAMPLES}\n${PSYCHOLOGY_JUNE_STYLE_EXAMPLES_SUPPLEMENT}\n${PSYCHOLOGY_JUNE_STYLE_EXAMPLES_OBSERVED}\n${PSYCHOLOGY_JUNE_LEXICON_OBSERVED}`,
+            historyProfile: `${PSYCHOLOGY_JUNE_STYLE_PROFILE}\n${PSYCHOLOGY_JUNE_STYLE_PROFILE_SUPPLEMENT}`,
+            historyExamples: `${PSYCHOLOGY_JUNE_STYLE_EXAMPLES}\n${PSYCHOLOGY_JUNE_STYLE_EXAMPLES_SUPPLEMENT}`,
             reportProfile: `- Mantiene un estilo clinico humano y algo mas narrativo, parecido a una redaccion real de June.
 - Si la complejidad del caso lo pide, puede agrupar informacion por areas o bloques internos utiles como Familia, Relaciones, Antecedentes u OT.
 - Si es terapia de pareja, debe explicitar mejor el patron relacional, las necesidades no cubiertas y el objetivo comun.
@@ -174,8 +99,8 @@ const getPsychologyClinicianStyle = (clinicianName) => {
     }
     return {
         name: normalized,
-        historyProfile: `${PSYCHOLOGY_AINHOA_STYLE_PROFILE}\n${PSYCHOLOGY_AINHOA_STYLE_PROFILE_OBSERVED}${generatedStylePrompt ? `\n${generatedStylePrompt}` : ''}`,
-        historyExamples: `${PSYCHOLOGY_AINHOA_STYLE_EXAMPLES}\n${PSYCHOLOGY_AINHOA_STYLE_EXAMPLES_OBSERVED}\n${PSYCHOLOGY_AINHOA_LEXICON_OBSERVED}`,
+        historyProfile: PSYCHOLOGY_AINHOA_STYLE_PROFILE,
+        historyExamples: PSYCHOLOGY_AINHOA_STYLE_EXAMPLES,
         reportProfile: `- Mantiene un estilo clinico humano, sobrio y parecido a una redaccion real de Ainhoa.
 - Incluye contexto vital, problema actual, sintomas, impacto funcional, apoyos y plan si constan.
 - Tiende a concretar frecuencia, intensidad, impacto funcional y factores protectores cuando aparecen.
@@ -1150,10 +1075,7 @@ Reglas:
 - Usa solo datos de la transcripcion.
 - Mantiene estilo clinico breve.
 - Si falta dato, escribe "No consta".
-${normalizeConsultationType(consultationType) === 'psicologia'
-        ? `${getPsychologyClinicianStyle(clinicianName).historyProfile}
-${getPsychologyClinicianStyle(clinicianName).historyExamples}`
-        : ''}
+${normalizeConsultationType(consultationType) === 'psicologia' ? getPsychologyClinicianStyle(clinicianName).historyProfile : ''}
 ${formatLearningPromptContext(learningContext)}
 
 TRANSCRIPCION:
@@ -1180,7 +1102,7 @@ const normalizeBriefingText = (rawText) => {
         });
 
     if (!lines.length) return '';
-    return lines.slice(0, 6).join('\n');
+    return lines.slice(0, 5).join('\n');
 };
 
 const buildBriefingPrompt = ({ patientName, consultationType, clinicianName, timelineItems }) => {
@@ -1202,24 +1124,21 @@ const buildBriefingPrompt = ({ patientName, consultationType, clinicianName, tim
         })
         .join('\n\n');
 
-    return `Eres un asistente clinico de psicologia. Redacta un briefing breve y muy util para la psicologa que va a retomar este caso.
-El objetivo es que en 20-30 segundos recuerde lo importante sin releer toda la historia.
+    return `Eres un asistente clinico de psicologia. Redacta un briefing ultra-breve para la psicologa que va a ver este caso.
+El objetivo es que la psicologa lo lea en 15 segundos antes de que entre la paciente y recuerde lo esencial.
 
-Resume en 4-6 lineas cortas, priorizando este orden:
-1. Motivo actual o foco principal del caso, con algo de contexto funcional si aparece.
-2. Que se trabajo en la ultima sesion o en la etapa mas reciente (tema concreto, no generalidades).
-3. Factores relevantes que estan manteniendo el malestar o areas afectadas si constan con claridad.
-4. Tareas, acuerdos, objetivos terapeuticos o pendientes para la siguiente sesion, solo si estan escritos.
-5. Recordatorios clinicos sensibles o importantes que convenga no olvidar, solo si constan explicitamente.
+Resume en maximo 3-4 lineas concretas:
+1. Que se trabajo en la ultima sesion (fecha y tema concreto).
+2. Que tareas, compromisos o pendientes quedaron (solo si constan explicitamente).
+3. Si hay algun dato sensible o importante que no deba olvidarse (solo si consta explicitamente).
 
 Reglas estrictas:
 - Usa SOLO informacion explicitamente presente en las notas.
-- No inventes diagnosticos, gravedad, riesgos ni interpretaciones no escritas.
+- No inventes diagnosticos, gravedad, riesgos, ni proximos pasos.
 - Si no hay informacion suficiente para un punto, OMITELO. No escribas "No consta".
-- Prioriza lo clinicamente util para una psicologa: foco actual, contexto relevante, areas afectadas, objetivos y pendientes.
-- Evita repetir datos entre lineas.
-- Evita frases demasiado largas o literarias.
-- Tono: nota breve, humana y muy clara, como contexto de trabajo antes de abrir la consulta.
+- Prioriza lo concreto: fechas, temas, tareas, datos literales. No prosa generica.
+- Tono: como una nota rapida pegada en la carpeta del paciente. Breve, directa, util.
+- No repitas informacion entre lineas.
 
 Paciente: ${patientName || 'Paciente'}
 Especialidad: ${specialty}
@@ -1469,7 +1388,7 @@ export const generatePatientBriefingPayload = async ({ patientName, consultation
         prompt: buildBriefingPrompt({ patientName, consultationType, clinicianName, timelineItems }),
         jsonMode: false,
         temperature: 0.15,
-        maxTokens: 650
+        maxTokens: 450
     });
     const normalizedText = normalizeBriefingText(response.text);
     if (!normalizedText) {

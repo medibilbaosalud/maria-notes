@@ -156,7 +156,7 @@ export const signOutSupabase = async (): Promise<void> => {
 
 type ProtectedSupabaseClient = NonNullable<typeof supabase>;
 const getProtectedSupabase = (): ProtectedSupabaseClient | null => {
-    if (!supabase || !hasSupabaseSession()) return null;
+    if (!supabase) return null;
     return supabase;
 };
 

@@ -315,12 +315,14 @@ const maybeUploadAudioToBlob = async (
 const buildLearningPayload = async (
     specialty: ClinicalSpecialtyId,
     artifactType: LearningArtifactType,
-    section: string
+    section: string,
+    clinicianProfile?: string
 ): Promise<Record<string, unknown> | undefined> => {
     const rulePackContext = await MemoryService.getRulePackContext({
         specialty,
         artifactType,
         section,
+        clinicianProfile,
         tokenBudget: artifactType === 'medical_report' ? 650 : 900
     });
     if (!rulePackContext.applied_rules.length) return undefined;
@@ -599,11 +601,12 @@ export class AIService {
         transcription: string,
         patientName: string = '',
         specialty: ClinicalSpecialtyId = 'otorrino',
-        clinicianName?: string
+        clinicianName?: string,
+        clinicianProfile?: string
     ): Promise<AIResultWithMetadata> {
         this.emitInvocation('single_shot_history', 'single_shot_history_generation', 'start', SERVER_TEXT_MODEL);
         try {
-            const learningContext = await buildLearningPayload(specialty, 'medical_history', 'generation');
+            const learningContext = await buildLearningPayload(specialty, 'medical_history', 'generation', clinicianProfile);
             const result = await postJson<AIResultWithMetadata>('/api/ai/generate-history', {
                 transcription,
                 patientName,
@@ -635,11 +638,12 @@ export class AIService {
         transcription: string,
         patientName: string = '',
         specialty: ClinicalSpecialtyId = 'otorrino',
-        clinicianName?: string
+        clinicianName?: string,
+        clinicianProfile?: string
     ): Promise<AIResult<string>> {
         this.emitInvocation('report', 'report_generation', 'start', SERVER_GROQ_TEXT_MODEL);
         try {
-            const learningContext = await buildLearningPayload(specialty, 'medical_report', 'generation');
+            const learningContext = await buildLearningPayload(specialty, 'medical_report', 'generation', clinicianProfile);
             const result = await postJson<{
                 text: string;
                 model: string;
@@ -716,11 +720,12 @@ export class AIService {
         sectionTitle: string,
         patientName: string = '',
         specialty: ClinicalSpecialtyId = 'otorrino',
-        clinicianName?: string
+        clinicianName?: string,
+        clinicianProfile?: string
     ): Promise<AIResult<string>> {
         this.emitInvocation('generation', 'section_regeneration', 'start', SERVER_GROQ_TEXT_MODEL);
         try {
-            const learningContext = await buildLearningPayload(specialty, 'medical_history', sectionTitle || 'generation');
+            const learningContext = await buildLearningPayload(specialty, 'medical_history', sectionTitle || 'generation', clinicianProfile);
             const result = await postJson<{
                 text: string;
                 model: string;

@@ -2,6 +2,8 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { Mic, Square, Stethoscope } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+import { MBSLogo } from './MBSLogo';
 import { buildPsychologyCaseSummary, getPatientBriefing, getPatientNameSuggestions, type PatientNameSuggestion, type PatientCaseSummary, type PatientBriefing } from '../services/storage';
 import { fadeSlideInSmall, motionEase, motionTransitions, softScaleTap, statusPulseSoft } from '../features/ui/motion-tokens';
 import type { ClinicalSpecialtyId } from '../clinical/specialties';
@@ -439,6 +441,10 @@ export const Recorder: React.FC<RecorderProps> = ({
       data-processing-stage={statusMessage}
     >
       <div className="recorder-centered-layout">
+        <div className="recorder-header-centered">
+          <MBSLogo size={56} />
+          <h2 className="recorder-title">Maria Notes</h2>
+        </div>
 
         <div className="recorder-status-area">
           <div className="status-indicator-pill" data-ui-state={recorderUiState}>

@@ -1382,12 +1382,17 @@ const AppContent = () => {
             })
         });
 
-        // Memory Consolidation (Nightly Logic)
+        // Memory consolidation by day/week/month windows
         const runConsolidation = async () => {
             const keys = getApiKeys(apiKey);
             if (keys.length > 0) {
                 console.log('Running startup memory consolidation...');
-                await MemoryService.consolidateDailyLessons(keys);
+                await MemoryService.consolidateLearningWindows(keys, {
+                    specialty: activeSpecialty,
+                    artifactType: 'medical_history',
+                    section: 'generation',
+                    clinicianProfile: resolveClinicianProfileForSpecialty(activeSpecialty)
+                });
             }
         };
 
@@ -1658,6 +1663,7 @@ const AppContent = () => {
                 history_output: params.result.data,
                 created_at: new Date().toISOString(),
                 record_uuid: params.recordId || null,
+                transcription_text: params.transcription,
                 transcription_length: params.transcription.length
             }
         });
@@ -2043,7 +2049,8 @@ const AppContent = () => {
             extractionInput,
             patientName,
             contextSpecialtyRef.current,
-            resolveClinicianNameForSpecialty(contextSpecialtyRef.current)
+            resolveClinicianNameForSpecialty(contextSpecialtyRef.current),
+            resolveClinicianProfileForSpecialty(contextSpecialtyRef.current)
         );
         if (runId) {
             recordDiagnosticEvent(runId, {
@@ -2326,7 +2333,8 @@ const AppContent = () => {
                             sanitizedTranscription,
                             patientName,
                             hardenedSpecialty,
-                            resolveClinicianNameForSpecialty(hardenedSpecialty)
+                            resolveClinicianNameForSpecialty(hardenedSpecialty),
+                            resolveClinicianProfileForSpecialty(hardenedSpecialty)
                         );
                         if (!isSessionVersionCurrent(sessionId, sessionVersion)) return;
                         const hardenedOutputTier: 'draft' | 'final' = 'final';
@@ -3085,7 +3093,8 @@ const AppContent = () => {
                 text,
                 patientName,
                 specialty,
-                resolveClinicianNameForSpecialty(specialty)
+                resolveClinicianNameForSpecialty(specialty),
+                resolveClinicianProfileForSpecialty(specialty)
             );
             let runStatus = result.pipeline_status || 'completed';
             let resultStatus = result.result_status || (runStatus === 'completed' ? 'completed' : 'provisional');
@@ -3420,7 +3429,8 @@ const AppContent = () => {
                 sectionTitle,
                 currentPatientName,
                 activeSpecialty,
-                resolveClinicianNameForSpecialty(activeSpecialty)
+                resolveClinicianNameForSpecialty(activeSpecialty),
+                resolveClinicianProfileForSpecialty(activeSpecialty)
             );
             return replaceHistorySection(currentContent, sectionTitle, regenerated.data);
         } catch (error) {
@@ -3604,7 +3614,8 @@ const AppContent = () => {
                                 transcription,
                                 currentPatientName,
                                 contextSpecialtyRef.current,
-                                resolveClinicianNameForSpecialty(contextSpecialtyRef.current)
+                                resolveClinicianNameForSpecialty(contextSpecialtyRef.current),
+                                resolveClinicianProfileForSpecialty(contextSpecialtyRef.current)
                             );
                             return res.data;
                         }}

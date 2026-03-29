@@ -64,6 +64,8 @@ export interface ProcessDoctorFeedbackV2Params {
     specialty?: ClinicalSpecialtyId | string;
     clinicianProfile?: string;
     doctorReasonCode?: LearningDoctorReasonCode;
+    doctorFeedbackText?: string;
+    doctorScore?: number | null;
 }
 
 const AUTOSAVE_SOURCES: DoctorEditSource[] = ['history_autosave', 'search_history_autosave'];
@@ -244,6 +246,26 @@ const canIngestBySignalGate = (
     return editDistanceRatio >= 0.01 || sectionsChanged >= 1;
 };
 
+const mapDoctorReasonToCategory = (reasonCode?: LearningDoctorReasonCode): LearningRuleCategory | null => {
+    if (reasonCode === 'terminologia') return 'terminology';
+    if (reasonCode === 'omision') return 'missing_data';
+    if (reasonCode === 'error_clinico') return 'clinical';
+    if (reasonCode === 'formato') return 'formatting';
+    if (reasonCode === 'redaccion') return 'style';
+    return null;
+};
+
+const formatDoctorReasonLabel = (reasonCode?: LearningDoctorReasonCode): string => {
+    if (reasonCode === 'terminologia') return 'terminologia';
+    if (reasonCode === 'omision') return 'omision';
+    if (reasonCode === 'error_clinico') return 'criterio clinico';
+    if (reasonCode === 'formato') return 'formato';
+    if (reasonCode === 'redaccion') return 'redaccion';
+    return 'ajuste profesional';
+};
+
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
 const enforceArtifactCategoryPolicy = (
     category: LearningRuleCategory,
     artifactType: LearningArtifactType
@@ -303,7 +325,34 @@ const inferEditScope = (
     return 'minor';
 };
 
-const deriveManualWeight = (source: DoctorEditSource): number => isAutosaveSource(source) ? 0.45 : 1;
+const deriveManualWeight = (
+    source: DoctorEditSource,
+    doctorReasonCode?: LearningDoctorReasonCode,
+    doctorScore?: number | null
+): number => {
+    const base = isAutosaveSource(source) ? 0.45 : 1;
+    const reasonBoost = doctorReasonCode === 'error_clinico'
+        ? 0.4
+        : doctorReasonCode === 'omision'
+            ? 0.28
+            : doctorReasonCode === 'terminologia'
+                ? 0.16
+                : doctorReasonCode === 'formato'
+                    ? 0.08
+                    : doctorReasonCode === 'redaccion'
+                        ? 0.05
+                        : 0;
+    const scoreBoost = typeof doctorScore === 'number'
+        ? doctorScore <= 2
+            ? 0.28
+            : doctorScore === 3
+                ? 0.12
+                : doctorScore >= 5
+                    ? -0.06
+                    : 0
+        : 0;
+    return Number(clamp(base + reasonBoost + scoreBoost, 0.2, 1.75).toFixed(2));
+};
 
 const buildFieldPath = (section: string, change: ChangeDetected): string => {
     const normalizedSection = normalizeHeader(section || 'GENERAL').toLowerCase().replace(/\s+/g, '_');
@@ -333,7 +382,12 @@ const buildSignatureHash = (params: {
     params.normalizedAfter
 ].join('|'));
 
-const categorizeDeterministically = (change: ChangeDetected): LearningRuleCategory | null => {
+const categorizeDeterministically = (
+    change: ChangeDetected,
+    doctorReasonCode?: LearningDoctorReasonCode
+): LearningRuleCategory | null => {
+    const explicitCategory = mapDoctorReasonToCategory(doctorReasonCode);
+    if (explicitCategory) return explicitCategory;
     const s = normalizeText(`${change.section} ${change.original} ${change.edited}`);
     if (/alucin|invent|hallucin/.test(s)) return 'hallucination';
     if (/falta|missing|no consta|anadir|agregar/.test(s)) return 'missing_data';
@@ -358,11 +412,66 @@ const stateToLessonStatus = (state: LearningLifecycleState): ImprovementLesson['
     return 'learning';
 };
 
-const summarizeRuleText = (change: ChangeDetected, category: LearningRuleCategory): string => {
-    const section = change.section || 'GENERAL';
-    const from = change.original ? change.original.slice(0, 120) : '(vacio)';
-    const to = change.edited ? change.edited.slice(0, 120) : '(vacio)';
-    return `[${category}] ${section}: usar "${to}" en lugar de "${from}"`;
+const truncateSnippet = (value: string, limit = 120): string => {
+    const clean = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!clean) return '';
+    return clean.length <= limit ? clean : `${clean.slice(0, limit - 1)}...`;
+};
+
+const extractFieldLabelFromPath = (fieldPath: string): string => {
+    const parts = String(fieldPath || '').split('.').filter(Boolean);
+    return String(parts[parts.length - 1] || 'contenido').replace(/_/g, ' ').trim();
+};
+
+const buildPatternKey = (params: {
+    specialty?: string;
+    clinicianProfile?: string;
+    artifactType?: LearningArtifactType;
+    section: string;
+    fieldPath: string;
+    category: LearningRuleCategory;
+    doctorReasonCode?: LearningDoctorReasonCode;
+}): string => deterministicHash([
+    normalizeClinicalSpecialty(params.specialty),
+    String(params.clinicianProfile || '').trim().toLowerCase(),
+    params.artifactType || 'medical_history',
+    normalizeHeader(params.section),
+    extractFieldLabelFromPath(params.fieldPath).toLowerCase(),
+    params.category,
+    params.doctorReasonCode || ''
+].join('|'));
+
+const buildReusableRuleSummary = (
+    change: ChangeDetected,
+    category: LearningRuleCategory,
+    options?: {
+        fieldPath?: string;
+        doctorReasonCode?: LearningDoctorReasonCode;
+        doctorFeedbackText?: string;
+    }
+): string => {
+    const section = normalizeHeader(change.section || 'GENERAL');
+    const fieldLabel = extractFieldLabelFromPath(options?.fieldPath || buildFieldPath(section, change));
+    const reasonLabel = formatDoctorReasonLabel(options?.doctorReasonCode);
+    const exampleAfter = truncateSnippet(change.edited || change.original, 90);
+    const feedbackHint = truncateSnippet(options?.doctorFeedbackText || '', 80);
+
+    const base = category === 'missing_data'
+        ? `[${category}] ${section}/${fieldLabel}: no omitir informacion explicitamente presente; si aparece en transcripcion, incluirla de forma fiel.`
+        : category === 'clinical'
+            ? `[${category}] ${section}/${fieldLabel}: preservar el criterio clinico escrito por el profesional y evitar reinterpretaciones no explicitadas.`
+            : category === 'hallucination'
+                ? `[${category}] ${section}/${fieldLabel}: eliminar afirmaciones no sostenidas por la transcripcion o la evidencia documentada.`
+                : category === 'terminology'
+                    ? `[${category}] ${section}/${fieldLabel}: respetar la terminologia clinica preferida por el profesional en esta seccion.`
+                    : category === 'formatting'
+                        ? `[${category}] ${section}/${fieldLabel}: mantener la estructura y rotulacion esperadas por el profesional.`
+                        : `[${category}] ${section}/${fieldLabel}: ajustar la redaccion para que sea mas clara, breve y util en contexto clinico.`;
+
+    const reasonSuffix = options?.doctorReasonCode ? ` Motivo recurrente: ${reasonLabel}.` : '';
+    const exampleSuffix = exampleAfter ? ` Ejemplo observado: "${exampleAfter}".` : '';
+    const feedbackSuffix = feedbackHint ? ` Comentario del profesional: "${feedbackHint}".` : '';
+    return `${base}${reasonSuffix}${exampleSuffix}${feedbackSuffix}`.trim();
 };
 
 const parseAnalysisCategory = (value: unknown): LearningRuleCategory => {
@@ -377,19 +486,47 @@ const parseAnalysisCategory = (value: unknown): LearningRuleCategory => {
 
 const analyzeChangesWithAI = async (
     changes: ChangeDetected[],
-    groqApiKey: string | string[]
+    groqApiKey: string | string[],
+    options?: {
+        doctorReasonCode?: LearningDoctorReasonCode;
+        doctorFeedbackText?: string;
+        doctorScore?: number | null;
+        specialty?: string;
+        artifactType?: LearningArtifactType;
+        source?: DoctorEditSource;
+    }
 ): Promise<{ summary: string; category: LearningRuleCategory; isFormat: boolean }> => {
     const changesDescription = changes.map((c) => (
         `Seccion: ${c.section}\nOriginal: ${c.original.slice(0, 140)}\nEditado: ${c.edited.slice(0, 140)}`
     )).join('\n\n');
 
+    const explicitReason = options?.doctorReasonCode
+        ? `Motivo marcado por el profesional: ${formatDoctorReasonLabel(options.doctorReasonCode)}.`
+        : 'Motivo marcado por el profesional: no especificado.';
+    const feedbackLine = options?.doctorFeedbackText
+        ? `Comentario libre del profesional: ${truncateSnippet(options.doctorFeedbackText, 220)}`
+        : 'Comentario libre del profesional: ninguno.';
+    const scoreLine = typeof options?.doctorScore === 'number'
+        ? `Valoracion del profesional: ${options.doctorScore}/5`
+        : 'Valoracion del profesional: sin puntuacion.';
+
     const prompt = `Analiza estas correcciones medicas y responde SOLO JSON.
 Reglas:
 - Resume en una leccion accionable, corta y reutilizable.
+- La leccion debe sonar a instruccion general aplicable a futuros casos, no a un cambio puntual de un paciente.
 - category debe ser una de: formatting|terminology|missing_data|hallucination|style|clinical.
 - Usa formatting solo para estructura/plantilla, terminology para terminos, missing_data para omisiones, hallucination para afirmaciones sin soporte, clinical para criterio medico, style para redaccion general.
 - is_format=true solo si el cambio principal es de formato/estructura.
 - No inventes contexto fuera de los cambios proporcionados.
+- Si el profesional marco un motivo explicito, priorizalo sobre heuristicas debiles del texto.
+
+CONTEXTO:
+- artifact_type: ${options?.artifactType || 'medical_history'}
+- specialty: ${normalizeClinicalSpecialty(options?.specialty)}
+- source: ${options?.source || 'history_save'}
+- ${explicitReason}
+- ${feedbackLine}
+- ${scoreLine}
 
 CAMBIOS:
 ${changesDescription}
@@ -412,7 +549,7 @@ Salida JSON:
     try {
         parsed = JSON.parse(jsonText) as Record<string, unknown>;
     } catch {
-        const fallback = changes[0] ? categorizeDeterministically(changes[0]) : null;
+        const fallback = changes[0] ? categorizeDeterministically(changes[0], options?.doctorReasonCode) : null;
         return {
             summary: 'Ajustar redaccion para mantener trazabilidad clinica y consistencia.',
             category: fallback || 'style',
@@ -442,13 +579,19 @@ export const extractStructuredEdits = (
         specialty?: string;
         clinicianProfile?: string;
         doctorReasonCode?: LearningDoctorReasonCode;
+        doctorFeedbackText?: string;
+        doctorScore?: number | null;
     }
 ): StructuredLearningEvent[] => {
     const changes = detectChanges(aiHistory, doctorHistory);
     const editScope = inferEditScope(options?.editDistanceRatio || 0, options?.sectionsChanged || changes.length);
-    const manualWeight = deriveManualWeight((options?.sourceView || 'history_save') as DoctorEditSource);
+    const manualWeight = deriveManualWeight(
+        (options?.sourceView || 'history_save') as DoctorEditSource,
+        options?.doctorReasonCode,
+        options?.doctorScore
+    );
     return changes.map((change) => {
-        const category = categorizeDeterministically(change) || 'style';
+        const category = categorizeDeterministically(change, options?.doctorReasonCode) || 'style';
         const normalizedBefore = normalizeText(change.original);
         const normalizedAfter = normalizeText(change.edited);
         const intent = inferEditIntent(category);
@@ -500,7 +643,12 @@ export const extractStructuredEdits = (
                 doctor_reason_code: options?.doctorReasonCode,
                 is_manual_save: isManualSaveSource((options?.sourceView || 'history_save') as DoctorEditSource),
                 is_autosave: isAutosaveSource((options?.sourceView || 'history_save') as DoctorEditSource),
-                manual_weight: manualWeight
+                manual_weight: manualWeight,
+                doctor_feedback_text: options?.doctorFeedbackText,
+                doctor_score: options?.doctorScore ?? null,
+                evidence_kind: options?.doctorReasonCode ? 'explicit_reason' : 'implicit_edit',
+                example_before: change.original.slice(0, 220),
+                example_after: change.edited.slice(0, 220)
             }
         };
     });
@@ -628,6 +776,7 @@ export const upsertRuleCandidateFromEvent = async (
         await supabase
             .from('ai_rule_candidates')
             .update({
+                rule_text: fallbackSummary || reverse.rule_text,
                 evidence_count: reverseEvidence,
                 contradiction_count: reverseContradiction,
                 confidence_score: reverseScore,
@@ -650,6 +799,11 @@ export const upsertRuleCandidateFromEvent = async (
                         artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
                         section: event.target_section || event.section
                     },
+                    pattern_key: event.metadata?.pattern_key || undefined,
+                    example_before: truncateSnippet(event.before_value, 180),
+                    example_after: truncateSnippet(event.after_value, 180),
+                    doctor_feedback_text: event.metadata?.doctor_feedback_text || undefined,
+                    doctor_score: event.metadata?.doctor_score ?? null,
                     source_view: event.metadata?.source_view || (reverse.rule_json as Record<string, unknown> | undefined)?.source_view || 'history_save',
                     signal_strength: event.metadata?.signal_strength || (reverse.rule_json as Record<string, unknown> | undefined)?.signal_strength || 'medium'
                 },
@@ -684,6 +838,7 @@ export const upsertRuleCandidateFromEvent = async (
         await supabase
             .from('ai_rule_candidates')
             .update({
+                rule_text: fallbackSummary || existing.rule_text,
                 evidence_count: nextEvidence,
                 confidence_score: nextConfidence,
                 lifecycle_state: nextState,
@@ -707,6 +862,11 @@ export const upsertRuleCandidateFromEvent = async (
                         artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
                         section: event.target_section || event.section
                     },
+                    pattern_key: event.metadata?.pattern_key || undefined,
+                    example_before: truncateSnippet(event.before_value, 180),
+                    example_after: truncateSnippet(event.after_value, 180),
+                    doctor_feedback_text: event.metadata?.doctor_feedback_text || undefined,
+                    doctor_score: event.metadata?.doctor_score ?? null,
                     source_view: event.metadata?.source_view || (existing.rule_json as Record<string, unknown> | undefined)?.source_view || 'history_save',
                     signal_strength: event.metadata?.signal_strength || (existing.rule_json as Record<string, unknown> | undefined)?.signal_strength || 'medium'
                 },
@@ -769,6 +929,11 @@ export const upsertRuleCandidateFromEvent = async (
             scope_level: event.scope_level || 'section',
             doctor_reason_code: event.doctor_reason_code || undefined,
             manual_weight: event.manual_weight ?? 1,
+            pattern_key: event.metadata?.pattern_key || undefined,
+            example_before: truncateSnippet(event.before_value, 180),
+            example_after: truncateSnippet(event.after_value, 180),
+            doctor_feedback_text: event.metadata?.doctor_feedback_text || undefined,
+            doctor_score: event.metadata?.doctor_score ?? null,
             applicable_when: {
                 specialty: event.specialty || 'otorrino',
                 artifact_type: event.artifact_type || event.metadata?.artifact_type || 'medical_history',
@@ -886,7 +1051,9 @@ const processDoctorFeedbackLegacy = async (
 
     for (const event of structuredEdits) {
         const effectiveCategory = aiCategory || event.category;
-        const ruleSummary = aiSummary || summarizeRuleText(changes[0], effectiveCategory);
+        const ruleSummary = aiSummary || buildReusableRuleSummary(changes[0], effectiveCategory, {
+            fieldPath: event.field_path
+        });
         const normalizedEvent: StructuredLearningEvent = {
             ...event,
             category: effectiveCategory,
@@ -1004,7 +1171,7 @@ export const processDoctorFeedbackV2 = async (
 
     const signalStrength = inferSignalStrength(params.source, editDistanceRatio, sectionsChanged);
     const specialty = normalizeClinicalSpecialty(params.specialty);
-    const changeCategoryHints = changes.map((change) => categorizeDeterministically(change));
+    const changeCategoryHints = changes.map((change) => categorizeDeterministically(change, params.doctorReasonCode));
     const unresolvedCount = changeCategoryHints.filter((value) => !value).length;
     const uniqueDeterministic = new Set(changeCategoryHints.filter((value): value is LearningRuleCategory => Boolean(value)));
     const shouldUseAIClassifier = Boolean(params.apiKey) && (unresolvedCount > 0 || uniqueDeterministic.size > 1);
@@ -1013,7 +1180,14 @@ export const processDoctorFeedbackV2 = async (
     let aiCategory: LearningRuleCategory | undefined;
     if (shouldUseAIClassifier) {
         try {
-            const analysis = await analyzeChangesWithAI(changes, params.apiKey as string | string[]);
+            const analysis = await analyzeChangesWithAI(changes, params.apiKey as string | string[], {
+                doctorReasonCode: params.doctorReasonCode,
+                doctorFeedbackText: params.doctorFeedbackText,
+                doctorScore: params.doctorScore,
+                specialty,
+                artifactType: params.artifactType,
+                source: params.source
+            });
             aiSummary = analysis.summary;
             aiCategory = analysis.category;
         } catch (error) {
@@ -1032,7 +1206,9 @@ export const processDoctorFeedbackV2 = async (
         ,
         specialty,
         clinicianProfile: params.clinicianProfile,
-        doctorReasonCode: params.doctorReasonCode
+        doctorReasonCode: params.doctorReasonCode,
+        doctorFeedbackText: params.doctorFeedbackText,
+        doctorScore: params.doctorScore
     }).map((event) => normalizeLearningEvent(event, {
         recordId: params.recordId,
         auditId: params.auditId,
@@ -1054,8 +1230,25 @@ export const processDoctorFeedbackV2 = async (
         );
         const change = changes[index] || changes[0];
         const ruleSummary = deterministicCategory
-            ? summarizeRuleText(change, effectiveCategory)
-            : (aiSummary || summarizeRuleText(change, effectiveCategory));
+            ? buildReusableRuleSummary(change, effectiveCategory, {
+                fieldPath: event.field_path,
+                doctorReasonCode: params.doctorReasonCode,
+                doctorFeedbackText: params.doctorFeedbackText
+            })
+            : (aiSummary || buildReusableRuleSummary(change, effectiveCategory, {
+                fieldPath: event.field_path,
+                doctorReasonCode: params.doctorReasonCode,
+                doctorFeedbackText: params.doctorFeedbackText
+            }));
+        const patternKey = buildPatternKey({
+            specialty,
+            clinicianProfile: params.clinicianProfile,
+            artifactType: params.artifactType,
+            section: event.section,
+            fieldPath: event.field_path,
+            category: effectiveCategory,
+            doctorReasonCode: params.doctorReasonCode
+        });
         const normalizedEvent: StructuredLearningEvent = {
             ...event,
             category: effectiveCategory,
@@ -1078,6 +1271,7 @@ export const processDoctorFeedbackV2 = async (
             continue;
         }
 
+        const evidenceKind: 'explicit_reason' | 'implicit_edit' = params.doctorReasonCode ? 'explicit_reason' : 'implicit_edit';
         const metadata = {
             ...(normalizedEvent.metadata || {}),
             artifact_type: params.artifactType,
@@ -1096,7 +1290,13 @@ export const processDoctorFeedbackV2 = async (
             doctor_reason_code: params.doctorReasonCode || undefined,
             is_manual_save: isManualSaveSource(params.source),
             is_autosave: isAutosaveSource(params.source),
-            manual_weight: normalizedEvent.manual_weight ?? deriveManualWeight(params.source)
+            manual_weight: normalizedEvent.manual_weight ?? deriveManualWeight(params.source, params.doctorReasonCode, params.doctorScore),
+            doctor_feedback_text: params.doctorFeedbackText || undefined,
+            doctor_score: params.doctorScore ?? null,
+            pattern_key: patternKey,
+            evidence_kind: evidenceKind,
+            example_before: truncateSnippet(normalizedEvent.before_value, 220),
+            example_after: truncateSnippet(normalizedEvent.after_value, 220)
         };
 
         const createdEventId = await saveAiLearningEvent({

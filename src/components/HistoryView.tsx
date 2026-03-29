@@ -766,7 +766,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           allowAutosaveLearn: true,
           specialty,
           clinicianProfile,
-          doctorReasonCode: doctorReasonCode || undefined
+          doctorReasonCode: doctorReasonCode || undefined,
+          doctorFeedbackText: doctorFeedbackText.trim() || undefined,
+          doctorScore: doctorFeedbackScore
         }).then((learningResult) => {
           if (learningResult?.candidate_ids?.length) {
             console.log('[HistoryView] Learning event registrado:', learningResult.event_ids.length);

@@ -1,5 +1,5 @@
 import { db, type AuditOutboxItem } from './db';
-import { hasSupabaseSession, logQualityEvent, supabase } from './supabase';
+import { logQualityEvent, supabase } from './supabase';
 import { safeGetLocalStorage, safeSetLocalStorage } from '../utils/safeBrowser';
 
 const MAX_ATTEMPTS = 6;
@@ -199,8 +199,8 @@ const chunkInsert = async (table: string, rows: Record<string, unknown>[], chunk
 };
 
 const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
-    if (!supabase || !hasSupabaseSession()) {
-        throw new Error('auth_required_for_audit_bundle');
+    if (!supabase) {
+        throw new Error('supabase_required_for_audit_bundle');
     }
 
     const auditId = (payload.audit_id as string | undefined) || undefined;
@@ -256,6 +256,9 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
             patient_name: auditData.patient_name || null,
             clinician_profile: clinicianProfile,
             medical_history: historyOutput || '',
+            transcription_text: typeof auditData.transcription_text === 'string'
+                ? auditData.transcription_text
+                : '',
             primary_model: typeof modelsUsed.generation === 'string' ? String(modelsUsed.generation) : null,
             models_used: modelsUsed,
             model_invocations: consultationHistoryInvocations,
@@ -392,8 +395,8 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
 };
 
 const processPipelineRunUpdate = async (payload: Record<string, unknown>) => {
-    if (!supabase || !hasSupabaseSession()) {
-        throw new Error('auth_required_for_pipeline_run');
+    if (!supabase) {
+        throw new Error('supabase_required_for_pipeline_run');
     }
     const sessionId = String(payload.session_id || '');
     if (!sessionId) throw new Error('invalid_pipeline_run_payload');
@@ -456,8 +459,8 @@ const processPipelineRunUpdate = async (payload: Record<string, unknown>) => {
 };
 
 const processPipelineAttempt = async (payload: Record<string, unknown>) => {
-    if (!supabase || !hasSupabaseSession()) {
-        throw new Error('auth_required_for_pipeline_attempt');
+    if (!supabase) {
+        throw new Error('supabase_required_for_pipeline_attempt');
     }
     const sessionId = String(payload.session_id || '');
     const stage = String(payload.stage || '');
@@ -509,8 +512,8 @@ const processPipelineAttempt = async (payload: Record<string, unknown>) => {
 };
 
 const processPipelineMarker = async (eventType: string, payload: Record<string, unknown>) => {
-    if (!supabase || !hasSupabaseSession()) {
-        throw new Error('auth_required_for_pipeline_marker');
+    if (!supabase) {
+        throw new Error('supabase_required_for_pipeline_marker');
     }
     const sessionId = String(payload.session_id || '');
     if (!sessionId) return;
