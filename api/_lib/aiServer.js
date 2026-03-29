@@ -1105,6 +1105,47 @@ const normalizeBriefingText = (rawText) => {
     return lines.slice(0, 5).join('\n');
 };
 
+const compactBriefingSnippet = (value, maxLength = 180) => {
+    const cleaned = cleanText(String(value || ''));
+    if (!cleaned) return '';
+    if (cleaned.length <= maxLength) return cleaned;
+    const softBreak = cleaned.lastIndexOf(' ', maxLength);
+    if (softBreak > Math.floor(maxLength * 0.6)) {
+        return `${cleaned.slice(0, softBreak).trim()}...`;
+    }
+    return `${cleaned.slice(0, maxLength).trim()}...`;
+};
+
+const buildFallbackBriefingText = ({ patientName, consultationType, clinicianName, timelineItems }) => {
+    const items = Array.isArray(timelineItems) ? timelineItems.filter(Boolean) : [];
+    const latest = items[0] || null;
+    const latestDate = cleanText(String(latest?.consultationAt || latest?.consultation_at || ''));
+    const latestHistory = cleanText(String(latest?.medicalHistory || latest?.medical_history || ''));
+    const priorCount = Math.max(0, items.length - 1);
+    const lines = [];
+
+    if (latestDate || latestHistory) {
+        lines.push(compactBriefingSnippet(
+            `${latestDate ? `Ultima sesion ${latestDate}: ` : 'Ultima sesion: '}${latestHistory || 'revisar historial clinico.'}`,
+            190
+        ));
+    }
+
+    if (priorCount > 0) {
+        lines.push(`Hay ${priorCount} sesion${priorCount === 1 ? '' : 'es'} previa${priorCount === 1 ? '' : 's'} en historial.`);
+    }
+
+    if (clinicianName) {
+        lines.push(`Profesional de referencia: ${clinicianName}.`);
+    }
+
+    if (!lines.length) {
+        lines.push(`Briefing breve para ${patientName || 'paciente'} sin historial suficiente en ${consultationType || 'consulta actual'}.`);
+    }
+
+    return lines.slice(0, 4).join('\n');
+};
+
 const buildBriefingPrompt = ({ patientName, consultationType, clinicianName, timelineItems }) => {
     const specialty = normalizeConsultationType(consultationType);
     const items = Array.isArray(timelineItems) ? timelineItems : [];
@@ -1384,20 +1425,28 @@ export const regenerateHistorySectionPayload = async (params) => {
 };
 
 export const generatePatientBriefingPayload = async ({ patientName, consultationType, clinicianName, timelineItems }) => {
-    const response = await callGroqChat({
-        prompt: buildBriefingPrompt({ patientName, consultationType, clinicianName, timelineItems }),
-        jsonMode: false,
-        temperature: 0.15,
-        maxTokens: 450
-    });
-    const normalizedText = normalizeBriefingText(response.text);
-    if (!normalizedText) {
-        throw new Error('briefing_empty_response');
+    try {
+        const response = await callGroqChat({
+            prompt: buildBriefingPrompt({ patientName, consultationType, clinicianName, timelineItems }),
+            jsonMode: false,
+            temperature: 0.15,
+            maxTokens: 450
+        });
+        const normalizedText = normalizeBriefingText(response.text);
+        if (!normalizedText) {
+            throw new Error('briefing_empty_response');
+        }
+        return {
+            text: normalizedText,
+            model: response.model
+        };
+    } catch (error) {
+        console.warn('[aiServer] generatePatientBriefingPayload fallback:', error instanceof Error ? error.message : error);
+        return {
+            text: buildFallbackBriefingText({ patientName, consultationType, clinicianName, timelineItems }),
+            model: 'fallback:timeline-briefing'
+        };
     }
-    return {
-        text: normalizedText,
-        model: response.model
-    };
 };
 
 export const transcribeAudioPayload = async ({ audioBase64, audioUrl, mimeType, consultationType, clinicianName, clientTrace }) => {
