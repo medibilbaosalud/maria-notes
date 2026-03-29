@@ -587,6 +587,23 @@
   color: var(--brand-primary);
 }
 
+.search-history-btn-secondary:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.search-history-btn-danger {
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.18);
+  background: #fff7f7;
+}
+
+.search-history-btn-danger:hover:not(:disabled) {
+  color: #ffffff;
+  background: #ef4444;
+  border-color: #ef4444;
+}
+
 .timeline-grid .detail-view {
   gap: 1rem;
 }

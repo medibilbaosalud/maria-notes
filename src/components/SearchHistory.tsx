@@ -13,6 +13,7 @@ import {
   Search,
   Shield,
   Sparkles,
+  Trash2,
   User,
   X
 } from 'lucide-react';
@@ -20,6 +21,7 @@ import ReactMarkdown from 'react-markdown';
 import { AIService } from '../services/ai';
 import {
   buildPsychologyCaseSummary,
+  deleteMedicalRecord,
   ensurePatientBriefing,
   getMedicalRecordByUuid,
   getPatientBriefing,
@@ -95,6 +97,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const [briefing, setBriefing] = useState<PatientBriefing | null>(null);
   const [timelineExpanded, setTimelineExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isDeletingRecord, setIsDeletingRecord] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportContent, setReportContent] = useState('');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -397,6 +400,29 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     printWindow.document.close();
   }, [selectedSpecialty]);
 
+  const handleDeleteSelectedRecord = useCallback(async () => {
+    if (!selectedItem || selectedItem.source !== 'current' || !selectedItem.recordUuid || isDeletingRecord) return;
+    const confirmed = window.confirm(`¿Quieres borrar la consulta actual de "${selectedGroup?.patientName || selectedItem.patientName}"? Esta acción también la eliminará de Supabase.`);
+    if (!confirmed) return;
+
+    setIsDeletingRecord(true);
+    try {
+      const deleted = await deleteMedicalRecord(selectedItem.recordUuid);
+      if (!deleted) {
+        window.alert('No se pudo borrar la consulta.');
+        return;
+      }
+
+      setSelectedRecord(null);
+      await loadResults(queryRef.current, selectedGroup?.patientName || selectedItem.patientName);
+    } catch (error) {
+      console.error('[SearchHistory] record deletion failed:', error);
+      window.alert('Ha fallado el borrado de la consulta.');
+    } finally {
+      setIsDeletingRecord(false);
+    }
+  }, [isDeletingRecord, loadResults, selectedGroup?.patientName, selectedItem]);
+
   const renderTimelineSnippet = (item: PatientTimelineItem) => {
     const value = item.medicalHistory.replace(/\s+/g, ' ').trim();
     return value.length > 160 ? `${value.slice(0, 160)}...` : value;
@@ -556,6 +582,16 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                       <button className="search-history-btn-secondary" onClick={handleOpenReport}>
                         <FileText size={16} />
                         <span>Informe</span>
+                      </button>
+                    )}
+                    {canOpenCurrent && (
+                      <button
+                        className="search-history-btn-secondary search-history-btn-danger"
+                        onClick={() => void handleDeleteSelectedRecord()}
+                        disabled={isDeletingRecord}
+                      >
+                        <Trash2 size={16} />
+                        <span>{isDeletingRecord ? 'Borrando...' : 'Borrar'}</span>
                       </button>
                     )}
                   </div>
