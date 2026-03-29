@@ -143,6 +143,7 @@ const toIsoString = (value?: string | null): string => {
 };
 
 const cleanText = (value?: string | null): string => String(value || '').replace(/\s+/g, ' ').trim();
+const preserveRichText = (value?: string | null): string => String(value || '').trim();
 
 const safeRecord = (value: unknown): Record<string, unknown> | null => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -164,7 +165,7 @@ const mapCurrentRecordToTimelineItem = (record: MedicalRecord): PatientTimelineI
     clinicianProfile: record.clinician_profile || undefined,
     clinicianName: displayPsychologyClinician(record.clinician_profile),
     consultationAt: toIsoString(record.updated_at || record.created_at),
-    medicalHistory: cleanText(record.medical_history),
+    medicalHistory: preserveRichText(record.medical_history),
     isEditable: true,
     sourceLabel: 'Consulta actual',
     recordUuid: record.record_uuid,
@@ -179,7 +180,7 @@ const mapLegacyRecordToTimelineItem = (record: LegacyClinicalRecord): PatientTim
     clinicianProfile: record.clinician_profile || undefined,
     clinicianName: displayPsychologyClinician(record.specialist_name || record.clinician_profile),
     consultationAt: toIsoString(record.consultation_at || record.updated_at || record.created_at),
-    medicalHistory: cleanText(record.medical_history),
+    medicalHistory: preserveRichText(record.medical_history),
     isEditable: false,
     sourceLabel: 'Historico importado',
     sourceEmail: record.source_email || undefined,
