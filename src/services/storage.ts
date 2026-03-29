@@ -435,6 +435,15 @@ const toCloudRecord = (record: MedicalRecord) => {
     };
 };
 
+const isMissingAuditDependencyError = (error: unknown): boolean => {
+    const message = String((error as { message?: string })?.message || '').toLowerCase();
+    const details = String((error as { details?: string })?.details || '').toLowerCase();
+    const combined = `${message} ${details}`;
+    return combined.includes('medical_records_audit_id_fkey')
+        || (combined.includes('foreign key') && combined.includes('audit_id'))
+        || combined.includes('violates foreign key constraint');
+};
+
 // Helper to sync a record to Supabase (fire-and-forget)
 const syncToCloud = async (record: MedicalRecord, operation: 'insert' | 'update' | 'delete') => {
     const client = getCloudClient();
@@ -443,9 +452,19 @@ const syncToCloud = async (record: MedicalRecord, operation: 'insert' | 'update'
     try {
         if (operation === 'insert' || operation === 'update') {
             const cloudRecord = toCloudRecord(record);
-            const { error } = await client
+            let { error } = await client
                 .from('medical_records')
                 .upsert([cloudRecord], { onConflict: 'record_uuid' });
+            if (error && isMissingAuditDependencyError(error)) {
+                const fallbackRecord = { ...cloudRecord, audit_id: null };
+                const retryResult = await client
+                    .from('medical_records')
+                    .upsert([fallbackRecord], { onConflict: 'record_uuid' });
+                error = retryResult.error ?? null;
+                if (!error) {
+                    console.warn('[Cloud Sync] Stored medical_record without audit_id; audit link will be backfilled later.');
+                }
+            }
             if (error) {
                 console.error(`[Cloud Sync] Upsert error (${operation}):`, error.message, error.details);
                 throw error;

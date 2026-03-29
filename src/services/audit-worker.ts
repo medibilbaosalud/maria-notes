@@ -248,6 +248,24 @@ const processPipelineAuditBundle = async (payload: Record<string, unknown>) => {
 
     if (auditError) throw auditError;
 
+    const recordUuid = String(auditData.record_uuid || '').trim();
+    if (recordUuid) {
+        try {
+            const { error: recordLinkError } = await supabase
+                .from('medical_records')
+                .update({
+                    audit_id: auditId,
+                    updated_at: nowIso()
+                })
+                .eq('record_uuid', recordUuid);
+            if (recordLinkError) {
+                console.warn('[AuditWorker] medical_records audit link update failed:', recordLinkError);
+            }
+        } catch (error) {
+            console.warn('[AuditWorker] medical_records audit link persistence error:', error);
+        }
+    }
+
     try {
         const { error: historyError } = await supabase.from('consultation_histories').upsert([{
             audit_id: auditId,
