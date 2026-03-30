@@ -49,7 +49,6 @@ import { convertBlobToWav } from './utils/audioProcessing';
 import { sortTranscriptChunksForMerge } from './utils/transcriptChunks';
 import { PipelineStageTracker } from './components/PipelineStageTracker';
 import { SpecialtyEntryScreen } from './components/SpecialtyEntryScreen';
-import { AccessGate } from './components/AccessGate';
 import { usePipelineStatusViewModel } from './features/ui/usePipelineStatusViewModel';
 import { usePipelineController } from './features/pipeline/usePipelineController';
 import { useSessionRecovery } from './features/pipeline/useSessionRecovery';
@@ -3763,18 +3762,10 @@ const AppContent = () => {
     );
 };
 
-const App = () => {
-    const [appAccessGranted, setAppAccessGranted] = useState(false);
-
-    return (
-        <SimulationProvider>
-            {appAccessGranted ? (
-                <AppContent />
-            ) : (
-                <AccessGate onUnlocked={() => setAppAccessGranted(true)} />
-            )}
-        </SimulationProvider>
-    );
-};
+const App = () => (
+    <SimulationProvider>
+        <AppContent />
+    </SimulationProvider>
+);
 
 export default App;
