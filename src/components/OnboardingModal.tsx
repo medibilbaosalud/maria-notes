@@ -75,7 +75,7 @@ const GENERIC_SLIDES: TunnelSlide[] = [
 ];
 
 const getSlidesForSpecialty = (specialty: ClinicalSpecialtyId): TunnelSlide[] =>
-    specialty === 'psicologia' ? PSYCHOLOGY_SLIDES : GENERIC_SLIDES;
+    specialty === 'psicologia' ? PSYCHOLOGY_SLIDES : [];
 
 const slideVariants = {
     enter: { opacity: 0, x: 60 },
@@ -104,9 +104,10 @@ export const OnboardingModal = ({
     const [hasSaved, setHasSaved] = useState(false);
     const isSetupStep = index === setupIndex;
     const isLastInfoStep = index === slides.length - 1;
-    const slide = slides[Math.min(index, slides.length - 1)];
+    const slide = slides[Math.min(index, Math.max(0, slides.length - 1))] || GENERIC_SLIDES[0];
     const SlideIcon = slide.icon;
     const isPsychology = specialty === 'psicologia';
+    const isOtorrino = specialty === 'otorrino';
     const name = clinicianName || 'profesional';
 
     useEffect(() => {
@@ -278,26 +279,28 @@ export const OnboardingModal = ({
                         </button>
                     ) : (
                         <div className="onboarding-style-footer">
-                            <button
-                                type="button"
-                                className="onboarding-style-secondary"
-                                onClick={() => {
-                                    onStartDemo();
-                                    onClose();
-                                }}
-                                disabled={isSaving}
-                            >
-                                <PlayCircle size={18} />
-                                Entrar sin guardar
-                            </button>
+                            {isPsychology && (
+                                <button
+                                    type="button"
+                                    className="onboarding-style-secondary"
+                                    onClick={() => {
+                                        onStartDemo();
+                                        onClose();
+                                    }}
+                                    disabled={isSaving}
+                                >
+                                    <PlayCircle size={18} />
+                                    Entrar sin guardar
+                                </button>
+                            )}
                             <button
                                 type="button"
                                 className="onboarding-tunnel-cta"
-                                onClick={() => void handleSave(true)}
+                                onClick={() => void handleSave(isPsychology)}
                                 disabled={!canSave}
                             >
                                 <Sparkles size={18} />
-                                {isSaving ? 'Guardando...' : 'Guardar y entrar'}
+                                {isSaving ? 'Guardando...' : isOtorrino ? 'Guardar estilo' : 'Guardar y entrar'}
                             </button>
                         </div>
                     )}

@@ -517,9 +517,10 @@ const AppContent = () => {
         if (!hasChosenWorkspaceMode) return;
         if (welcomeAutoOpenedRef.current) return;
         if (showWelcomeModal) return;
+        if (activeSpecialty !== 'psicologia') return;
         welcomeAutoOpenedRef.current = true;
         setShowWelcomeModal(true);
-    }, [hasChosenWorkspaceMode, showWelcomeModal]);
+    }, [activeSpecialty, hasChosenWorkspaceMode, showWelcomeModal]);
 
     const handleCloseWelcomeModal = useCallback(() => {
         setShowWelcomeModal(false);
@@ -3809,6 +3810,7 @@ const AppContent = () => {
                                 <Suspense fallback={<div className="view-loading">Cargando ajustes...</div>}>
                                     <Settings
                                         apiKey={apiKey}
+                                        activeSpecialty={activeSpecialty}
                                         onSave={handleSaveSettings}
                                         onClose={() => setShowSettings(false)}
                                     />

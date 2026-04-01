@@ -16,14 +16,16 @@ import { syncFromCloud } from '../services/storage';
 import { useSimulation } from './Simulation/SimulationContext';
 import { motionTransitions } from '../features/ui/motion-tokens';
 import { isSupabaseAutologinConfigured } from '../services/supabase';
+import type { ClinicalSpecialtyId } from '../clinical/specialties';
 
 interface SettingsProps {
   apiKey: string;
   onSave: (key: string) => void;
   onClose: () => void;
+  activeSpecialty: ClinicalSpecialtyId;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) => {
+export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose, activeSpecialty }) => {
   const [key, setKey] = useState(apiKey);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [backupStatus, setBackupStatus] = useState<'idle' | 'exporting' | 'importing' | 'success' | 'error'>('idle');
@@ -265,20 +267,22 @@ export const Settings: React.FC<SettingsProps> = ({ apiKey, onSave, onClose }) =
               )}
             </div>
 
-            <div className="settings-form-group settings-help-section">
-              <label>Ayuda y Tutoriales</label>
-              <button
-                type="button"
-                className="settings-btn-backup settings-demo-btn"
-                onClick={() => {
-                  startSimulation();
-                  onClose();
-                }}
-              >
-                <Play size={18} />
-                Ver Demo Interactiva (Auto-Pilot)
-              </button>
-            </div>
+            {activeSpecialty === 'psicologia' && (
+              <div className="settings-form-group settings-help-section">
+                <label>Ayuda y Tutoriales</label>
+                <button
+                  type="button"
+                  className="settings-btn-backup settings-demo-btn"
+                  onClick={() => {
+                    startSimulation();
+                    onClose();
+                  }}
+                >
+                  <Play size={18} />
+                  Ver Demo Interactiva (Auto-Pilot)
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="settings-modal-footer">

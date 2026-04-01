@@ -101,6 +101,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportContent, setReportContent] = useState('');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(40);
   const briefingRequestRef = useRef(0);
   const selectedGroupRef = useRef<PatientTimelineGroup | null>(null);
   const queryRef = useRef('');
@@ -135,6 +136,8 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const activeContent = selectedItem?.medicalHistory || '';
   const { history: activeHistory, notes: activeNotes } = parseContent(activeContent);
   const canOpenCurrent = selectedItem?.source === 'current' && Boolean(onLoadRecord) && Boolean(selectedItem?.recordUuid);
+  const visibleResults = React.useMemo(() => results.slice(0, visibleCount), [results, visibleCount]);
+  const hasMoreResults = visibleCount < results.length;
 
   const getDemoGroups = useCallback((searchTerm: string) => {
     if (!demoContinuity?.timelineGroup) return [] as PatientTimelineGroup[];
@@ -149,6 +152,10 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   useEffect(() => {
     queryRef.current = query;
   }, [query]);
+
+  useEffect(() => {
+    setVisibleCount(40);
+  }, [query, results.length, activeSpecialty, activeClinicianProfile]);
 
   const loadResults = useCallback(async (nextQuery?: string, preferredPatientName?: string) => {
     setIsLoading(true);
@@ -406,6 +413,15 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     return value.length > 160 ? `${value.slice(0, 160)}...` : value;
   };
 
+  const handleListScroll: React.UIEventHandler<HTMLDivElement> = useCallback((event) => {
+    if (!hasMoreResults) return;
+    const target = event.currentTarget;
+    const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+    if (distanceToBottom <= 320) {
+      setVisibleCount((current) => Math.min(current + 30, results.length));
+    }
+  }, [hasMoreResults, results.length]);
+
   const selectedContent = activeHistory || activeContent;
   const emptyStateMessage = !isCloudEnabled
     ? 'No hay nube configurada y no existen pacientes guardados en local.'
@@ -448,7 +464,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       </div>
 
       <div className="content-grid timeline-grid">
-        <div className="list-column">
+        <div className="list-column" onScroll={handleListScroll}>
           {isLoading ? (
             <div className="search-history-loading-state">
               <div className="search-history-spinner" />
@@ -462,7 +478,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
             </div>
           ) : (
             <div className="cards-list">
-              {results.map((group, index) => (
+              {visibleResults.map((group, index) => (
                 <motion.button
                   type="button"
                   key={group.normalizedPatientName}
@@ -499,6 +515,9 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   </div>
                 </motion.button>
               ))}
+              {hasMoreResults && (
+                <div className="history-list-loading-more">Cargando más pacientes...</div>
+              )}
             </div>
           )}
         </div>
