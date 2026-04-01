@@ -26,13 +26,29 @@ interface PatientBriefingCardProps {
   onDismiss?: () => void;
 }
 
+const STRUCTURED_BRIEFING_KEYS: Array<keyof StructuredBriefing> = [
+  'hilo_terapeutico',
+  'ultima_sesion',
+  'momento_del_proceso',
+  'pendientes',
+  'patrones_observados',
+  'alerta_clinica',
+  'frase_para_retomar',
+  'evolucion'
+];
+
 const parseStructuredBriefing = (summaryText: string): StructuredBriefing | null => {
   const text = String(summaryText || '').trim();
   if (!text) return null;
 
   try {
     const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === 'object' && (parsed.hilo_terapeutico || parsed.ultima_sesion)) {
+    if (
+      parsed
+      && typeof parsed === 'object'
+      && !Array.isArray(parsed)
+      && STRUCTURED_BRIEFING_KEYS.some((key) => key in parsed)
+    ) {
       return parsed as StructuredBriefing;
     }
   } catch {
@@ -242,4 +258,3 @@ export const PatientBriefingCard: React.FC<PatientBriefingCardProps> = ({
     </section>
   );
 };
-

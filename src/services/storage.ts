@@ -287,6 +287,8 @@ const getBriefingRecordIds = (items: PatientTimelineItem[]): string[] => {
         .filter((value, index, array): value is string => Boolean(value) && array.indexOf(value) === index);
 };
 
+const briefingTimelineOptions = { includeLegacy: true } as const;
+
 const getPatientBriefingCandidates = async (
     patientName: string,
     specialty?: string,
@@ -620,7 +622,7 @@ export const getPatientBriefing = async (
         const normalizedName = normalizePatientName(patientName || '');
         if (!normalizedName) return null;
 
-        const timeline = await getPatientTimeline(patientName, specialty, clinician);
+        const timeline = await getPatientTimeline(patientName, specialty, clinician, briefingTimelineOptions);
         const latestConsultationAt = timeline[0]?.consultationAt || '';
         const candidates = await getPatientBriefingCandidates(patientName, specialty, clinician);
         const readyCandidates = candidates
@@ -650,7 +652,7 @@ export const markPatientBriefingStale = async (
     clinician?: string
 ): Promise<PatientBriefing | null> => {
     try {
-        const timeline = await getPatientTimeline(patientName, specialty, clinician);
+        const timeline = await getPatientTimeline(patientName, specialty, clinician, briefingTimelineOptions);
         if (!timeline.length) return null;
 
         const normalizedName = normalizePatientName(patientName || '');
@@ -693,15 +695,12 @@ export const ensurePatientBriefing = async (
     clinician?: string
 ): Promise<PatientBriefing | null> => {
     try {
-        const timeline = await getPatientTimeline(patientName, specialty, clinician);
+        const timeline = await getPatientTimeline(patientName, specialty, clinician, briefingTimelineOptions);
         if (!timeline.length) return null;
 
         const latestConsultationAt = timeline[0]?.consultationAt || '';
         const candidates = await getPatientBriefingCandidates(patientName, specialty, clinician);
         const latestCandidate = candidates.sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
-        if (latestCandidate?.status === 'failed') {
-            return null;
-        }
 
         const currentReady = candidates
             .filter((briefing) => briefing.status === 'ready')
@@ -713,7 +712,9 @@ export const ensurePatientBriefing = async (
 
         const sourceKind = getBriefingSourceKind(timeline);
         const shouldGenerate = Boolean(
-            sourceKind === 'legacy'
+            !latestCandidate
+            || latestCandidate.status === 'failed'
+            || sourceKind === 'legacy'
             || candidates.some((briefing) => briefing.status === 'stale')
             || (latestCandidate && latestCandidate.status === 'ready' && !isBriefingCurrent(latestCandidate, latestConsultationAt))
         );
@@ -753,7 +754,7 @@ export const ensurePatientBriefing = async (
         return generated;
     } catch (error) {
         try {
-            const timeline = await getPatientTimeline(patientName, specialty, clinician);
+            const timeline = await getPatientTimeline(patientName, specialty, clinician, briefingTimelineOptions);
             if (!timeline.length) return null;
             const latestConsultationAt = timeline[0]?.consultationAt || nowIso();
             const candidates = await getPatientBriefingCandidates(patientName, specialty, clinician);

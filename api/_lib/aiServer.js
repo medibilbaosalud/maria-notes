@@ -1105,6 +1105,17 @@ ${String(currentHistory || '').slice(0, 12000)}`;
 
 const cleanBriefingLine = (value) => cleanText(String(value || '').replace(/^[-*•]+\s*/, ''));
 
+const STRUCTURED_BRIEFING_KEYS = [
+    'hilo_terapeutico',
+    'ultima_sesion',
+    'momento_del_proceso',
+    'pendientes',
+    'patrones_observados',
+    'alerta_clinica',
+    'frase_para_retomar',
+    'evolucion'
+];
+
 const normalizeBriefingText = (rawText) => {
     const text = String(rawText || '').trim();
     if (!text) return '';
@@ -1112,7 +1123,12 @@ const normalizeBriefingText = (rawText) => {
     // Try to parse as structured JSON first
     try {
         const parsed = JSON.parse(text);
-        if (parsed && typeof parsed === 'object' && parsed.hilo_terapeutico) {
+        if (
+            parsed
+            && typeof parsed === 'object'
+            && !Array.isArray(parsed)
+            && STRUCTURED_BRIEFING_KEYS.some((key) => key in parsed)
+        ) {
             return JSON.stringify(parsed);
         }
     } catch {

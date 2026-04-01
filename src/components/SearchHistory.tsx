@@ -81,7 +81,8 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   focusedPatientName = '',
   psychologyClinicianName,
   onFocusedPatientNameConsumed,
-  onLoadRecord
+  onLoadRecord,
+  onUseAsContext
 }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PatientTimelineGroup[]>([]);
@@ -153,7 +154,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       const effectiveQuery = typeof nextQuery === 'string' ? nextQuery : queryRef.current;
       const groups = demoContinuity
         ? getDemoGroups(effectiveQuery)
-        : await searchPatientTimeline(effectiveQuery, 'psicologia', activeClinicianProfile, { includeLegacy: false });
+        : await searchPatientTimeline(effectiveQuery, 'psicologia', activeClinicianProfile, { includeLegacy: true });
       setResults(groups);
       const normalizedPreferredPatient = preferredPatientName?.trim().toLowerCase();
       const previousSelectedGroup = selectedGroupRef.current;
@@ -249,8 +250,9 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
         return;
       }
       setCaseSummaryLoading(true);
+      setCaseSummary(null);
       try {
-        const summary = await buildPsychologyCaseSummary(selectedGroupName, activeClinicianProfile, { includeLegacy: false });
+        const summary = await buildPsychologyCaseSummary(selectedGroupName, activeClinicianProfile, { includeLegacy: true });
         if (!cancelled) setCaseSummary(summary);
       } finally {
         if (!cancelled) setCaseSummaryLoading(false);
@@ -275,17 +277,12 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       }
 
       const currentRequest = ++briefingRequestRef.current;
+      setBriefing(null);
       try {
         const existing = await getPatientBriefing(selectedGroupName, 'psicologia', activeClinicianProfile);
         if (cancelled || currentRequest !== briefingRequestRef.current) return;
         if (existing) {
           setBriefing(existing);
-          return;
-        }
-
-        const shouldGenerate = false;
-        if (!shouldGenerate) {
-          setBriefing(null);
           return;
         }
 
@@ -334,6 +331,16 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     }
   }, [onLoadRecord]);
 
+  const handleUseAsContext = useCallback(() => {
+    if (!onUseAsContext || !selectedItem || !selectedGroup) return;
+    onUseAsContext({
+      patientName: selectedGroup.patientName,
+      specialty: selectedItem.specialty,
+      clinicianProfile: selectedItem.clinicianProfile,
+      clinicianName: selectedItem.clinicianName
+    });
+  }, [onUseAsContext, selectedGroup, selectedItem]);
+
   const handleCopy = useCallback(async (text: string) => {
     const copiedOk = await safeCopyToClipboard(text);
     if (!copiedOk) return;
@@ -368,7 +375,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     } finally {
       setIsGeneratingReport(false);
     }
-  }, [apiKey, selectedItem, selectedSpecialty]);
+  }, [apiKey, selectedItem, selectedRecord, selectedSpecialty]);
 
   const handleSaveReport = useCallback(async () => {
     const currentRecord = selectedRecord || (selectedItem?.source === 'current' && selectedItem.recordUuid
@@ -530,6 +537,12 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   </div>
 
                   <div className="header-actions">
+                    {onUseAsContext && (
+                      <button className="search-history-btn-primary" onClick={handleUseAsContext}>
+                        <Sparkles size={16} />
+                        <span>Usar como contexto</span>
+                      </button>
+                    )}
                     {canOpenCurrent && (
                       <button className="search-history-btn-secondary" onClick={() => void handleLoadCurrentRecord(selectedItem)}>
                         <ArrowRight size={16} />

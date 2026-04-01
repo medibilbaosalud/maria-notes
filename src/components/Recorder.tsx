@@ -236,7 +236,7 @@ export const Recorder: React.FC<RecorderProps> = ({
             8,
             selectedSpecialty,
             activeClinicianProfile,
-            { includeLegacy: false }
+            { includeLegacy: true }
         );
         if (currentRequest !== suggestionRequestRef.current) return;
         setSuggestions(next);
@@ -273,10 +273,11 @@ export const Recorder: React.FC<RecorderProps> = ({
 
     const currentRequest = ++caseSummaryRequestRef.current;
     setCaseSummaryLoading(true);
+    setCaseSummary(null);
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const summary = await buildPsychologyCaseSummary(trimmed, activeClinicianProfile, { includeLegacy: false });
+          const summary = await buildPsychologyCaseSummary(trimmed, activeClinicianProfile, { includeLegacy: true });
           if (cancelled || currentRequest !== caseSummaryRequestRef.current) return;
           setCaseSummary(summary);
         } catch (error) {
@@ -316,6 +317,7 @@ export const Recorder: React.FC<RecorderProps> = ({
     }
 
     const currentRequest = ++briefingRequestRef.current;
+    setBriefing(null);
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
