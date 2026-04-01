@@ -7,6 +7,7 @@ import { MBSLogo } from './MBSLogo';
 import { buildPsychologyCaseSummary, getPatientBriefing, getPatientNameSuggestions, type PatientNameSuggestion, type PatientCaseSummary, type PatientBriefing } from '../services/storage';
 import { fadeSlideInSmall, motionEase, motionTransitions, softScaleTap, statusPulseSoft } from '../features/ui/motion-tokens';
 import type { ClinicalSpecialtyId } from '../clinical/specialties';
+import { resolveFixedClinicianProfileForSpecialty } from '../clinical/clinicians';
 import { useSimulation } from './Simulation/SimulationContext';
 import { PatientBriefingCard } from './PatientBriefingCard';
 import './Recorder.css';
@@ -67,7 +68,7 @@ export const Recorder: React.FC<RecorderProps> = ({
   const [micErrorMessage, setMicErrorMessage] = useState('');
   const { isPlaying, demoData } = useSimulation();
   const normalizedDemoPatientName = demoData?.patientName?.trim().toLowerCase() || '';
-  const activeClinicianProfile = selectedSpecialty === 'psicologia' ? psychologyClinicianName : undefined;
+  const activeClinicianProfile = resolveFixedClinicianProfileForSpecialty(selectedSpecialty, psychologyClinicianName);
 
   useEffect(() => {
     patientNameRef.current = patientName;
@@ -345,10 +346,16 @@ export const Recorder: React.FC<RecorderProps> = ({
 
   const patientNameValid = patientNameRef.current.trim().length >= 2;
   const canStartRecording = canStart && patientNameValid && !isFinalizing;
+  const startDisabledBySystem = !canStart && patientNameValid;
   const isProcessing = isFinalizing
     || (!isRecording && !!processingLabel && processingLabel.toLowerCase() !== 'listo para grabar');
 
   const handleStart = async () => {
+    if (!patientNameValid) {
+      inputRef.current?.focus();
+      setIsSuggestionsOpen(true);
+      return;
+    }
     if (!canStartRecording) return;
     setIsFinalizing(false);
     setIsSuggestionsOpen(false);
@@ -682,8 +689,8 @@ export const Recorder: React.FC<RecorderProps> = ({
                 id="main-record-btn"
                 className="action-btn-large start"
                 onClick={handleStart}
-                disabled={!canStartRecording}
-                title={!canStartRecording ? (startBlockReason || 'Completa el preflight antes de iniciar') : undefined}
+                disabled={startDisabledBySystem || isFinalizing}
+                title={startDisabledBySystem || isFinalizing ? (startBlockReason || 'Completa el preflight antes de iniciar') : undefined}
                 {...softScaleTap}
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}

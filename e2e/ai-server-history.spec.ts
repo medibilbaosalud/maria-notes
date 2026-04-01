@@ -51,7 +51,7 @@ test.describe('generateMedicalHistoryPayload', () => {
 
   test('uses a single model call and returns unified ORL history payload', async () => {
     let fetchCalls = 0;
-    globalThis.fetch = async () => {
+    globalThis.fetch = async (_input, init) => {
       fetchCalls += 1;
       return buildGeminiResponse({
         history_markdown: `## MOTIVO DE CONSULTA
@@ -120,6 +120,79 @@ Tratamiento topico y control`,
     expect(result.gemini_calls_used).toBe(1);
     expect(result.one_call_policy_applied).toBe(true);
     expect(result.quality_notes).toEqual([]);
+  });
+
+  test('injects the ORL Gotxi style supplement into the generation prompt without contaminating output data', async () => {
+    let capturedPrompt = '';
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body || '{}'));
+      capturedPrompt = String(body?.contents?.[0]?.parts?.[0]?.text || '');
+      return buildGeminiResponse({
+        history_markdown: `## MOTIVO DE CONSULTA
+Refiere otalgia derecha
+
+## ANTECEDENTES
+- Alergias: No consta
+- Enfermedades cronicas: No consta
+- Cirugias: No consta
+- Tratamiento habitual: No consta
+
+## ENFERMEDAD ACTUAL
+- Sintomas: otalgia derecha
+- Evolucion: 72 horas
+
+## EXPLORACION / PRUEBAS
+EXPLORACION: OTOSCOPIA: OD: hiperemia. OI: normal.
+
+## DIAGNOSTICO
+Otitis externa derecha
+
+## PLAN
+Tratamiento topico y control`,
+        extraction: {
+          antecedentes: {
+            alergias: [],
+            enfermedades_cronicas: [],
+            cirugias: [],
+            tratamiento_habitual: []
+          },
+          enfermedad_actual: {
+            motivo_consulta: 'Refiere otalgia derecha',
+            sintomas: ['otalgia derecha'],
+            evolucion: '72 horas'
+          },
+          exploraciones_realizadas: {
+            otoscopia: 'OD: hiperemia. OI: normal.'
+          },
+          diagnostico: ['Otitis externa derecha'],
+          plan: 'Tratamiento topico y control',
+          notas_calidad: []
+        },
+        classification: {
+          visit_type: 'follow_up',
+          clinical_area: 'ear',
+          urgency: 'routine',
+          confidence: 0.95
+        },
+        quality_notes: [],
+        uncertainty_flags: []
+      });
+    };
+
+    const result = await generateMedicalHistoryPayload({
+      transcription: 'Paciente con otalgia derecha de tres dias.',
+      patientName: 'Paciente ORL',
+      consultationType: 'otorrino',
+      learningContext: undefined
+    });
+
+    expect(capturedPrompt).toContain('ESTILO PROFESIONAL DE DRA. GOTXI');
+    expect(capturedPrompt).toContain('SENALES DEL CORPUS ORL DE GOTXI');
+    expect(capturedPrompt).toContain('EXPLORACION:');
+    expect(capturedPrompt).toContain('OTOSCOPIA:');
+    expect(result.data).toContain('## MOTIVO DE CONSULTA');
+    expect(result.data).toContain('## PLAN');
+    expect(result.data).not.toContain('SENALES DEL CORPUS ORL DE GOTXI');
   });
 
   test('captures Gemini thought trace internally without contaminating the clinical history', async () => {

@@ -16,6 +16,13 @@ export interface ClinicalStyleProfile extends ClinicalStyleReference {
 
 const cleanText = (value?: string | null): string => String(value || '').replace(/\r/g, '').trim();
 
+const buildProfileDisplayName = (specialty: ClinicalSpecialtyId, clinicianProfile?: string | null): string => {
+    if (specialty === 'psicologia') return 'Estilo de historias psicologia';
+    return clinicianProfile === 'gotxi'
+        ? 'Estilo de historias ORL · Dra. Gotxi'
+        : 'Estilo de historias ORL';
+};
+
 const normalizeHeading = (value: string): string => value
     .trim()
     .toLowerCase()
@@ -201,7 +208,10 @@ const mapRowToProfile = (row: Record<string, unknown>, specialty: ClinicalSpecia
         id: String(row.id || ''),
         specialty,
         clinicianProfile: typeof row.clinician_profile === 'string' ? row.clinician_profile : null,
-        displayName: typeof row.display_name === 'string' ? row.display_name : null,
+        displayName: typeof row.display_name === 'string' ? row.display_name : buildProfileDisplayName(
+            specialty,
+            typeof row.clinician_profile === 'string' ? row.clinician_profile : null
+        ),
         referenceStory,
         generatedTemplate,
         updatedAt: String(row.updated_at || new Date().toISOString())
@@ -279,7 +289,7 @@ export const saveClinicalStyleProfile = async (params: {
         owner_user_id: ownerUserId,
         specialty,
         clinician_profile: params.clinicianProfile || null,
-        display_name: specialty === 'psicologia' ? 'Estilo de historias psicologia' : 'Estilo de historias ORL',
+        display_name: buildProfileDisplayName(specialty, params.clinicianProfile || null),
         note_preferences: {
             mode: 'reference_story',
             reference_story: referenceStory,

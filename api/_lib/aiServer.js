@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { del, get } from '@vercel/blob';
+import { GENERATED_ORL_STYLE_PROFILES } from './orlStyleProfiles.generated.js';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
@@ -15,6 +16,25 @@ const ORL_STYLE_PROFILE = `ESTILO ORL TELEGRAFICO (OBLIGATORIO)
 - Exploracion/pruebas con etiquetas cortas tipo "ETIQUETA: hallazgo".
 - Plan en acciones breves y operativas.
 - No inventes datos ni expandas mas alla de la transcripcion.`;
+
+const ORL_GOTXI_STYLE_PROFILE = `ESTILO PROFESIONAL DE DRA. GOTXI (OBLIGATORIO EN ORL)
+- La historia debe sonar a consulta ORL real de Dra. Gotxi: muy sintetica, clinica, directa y resolutiva.
+- Prioriza aperturas naturales tipo "Refiere...", "Acude..." o "Desde hace..." cuando encajen con la transcripcion.
+- Dentro de las secciones, usa bloques muy compactos con etiquetas clinicas cortas como "EXPLORACION:", "OTOSCOPIA:", "VIDEONASO:", "IMPE:" o equivalentes solo si la transcripcion aporta ese contenido.
+- Usa lateralidad compacta y lenguaje ORL de consulta: "OD", "OI", "IZQ", "DCHA", "bilateral", "control", "alta", siempre que este sustentado.
+- El plan debe ser operativo, breve y en estilo de pauta real de consulta, sin explicaciones docentes ni relleno.
+- Si la transcripcion permite concrecion, da preferencia a sintomas ORL, evolucion, exploracion, prueba realizada, impresion diagnostica y conducta.
+- Mantiene frases cortas y densas en informacion. Evita parrafos largos si la informacion puede resolverse con 1-3 frases clinicas compactas.
+- Si un dato no consta, escribe "No consta", pero sin convertir toda la historia en una plantilla mecanica.
+- NO imites erratas, ruido de OCR, fallos de acentuacion, codificacion extrana ni abreviaturas ambiguas que bajen la calidad final.
+- NO copies literalmente la historia de referencia; solo imita voz, ritmo, etiquetas, longitud y forma de sintetizar.`;
+
+const ORL_GOTXI_STYLE_EXAMPLES = `EJEMPLOS DE FORMA (NO REUTILIZAR CONTENIDO NI DATOS)
+1) Apertura breve con motivo y evolucion: "Refiere..." o "Acude..." y despues una exploracion ORL muy sintetica.
+2) Si hay tapones o cerumen, es preferible una redaccion muy operativa con "OTOSCOPIA: OD... OI..." y un plan de control o alta si procede.
+3) Si hay disfonia, rinorrea, hipoacusia o mareo, prioriza la secuencia problema actual -> exploracion/prueba -> plan, con pocas frases y mucha utilidad clinica.
+4) Si se realiza una exploracion endoscopica o funcional, nombra la prueba con etiqueta corta y describe solo el hallazgo clinicamente relevante.
+5) El plan puede incluir tratamiento, lavados, pauta, derivacion, control o alta, siempre en estilo breve y real de consulta ORL.`;
 
 const PSYCHOLOGY_STYLE_PROFILE = `ESTILO PSICOLOGIA CLINICA (OBLIGATORIO)
 - Tono profesional, sobrio y centrado en la utilidad clinica.
@@ -84,6 +104,41 @@ const normalizePsychologyClinicianName = (value) => {
     return 'Ainhoa';
 };
 
+const normalizeOrlClinicianName = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return 'Dra. Gotxi';
+    if (normalized === 'gotxi' || normalized.includes('gotxi') || normalized.includes('itziar')) return 'Dra. Gotxi';
+    return 'Dra. Gotxi';
+};
+
+const buildOrlCorpusSummary = (profile) => {
+    if (!profile) return '';
+    const openers = Array.isArray(profile.frequentOpeners) ? profile.frequentOpeners.slice(0, 5).join(', ') : '';
+    const labels = Array.isArray(profile.frequentLabels) ? profile.frequentLabels.slice(0, 8).join(', ') : '';
+    const terms = Array.isArray(profile.frequentTerms) ? profile.frequentTerms.slice(0, 8).join(', ') : '';
+    const abbreviations = Array.isArray(profile.frequentAbbreviations) ? profile.frequentAbbreviations.slice(0, 8).join(', ') : '';
+    return `SENALES DEL CORPUS ORL DE GOTXI
+- Muestras analizadas: ${Number(profile.sampleCount || 0)}.
+- Aperturas frecuentes: ${openers || 'Refiere, Acude, Desde hace'}.
+- Etiquetas frecuentes: ${labels || 'EXPLORACION:, OTOSCOPIA:, PLAN:'}.
+- Terminos frecuentes: ${terms || 'disfonia, hipoacusia, cerumen, control'}.
+- Abreviaturas frecuentes: ${abbreviations || 'OD, OI, IZQ, DCHA'}.
+- Usa estas senales para parecer una nota real de Dra. Gotxi, pero sin copiar datos de pacientes ni reproducir errores tipograficos.`;
+};
+
+const getOrlClinicianStyle = (clinicianName) => {
+    const normalized = normalizeOrlClinicianName(clinicianName);
+    const corpusProfile = GENERATED_ORL_STYLE_PROFILES.gotxi;
+    return {
+        name: normalized,
+        historyProfile: `${ORL_GOTXI_STYLE_PROFILE}\n${buildOrlCorpusSummary(corpusProfile)}`,
+        historyExamples: ORL_GOTXI_STYLE_EXAMPLES,
+        reportProfile: `- Mantiene una voz ORL muy breve, directa y clinica, alineada con Dra. Gotxi.
+- Prioriza hallazgo ORL, prueba, impresion y conducta con frases compactas.
+- No reproduce erratas, ruido ni abreviaturas ambiguas aunque la referencia legacy las contenga.`
+    };
+};
+
 const getPsychologyClinicianStyle = (clinicianName) => {
     const normalized = normalizePsychologyClinicianName(clinicianName);
     if (normalized === 'June') {
@@ -135,9 +190,12 @@ const buildTranscriptionPrompt = (consultationType, clinicianName) => {
     const psychologyClinician = specialty === 'psicologia'
         ? normalizePsychologyClinicianName(clinicianName)
         : null;
+    const orlClinician = specialty === 'otorrino'
+        ? normalizeOrlClinicianName(clinicianName)
+        : null;
     const domainHint = specialty === 'psicologia'
         ? `Consulta de psicologia clinica${psychologyClinician ? ` (${psychologyClinician})` : ''}.`
-        : 'Consulta medica de otorrinolaringologia.';
+        : `Consulta medica de otorrinolaringologia${orlClinician ? ` (${orlClinician})` : ''}.`;
 
     return [
         domainHint,
@@ -1015,6 +1073,7 @@ const buildGenerateHistoryPrompt = (transcription, patientName, consultationType
     const specialty = getSpecialtyConfig(consultationType);
     const specialtyRole = specialty.specialty === 'psicologia' ? 'psicologia clinica' : 'otorrinolaringologia';
     const psychologyClinicianStyle = specialty.specialty === 'psicologia' ? getPsychologyClinicianStyle(clinicianName) : null;
+    const orlClinicianStyle = specialty.specialty === 'otorrino' ? getOrlClinicianStyle(clinicianName) : null;
     const activeTemplate = String(styleReference?.generatedTemplate || '').trim() || specialty.historyTemplate;
     return `Eres un asistente clinico experto en ${specialtyRole}. Responde SOLO JSON valido.
 Objetivo: generar historia clinica final y extraccion estructurada en una sola respuesta.
@@ -1028,6 +1087,7 @@ ${activeTemplate}
 
 ${specialty.styleProfile}
 ${psychologyClinicianStyle ? `\n${psychologyClinicianStyle.historyProfile}\n\n${psychologyClinicianStyle.historyExamples}` : ''}
+${orlClinicianStyle ? `\n${orlClinicianStyle.historyProfile}\n\n${orlClinicianStyle.historyExamples}` : ''}
 ${formatLearningPromptContext(learningContext)}
 ${formatStyleReferencePrompt(styleReference)}
 
@@ -1080,6 +1140,7 @@ Reglas:
 - Si falta un dato, indica "No consta".
 - Responde en texto Markdown simple.
 ${normalizeConsultationType(consultationType) === 'psicologia' ? getPsychologyClinicianStyle(clinicianName).reportProfile : ''}
+${normalizeConsultationType(consultationType) === 'otorrino' ? getOrlClinicianStyle(clinicianName).reportProfile : ''}
 ${formatLearningPromptContext(learningContext)}
 
 TRANSCRIPCION:
@@ -1094,6 +1155,7 @@ Reglas:
 - Mantiene estilo clinico breve.
 - Si falta dato, escribe "No consta".
 ${normalizeConsultationType(consultationType) === 'psicologia' ? getPsychologyClinicianStyle(clinicianName).historyProfile : ''}
+${normalizeConsultationType(consultationType) === 'otorrino' ? getOrlClinicianStyle(clinicianName).historyProfile : ''}
 ${formatLearningPromptContext(learningContext)}
 ${formatStyleReferencePrompt(styleReference)}
 

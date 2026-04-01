@@ -76,7 +76,7 @@ export const Layout: React.FC<LayoutProps> = ({
             <FileBarChart size={20} />
             <span>Informes</span>
           </button>
-          {onOpenGuide && activeSpecialty === 'psicologia' && (
+          {onOpenGuide && (
             <button className="settings-btn guide-btn" onClick={onOpenGuide} aria-label="Configurar estilo de redaccion">
               <BookOpen size={20} />
               <span>Estilo de redaccion</span>

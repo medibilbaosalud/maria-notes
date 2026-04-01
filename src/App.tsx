@@ -59,6 +59,10 @@ import { usePipelineStatusViewModel } from './features/ui/usePipelineStatusViewM
 import { usePipelineController } from './features/pipeline/usePipelineController';
 import { useSessionRecovery } from './features/pipeline/useSessionRecovery';
 import { fadeSlideInSmall } from './features/ui/motion-tokens';
+import {
+    resolveFixedClinicianNameForSpecialty,
+    resolveFixedClinicianProfileForSpecialty
+} from './clinical/clinicians';
 import { withTimeout } from './utils/asyncTimeout';
 import { safeGetLocalStorage, safeSetLocalStorage } from './utils/safeBrowser';
 import { useCloudSync } from './hooks/useCloudSync';
@@ -319,12 +323,12 @@ const AppContent = () => {
         safeSetLocalStorage(PSYCHOLOGY_CLINICIAN_STORAGE_KEY, clinicianName);
     }, []);
 
-    const resolveClinicianNameForSpecialty = useCallback((_specialty: ClinicalSpecialtyId): string | undefined => {
-        return undefined;
-    }, []);
+    const resolveClinicianNameForSpecialty = useCallback((specialty: ClinicalSpecialtyId): string | undefined => {
+        return resolveFixedClinicianNameForSpecialty(specialty, psychologyClinicianName);
+    }, [psychologyClinicianName]);
 
     const resolveClinicianProfileForSpecialty = useCallback((specialty: ClinicalSpecialtyId): string | undefined => {
-        return specialty === 'psicologia' ? psychologyClinicianName : undefined;
+        return resolveFixedClinicianProfileForSpecialty(specialty, psychologyClinicianName);
     }, [psychologyClinicianName]);
 
     const resolveStyleReferenceForSpecialty = useCallback((specialty: ClinicalSpecialtyId) => {
@@ -3546,7 +3550,8 @@ const AppContent = () => {
                     <SearchHistory
                         apiKey={apiKey}
                         focusedPatientName={historyFocusedPatientName}
-                        psychologyClinicianName={psychologyClinicianName}
+                        activeSpecialty={activeSpecialty}
+                        clinicianProfile={resolveClinicianProfileForSpecialty(activeSpecialty)}
                         onFocusedPatientNameConsumed={() => setHistoryFocusedPatientName('')}
                         onLoadRecord={(record) => {
                             setHistory(record.medical_history);
@@ -3759,12 +3764,12 @@ const AppContent = () => {
                         {showWelcomeModal && (
                             <OnboardingModal
                                 specialty={activeSpecialty}
-                                clinicianName={activeSpecialty === 'psicologia' ? psychologyClinicianName : undefined}
+                                clinicianName={resolveClinicianNameForSpecialty(activeSpecialty)}
                                 referenceStory={clinicalStyleProfile?.referenceStory}
                                 generatedTemplate={clinicalStyleProfile?.generatedTemplate}
                                 isProfileLoading={clinicalStyleProfileLoading}
                                 onClose={handleCloseWelcomeModal}
-                                onStartDemo={() => startSimulation(activeSpecialty, activeSpecialty === 'psicologia' ? psychologyClinicianName : undefined)}
+                                onStartDemo={() => startSimulation(activeSpecialty, resolveClinicianNameForSpecialty(activeSpecialty))}
                                 onSaveStyleProfile={handleSaveClinicalStyleProfile}
                             />
                         )}

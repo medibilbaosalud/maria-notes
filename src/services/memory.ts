@@ -4,6 +4,7 @@ import { recordLearningMetric } from './audit-worker';
 import type { ConsultationClassification } from './groq';
 import type { LearningArtifactType, RulePack, RulePackContext, RulePackRule } from './learning/types';
 import { normalizeClinicalSpecialty } from '../clinical/specialties';
+import { normalizeClinicianProfileForSpecialty } from '../clinical/clinicians';
 
 const MEMORY_MODEL = getTaskModels('memory')[0] || 'llama-3.3-70b-versatile';
 const RULEPACK_APPLY_ENABLED = String(import.meta.env.VITE_RULEPACK_APPLY_ENABLED ?? 'true').toLowerCase() === 'true';
@@ -131,10 +132,9 @@ export class MemoryService {
 
     private static normalizeClinicianScope(specialty?: string, clinicianProfile?: string | null): string {
         const normalizedSpecialty = normalizeClinicalSpecialty(specialty);
-        const normalizedClinician = String(clinicianProfile || '').trim().toLowerCase();
-        if (normalizedSpecialty === 'otorrino') return 'otorrino';
-        if (normalizedClinician === 'june') return 'june';
-        return 'ainhoa';
+        const normalizedClinician = normalizeClinicianProfileForSpecialty(normalizedSpecialty, clinicianProfile);
+        if (normalizedSpecialty === 'otorrino') return normalizedClinician || 'gotxi';
+        return normalizedClinician || 'ainhoa';
     }
 
     private static resolveRuleClinicianProfile(

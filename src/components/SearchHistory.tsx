@@ -36,7 +36,7 @@ import { isCloudSyncEnabled, useCloudSync } from '../hooks/useCloudSync';
 import { motionTransitions } from '../features/ui/motion-tokens';
 import { safeCopyToClipboard } from '../utils/safeBrowser';
 import { buildPrintableDocument } from '../utils/printTemplates';
-import { getClinicalSpecialtyConfig, normalizeClinicalSpecialty } from '../clinical/specialties';
+import { getClinicalSpecialtyConfig, normalizeClinicalSpecialty, type ClinicalSpecialtyId } from '../clinical/specialties';
 import { useSimulation } from './Simulation/SimulationContext';
 import { PatientBriefingCard } from './PatientBriefingCard';
 import './SearchHistory.css';
@@ -44,7 +44,8 @@ import './SearchHistory.css';
 interface SearchHistoryProps {
   apiKey: string;
   focusedPatientName?: string;
-  psychologyClinicianName?: 'Ainhoa' | 'June';
+  activeSpecialty: ClinicalSpecialtyId;
+  clinicianProfile?: string;
   onFocusedPatientNameConsumed?: () => void;
   onLoadRecord?: (record: MedicalRecord) => void;
   onUseAsContext?: (payload: {
@@ -79,7 +80,8 @@ const modalContentVariants = {
 export const SearchHistory: React.FC<SearchHistoryProps> = ({
   apiKey,
   focusedPatientName = '',
-  psychologyClinicianName,
+  activeSpecialty,
+  clinicianProfile,
   onFocusedPatientNameConsumed,
   onLoadRecord,
   onUseAsContext
@@ -120,7 +122,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const normalizedDemoPatientName = demoData?.patientName?.trim().toLowerCase() || '';
   const selectedGroupName = selectedGroup?.patientName || '';
   const selectedGroupNormalizedName = selectedGroup?.normalizedPatientName || '';
-  const activeClinicianProfile = psychologyClinicianName;
+  const activeClinicianProfile = clinicianProfile;
   const isDemoSelectedGroup = Boolean(
     demoContinuity
     && selectedGroupNormalizedName
@@ -129,7 +131,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const effectiveCaseSummary = isDemoSelectedGroup ? demoContinuity?.caseSummary ?? null : caseSummary;
   const effectiveCaseSummaryLoading = isDemoSelectedGroup ? false : caseSummaryLoading;
 
-  const selectedSpecialty = normalizeClinicalSpecialty(selectedItem?.specialty || 'psicologia');
+  const selectedSpecialty = normalizeClinicalSpecialty(selectedItem?.specialty || activeSpecialty);
   const activeContent = selectedItem?.medicalHistory || '';
   const { history: activeHistory, notes: activeNotes } = parseContent(activeContent);
   const canOpenCurrent = selectedItem?.source === 'current' && Boolean(onLoadRecord) && Boolean(selectedItem?.recordUuid);
@@ -154,7 +156,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       const effectiveQuery = typeof nextQuery === 'string' ? nextQuery : queryRef.current;
       const groups = demoContinuity
         ? getDemoGroups(effectiveQuery)
-        : await searchPatientTimeline(effectiveQuery, 'psicologia', activeClinicianProfile, { includeLegacy: true });
+        : await searchPatientTimeline(effectiveQuery, activeSpecialty, activeClinicianProfile);
       setResults(groups);
       const normalizedPreferredPatient = preferredPatientName?.trim().toLowerCase();
       const previousSelectedGroup = selectedGroupRef.current;
@@ -170,7 +172,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [activeClinicianProfile, demoContinuity, getDemoGroups]);
+  }, [activeClinicianProfile, activeSpecialty, demoContinuity, getDemoGroups]);
 
   const refreshResults = useCallback(async () => {
     if (syncingRef.current) return;
@@ -240,7 +242,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      if (!selectedGroupName) {
+      if (!selectedGroupName || activeSpecialty !== 'psicologia') {
         setCaseSummary(null);
         return;
       }
@@ -252,7 +254,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       setCaseSummaryLoading(true);
       setCaseSummary(null);
       try {
-        const summary = await buildPsychologyCaseSummary(selectedGroupName, activeClinicianProfile, { includeLegacy: true });
+        const summary = await buildPsychologyCaseSummary(selectedGroupName, activeClinicianProfile);
         if (!cancelled) setCaseSummary(summary);
       } finally {
         if (!cancelled) setCaseSummaryLoading(false);
@@ -262,7 +264,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [activeClinicianProfile, demoContinuity, normalizedDemoPatientName, selectedGroupName, selectedGroupNormalizedName]);
+  }, [activeClinicianProfile, activeSpecialty, demoContinuity, normalizedDemoPatientName, selectedGroupName, selectedGroupNormalizedName]);
 
   useEffect(() => {
     let cancelled = false;

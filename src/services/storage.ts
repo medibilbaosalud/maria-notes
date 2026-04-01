@@ -18,6 +18,10 @@ import { supabase } from './supabase';
 import { isCloudSyncEnabled } from '../hooks/useCloudSync';
 import type { ConsultationClassification, ExtractionMeta, ExtractionResult } from './groq';
 import { normalizeClinicalSpecialty } from '../clinical/specialties';
+import {
+    displayClinicianName,
+    normalizeClinicianProfileForSpecialty
+} from '../clinical/clinicians';
 
 export type { MedicalRecord };
 export type { LegacyClinicalRecord };
@@ -87,34 +91,23 @@ const isTechnicalPatientName = (value: string): boolean => {
     return normalized.startsWith('TEST_LAB_') || normalized.startsWith('DIAG_');
 };
 
-const displayPsychologyClinician = (value?: string | null): string | undefined => {
-    if (!value) return undefined;
-    if (value.toLowerCase() === 'ainhoa') return 'Ainhoa';
-    if (value.toLowerCase() === 'june') return 'June';
-    return value;
-};
-
-const normalizePsychologyClinicianProfile = (value?: string | null): string | undefined => {
-    const normalized = normalizeKey(String(value || ''));
-    if (normalized === 'ainhoa') return 'ainhoa';
-    if (normalized === 'june') return 'june';
-    return undefined;
-};
-
-const getNormalizedTimelineClinician = (item: Pick<PatientTimelineItem, 'clinicianProfile' | 'clinicianName'>): string | undefined => {
-    return normalizePsychologyClinicianProfile(item.clinicianProfile || item.clinicianName || undefined);
+const getNormalizedTimelineClinician = (item: Pick<PatientTimelineItem, 'specialty' | 'clinicianProfile' | 'clinicianName'>): string | undefined => {
+    return normalizeClinicianProfileForSpecialty(item.specialty, item.clinicianProfile || item.clinicianName || undefined);
 };
 
 const getNormalizedScopedClinician = (specialty: string | undefined, clinician?: string): string | undefined => {
-    const normalizedSpecialty = normalizeClinicalSpecialty(specialty || 'otorrino');
-    if (normalizedSpecialty === 'psicologia') {
-        return normalizePsychologyClinicianProfile(clinician);
-    }
+    return normalizeClinicianProfileForSpecialty(specialty || 'otorrino', clinician);
+};
 
-    const normalized = normalizeKey(String(clinician || ''));
-    if (!normalized) return undefined;
-    if (normalized.includes('gotxi') || normalized.includes('itziar')) return 'gotxi';
-    return normalized;
+const shouldIncludeLegacyTimeline = (
+    specialty?: string,
+    clinician?: string,
+    options?: { includeLegacy?: boolean }
+): boolean => {
+    if (options?.includeLegacy === true) return true;
+    const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
+    const normalizedClinician = getNormalizedScopedClinician(normalizedSpecialty || undefined, clinician);
+    return normalizedSpecialty === 'otorrino' && normalizedClinician === 'gotxi';
 };
 
 const matchesTimelineClinicianScope = (
@@ -125,16 +118,7 @@ const matchesTimelineClinicianScope = (
     const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
     const scopedClinician = getNormalizedScopedClinician(normalizedSpecialty || item.specialty, clinician);
     if (!scopedClinician) return true;
-
-    if ((normalizedSpecialty || normalizeClinicalSpecialty(item.specialty)) === 'psicologia') {
-        return getNormalizedTimelineClinician(item) === scopedClinician;
-    }
-
-    const itemClinician = normalizeKey([
-        item.clinicianProfile || '',
-        item.clinicianName || ''
-    ].join(' '));
-    return itemClinician.includes(scopedClinician);
+    return getNormalizedTimelineClinician(item) === scopedClinician;
 };
 
 const toIsoString = (value?: string | null): string => {
@@ -162,7 +146,7 @@ const mapCurrentRecordToTimelineItem = (record: MedicalRecord): PatientTimelineI
     patientName: record.patient_name,
     specialty: normalizeClinicalSpecialty(record.specialty || record.consultation_type),
     clinicianProfile: record.clinician_profile || undefined,
-    clinicianName: displayPsychologyClinician(record.clinician_profile),
+    clinicianName: displayClinicianName(record.clinician_profile),
     consultationAt: toIsoString(record.updated_at || record.created_at),
     medicalHistory: cleanText(record.medical_history),
     isEditable: true,
@@ -177,7 +161,7 @@ const mapLegacyRecordToTimelineItem = (record: LegacyClinicalRecord): PatientTim
     patientName: record.patient_name,
     specialty: normalizeClinicalSpecialty(record.specialty || 'psicologia'),
     clinicianProfile: record.clinician_profile || undefined,
-    clinicianName: displayPsychologyClinician(record.specialist_name || record.clinician_profile),
+    clinicianName: displayClinicianName(record.specialist_name || record.clinician_profile),
     consultationAt: toIsoString(record.consultation_at || record.updated_at || record.created_at),
     medicalHistory: cleanText(record.medical_history),
     isEditable: false,
@@ -287,8 +271,6 @@ const getBriefingRecordIds = (items: PatientTimelineItem[]): string[] => {
         .filter((value, index, array): value is string => Boolean(value) && array.indexOf(value) === index);
 };
 
-const briefingTimelineOptions = { includeLegacy: true } as const;
-
 const getPatientBriefingCandidates = async (
     patientName: string,
     specialty?: string,
@@ -298,7 +280,7 @@ const getPatientBriefingCandidates = async (
     if (!normalizedName) return [];
 
     const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
-    const normalizedClinician = normalizePsychologyClinicianProfile(clinician);
+    const normalizedClinician = normalizeClinicianProfileForSpecialty(normalizedSpecialty || undefined, clinician);
     const rows = await db.patient_briefings
         .where('normalized_patient_name')
         .equals(normalizedName)
@@ -306,7 +288,10 @@ const getPatientBriefingCandidates = async (
 
     return rows.filter((briefing) => {
         if (normalizedSpecialty && normalizeClinicalSpecialty(briefing.specialty) !== normalizedSpecialty) return false;
-        const briefingClinician = normalizePsychologyClinicianProfile(briefing.clinician_profile || undefined);
+        const briefingClinician = normalizeClinicianProfileForSpecialty(
+            briefing.specialty || normalizedSpecialty || undefined,
+            briefing.clinician_profile || undefined
+        );
         if (normalizedClinician && briefingClinician !== normalizedClinician) return false;
         return true;
     });
@@ -581,8 +566,8 @@ const normalizeBriefingRow = (briefing: PatientBriefing): PatientBriefing => ({
     normalized_patient_name: normalizePatientName(briefing.normalized_patient_name || briefing.patient_name),
     patient_name: cleanText(briefing.patient_name) || 'Sin nombre',
     specialty: normalizeClinicalSpecialty(briefing.specialty || 'psicologia'),
-    clinician_profile: normalizePsychologyClinicianProfile(briefing.clinician_profile || undefined) || briefing.clinician_profile || null,
-    clinician_name: displayPsychologyClinician(briefing.clinician_name || briefing.clinician_profile || undefined) || briefing.clinician_name || null,
+    clinician_profile: normalizeClinicianProfileForSpecialty(briefing.specialty || 'psicologia', briefing.clinician_profile || undefined) || briefing.clinician_profile || null,
+    clinician_name: displayClinicianName(briefing.clinician_name || briefing.clinician_profile || undefined) || briefing.clinician_name || null,
     source_kind: briefing.source_kind === 'legacy' || briefing.source_kind === 'mixed' ? briefing.source_kind : 'current',
     summary_text: normalizeBriefingSummaryText(briefing.summary_text || ''),
     latest_consultation_at: toIsoString(briefing.latest_consultation_at),
@@ -622,7 +607,7 @@ export const getPatientBriefing = async (
         const normalizedName = normalizePatientName(patientName || '');
         if (!normalizedName) return null;
 
-        const timeline = await getPatientTimeline(patientName, specialty, clinician, briefingTimelineOptions);
+        const timeline = await getPatientTimeline(patientName, specialty, clinician);
         const latestConsultationAt = timeline[0]?.consultationAt || '';
         const candidates = await getPatientBriefingCandidates(patientName, specialty, clinician);
         const readyCandidates = candidates
@@ -652,7 +637,7 @@ export const markPatientBriefingStale = async (
     clinician?: string
 ): Promise<PatientBriefing | null> => {
     try {
-        const timeline = await getPatientTimeline(patientName, specialty, clinician, briefingTimelineOptions);
+        const timeline = await getPatientTimeline(patientName, specialty, clinician);
         if (!timeline.length) return null;
 
         const normalizedName = normalizePatientName(patientName || '');
@@ -667,8 +652,8 @@ export const markPatientBriefingStale = async (
             normalized_patient_name: normalizedName,
             patient_name: timeline[0]?.patientName || patientName,
             specialty: normalizeClinicalSpecialty(specialty || timeline[0]?.specialty || 'psicologia'),
-            clinician_profile: normalizePsychologyClinicianProfile(clinician || timeline[0]?.clinicianProfile || undefined) || existing?.clinician_profile || null,
-            clinician_name: displayPsychologyClinician(clinician || timeline[0]?.clinicianName || existing?.clinician_name || undefined) || existing?.clinician_name || null,
+            clinician_profile: normalizeClinicianProfileForSpecialty(specialty || timeline[0]?.specialty || 'psicologia', clinician || timeline[0]?.clinicianProfile || undefined) || existing?.clinician_profile || null,
+            clinician_name: displayClinicianName(clinician || timeline[0]?.clinicianName || existing?.clinician_name || undefined) || existing?.clinician_name || null,
             source_kind: sourceKind,
             summary_text: existing?.summary_text || '',
             latest_consultation_at: latestConsultationAt,
@@ -695,12 +680,15 @@ export const ensurePatientBriefing = async (
     clinician?: string
 ): Promise<PatientBriefing | null> => {
     try {
-        const timeline = await getPatientTimeline(patientName, specialty, clinician, briefingTimelineOptions);
+        const timeline = await getPatientTimeline(patientName, specialty, clinician);
         if (!timeline.length) return null;
 
         const latestConsultationAt = timeline[0]?.consultationAt || '';
         const candidates = await getPatientBriefingCandidates(patientName, specialty, clinician);
         const latestCandidate = candidates.sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+        if (latestCandidate?.status === 'failed') {
+            return null;
+        }
 
         const currentReady = candidates
             .filter((briefing) => briefing.status === 'ready')
@@ -712,9 +700,7 @@ export const ensurePatientBriefing = async (
 
         const sourceKind = getBriefingSourceKind(timeline);
         const shouldGenerate = Boolean(
-            !latestCandidate
-            || latestCandidate.status === 'failed'
-            || sourceKind === 'legacy'
+            sourceKind === 'legacy'
             || candidates.some((briefing) => briefing.status === 'stale')
             || (latestCandidate && latestCandidate.status === 'ready' && !isBriefingCurrent(latestCandidate, latestConsultationAt))
         );
@@ -736,8 +722,8 @@ export const ensurePatientBriefing = async (
             normalized_patient_name: normalizePatientName(patientName || timeline[0]?.patientName || ''),
             patient_name: timeline[0]?.patientName || patientName || 'Sin nombre',
             specialty: normalizeClinicalSpecialty(specialty || timeline[0]?.specialty || 'psicologia'),
-            clinician_profile: normalizePsychologyClinicianProfile(clinician || timeline[0]?.clinicianProfile || undefined) || latestCandidate?.clinician_profile || null,
-            clinician_name: displayPsychologyClinician(clinician || timeline[0]?.clinicianName || latestCandidate?.clinician_name || undefined) || latestCandidate?.clinician_name || null,
+            clinician_profile: normalizeClinicianProfileForSpecialty(specialty || timeline[0]?.specialty || 'psicologia', clinician || timeline[0]?.clinicianProfile || undefined) || latestCandidate?.clinician_profile || null,
+            clinician_name: displayClinicianName(clinician || timeline[0]?.clinicianName || latestCandidate?.clinician_name || undefined) || latestCandidate?.clinician_name || null,
             source_kind: sourceKind,
             summary_text: briefingResult.data,
             latest_consultation_at: latestConsultationAt,
@@ -754,7 +740,7 @@ export const ensurePatientBriefing = async (
         return generated;
     } catch (error) {
         try {
-            const timeline = await getPatientTimeline(patientName, specialty, clinician, briefingTimelineOptions);
+            const timeline = await getPatientTimeline(patientName, specialty, clinician);
             if (!timeline.length) return null;
             const latestConsultationAt = timeline[0]?.consultationAt || nowIso();
             const candidates = await getPatientBriefingCandidates(patientName, specialty, clinician);
@@ -765,8 +751,8 @@ export const ensurePatientBriefing = async (
                 normalized_patient_name: normalizePatientName(patientName || timeline[0]?.patientName || ''),
                 patient_name: timeline[0]?.patientName || patientName || 'Sin nombre',
                 specialty: normalizeClinicalSpecialty(specialty || timeline[0]?.specialty || 'psicologia'),
-                clinician_profile: normalizePsychologyClinicianProfile(clinician || timeline[0]?.clinicianProfile || undefined) || latestCandidate?.clinician_profile || null,
-                clinician_name: displayPsychologyClinician(clinician || timeline[0]?.clinicianName || latestCandidate?.clinician_name || undefined) || latestCandidate?.clinician_name || null,
+                clinician_profile: normalizeClinicianProfileForSpecialty(specialty || timeline[0]?.specialty || 'psicologia', clinician || timeline[0]?.clinicianProfile || undefined) || latestCandidate?.clinician_profile || null,
+                clinician_name: displayClinicianName(clinician || timeline[0]?.clinicianName || latestCandidate?.clinician_name || undefined) || latestCandidate?.clinician_name || null,
                 source_kind: getBriefingSourceKind(timeline),
                 summary_text: '',
                 latest_consultation_at: latestConsultationAt,
@@ -825,7 +811,9 @@ export const searchPatientTimeline = async (
     try {
         const normalizedQuery = normalizePatientName(query || '');
         const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
-        const allItems = await getAllUnifiedTimelineItems(options);
+        const allItems = await getAllUnifiedTimelineItems({
+            includeLegacy: shouldIncludeLegacyTimeline(normalizedSpecialty || undefined, clinician, options)
+        });
         const filteredItems = allItems.filter((item) => {
             if (normalizedSpecialty && normalizeClinicalSpecialty(item.specialty) !== normalizedSpecialty) {
                 return false;
@@ -860,7 +848,9 @@ export const getPatientTimeline = async (
         const normalizedName = normalizePatientName(patientName || '');
         if (!normalizedName) return [];
         const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
-        const items = await getAllUnifiedTimelineItems(options);
+        const items = await getAllUnifiedTimelineItems({
+            includeLegacy: shouldIncludeLegacyTimeline(normalizedSpecialty || undefined, clinician, options)
+        });
         return items
             .filter((item) => {
                 if (normalizePatientName(item.patientName) !== normalizedName) return false;
@@ -913,7 +903,9 @@ export const getPatientNameSuggestions = async (
     try {
         const normalizedQuery = normalizePatientName(query);
         const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
-        const rows = await getAllUnifiedTimelineItems(options);
+        const rows = await getAllUnifiedTimelineItems({
+            includeLegacy: shouldIncludeLegacyTimeline(normalizedSpecialty || undefined, clinician, options)
+        });
         const buckets = new Map<string, PatientNameSuggestion>();
 
         rows.forEach((record, index) => {

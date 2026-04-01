@@ -709,7 +709,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       provider_used: generationProviderLabel,
       prompt_version: specialty === 'psicologia'
         ? `psychology-${String(clinicianProfile || 'ainhoa')}-v1`
-        : 'otorrino-v1',
+        : `otorrino-${String(clinicianProfile || 'gotxi')}-v1`,
       rule_pack_version: metadata?.rulePackVersion || null,
       rule_ids_used: metadata?.ruleIdsUsed || [],
       pipeline_status: metadata?.resultStatus || null,
