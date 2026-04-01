@@ -143,7 +143,6 @@ const toIsoString = (value?: string | null): string => {
 };
 
 const cleanText = (value?: string | null): string => String(value || '').replace(/\s+/g, ' ').trim();
-const preserveRichText = (value?: string | null): string => String(value || '').trim();
 
 const safeRecord = (value: unknown): Record<string, unknown> | null => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -165,7 +164,7 @@ const mapCurrentRecordToTimelineItem = (record: MedicalRecord): PatientTimelineI
     clinicianProfile: record.clinician_profile || undefined,
     clinicianName: displayPsychologyClinician(record.clinician_profile),
     consultationAt: toIsoString(record.updated_at || record.created_at),
-    medicalHistory: preserveRichText(record.medical_history),
+    medicalHistory: cleanText(record.medical_history),
     isEditable: true,
     sourceLabel: 'Consulta actual',
     recordUuid: record.record_uuid,
@@ -180,7 +179,7 @@ const mapLegacyRecordToTimelineItem = (record: LegacyClinicalRecord): PatientTim
     clinicianProfile: record.clinician_profile || undefined,
     clinicianName: displayPsychologyClinician(record.specialist_name || record.clinician_profile),
     consultationAt: toIsoString(record.consultation_at || record.updated_at || record.created_at),
-    medicalHistory: preserveRichText(record.medical_history),
+    medicalHistory: cleanText(record.medical_history),
     isEditable: false,
     sourceLabel: 'Historico importado',
     sourceEmail: record.source_email || undefined,
@@ -436,15 +435,6 @@ const toCloudRecord = (record: MedicalRecord) => {
     };
 };
 
-const isMissingAuditDependencyError = (error: unknown): boolean => {
-    const message = String((error as { message?: string })?.message || '').toLowerCase();
-    const details = String((error as { details?: string })?.details || '').toLowerCase();
-    const combined = `${message} ${details}`;
-    return combined.includes('medical_records_audit_id_fkey')
-        || (combined.includes('foreign key') && combined.includes('audit_id'))
-        || combined.includes('violates foreign key constraint');
-};
-
 // Helper to sync a record to Supabase (fire-and-forget)
 const syncToCloud = async (record: MedicalRecord, operation: 'insert' | 'update' | 'delete') => {
     const client = getCloudClient();
@@ -453,19 +443,9 @@ const syncToCloud = async (record: MedicalRecord, operation: 'insert' | 'update'
     try {
         if (operation === 'insert' || operation === 'update') {
             const cloudRecord = toCloudRecord(record);
-            let { error } = await client
+            const { error } = await client
                 .from('medical_records')
                 .upsert([cloudRecord], { onConflict: 'record_uuid' });
-            if (error && isMissingAuditDependencyError(error)) {
-                const fallbackRecord = { ...cloudRecord, audit_id: null };
-                const retryResult = await client
-                    .from('medical_records')
-                    .upsert([fallbackRecord], { onConflict: 'record_uuid' });
-                error = retryResult.error ?? null;
-                if (!error) {
-                    console.warn('[Cloud Sync] Stored medical_record without audit_id; audit link will be backfilled later.');
-                }
-            }
             if (error) {
                 console.error(`[Cloud Sync] Upsert error (${operation}):`, error.message, error.details);
                 throw error;
@@ -555,7 +535,7 @@ export const saveMedicalRecord = async (
                     updated_at: now
                 });
                 const updated = await db.medical_records.get(existing.id);
-                if (updated) await syncToCloud(updated, 'update');
+                if (updated) syncToCloud(updated, 'update');
                 return updated ? [updated] : null;
             }
         }
@@ -570,7 +550,7 @@ export const saveMedicalRecord = async (
         const saved = await db.medical_records.get(id);
 
         // Cloud sync
-        if (saved) await syncToCloud(saved, 'insert');
+        if (saved) syncToCloud(saved, 'insert');
 
         return saved ? [saved] : null;
     } catch (error) {
@@ -822,11 +802,12 @@ export const searchMedicalRecords = async (query: string): Promise<MedicalRecord
     }
 };
 
-const getAllUnifiedTimelineItems = async (): Promise<PatientTimelineItem[]> => {
-    const [currentRecords, legacyRecords] = await Promise.all([
-        db.medical_records.orderBy('updated_at').reverse().toArray(),
-        db.legacy_clinical_records.orderBy('updated_at').reverse().toArray()
-    ]);
+const getAllUnifiedTimelineItems = async (options?: { includeLegacy?: boolean }): Promise<PatientTimelineItem[]> => {
+    const includeLegacy = options?.includeLegacy === true;
+    const currentRecords = await db.medical_records.orderBy('updated_at').reverse().toArray();
+    const legacyRecords = includeLegacy
+        ? await db.legacy_clinical_records.orderBy('updated_at').reverse().toArray()
+        : [];
 
     return [
         ...currentRecords.map(mapCurrentRecordToTimelineItem),
@@ -834,11 +815,16 @@ const getAllUnifiedTimelineItems = async (): Promise<PatientTimelineItem[]> => {
     ].filter((item) => Boolean(cleanText(item.patientName)));
 };
 
-export const searchPatientTimeline = async (query: string, specialty?: string, clinician?: string): Promise<PatientTimelineGroup[]> => {
+export const searchPatientTimeline = async (
+    query: string,
+    specialty?: string,
+    clinician?: string,
+    options?: { includeLegacy?: boolean }
+): Promise<PatientTimelineGroup[]> => {
     try {
         const normalizedQuery = normalizePatientName(query || '');
         const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
-        const allItems = await getAllUnifiedTimelineItems();
+        const allItems = await getAllUnifiedTimelineItems(options);
         const filteredItems = allItems.filter((item) => {
             if (normalizedSpecialty && normalizeClinicalSpecialty(item.specialty) !== normalizedSpecialty) {
                 return false;
@@ -866,13 +852,14 @@ export const searchPatientTimeline = async (query: string, specialty?: string, c
 export const getPatientTimeline = async (
     patientName: string,
     specialty?: string,
-    clinician?: string
+    clinician?: string,
+    options?: { includeLegacy?: boolean }
 ): Promise<PatientTimelineItem[]> => {
     try {
         const normalizedName = normalizePatientName(patientName || '');
         if (!normalizedName) return [];
         const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
-        const items = await getAllUnifiedTimelineItems();
+        const items = await getAllUnifiedTimelineItems(options);
         return items
             .filter((item) => {
                 if (normalizePatientName(item.patientName) !== normalizedName) return false;
@@ -902,10 +889,11 @@ export const getPatientTimeline = async (
 
 export const buildPsychologyCaseSummary = async (
     patientName: string,
-    clinician?: string
+    clinician?: string,
+    options?: { includeLegacy?: boolean }
 ): Promise<PatientCaseSummary | null> => {
     try {
-        const timeline = await getPatientTimeline(patientName, 'psicologia', clinician);
+        const timeline = await getPatientTimeline(patientName, 'psicologia', clinician, options);
         if (!timeline.length) return null;
         return buildCaseSummaryFromTimeline(patientName, timeline);
     } catch (error) {
@@ -918,12 +906,13 @@ export const getPatientNameSuggestions = async (
     query: string,
     limit: number = 8,
     specialty?: string,
-    clinician?: string
+    clinician?: string,
+    options?: { includeLegacy?: boolean }
 ): Promise<PatientNameSuggestion[]> => {
     try {
         const normalizedQuery = normalizePatientName(query);
         const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
-        const rows = await getAllUnifiedTimelineItems();
+        const rows = await getAllUnifiedTimelineItems(options);
         const buckets = new Map<string, PatientNameSuggestion>();
 
         rows.forEach((record, index) => {
@@ -991,7 +980,7 @@ export const deleteMedicalRecord = async (idOrUuid: string | number): Promise<bo
         if (record?.id) await db.medical_records.delete(record.id);
 
         // Cloud sync
-        if (record) await syncToCloud(record, 'delete');
+        if (record) syncToCloud(record, 'delete');
 
         return true;
     } catch (error) {
@@ -1015,7 +1004,7 @@ export const updateMedicalRecord = async (idOrUuid: string | number, updates: Pa
         const updated = await db.medical_records.get(record.id);
 
         // Cloud sync
-        if (updated) await syncToCloud(updated, 'update');
+        if (updated) syncToCloud(updated, 'update');
 
         return updated ? [updated] : null;
     } catch (error) {

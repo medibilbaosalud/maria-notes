@@ -1,222 +1,244 @@
-import React from 'react';
-import { Calendar, Clock3, Layers3, Sparkles } from 'lucide-react';
+import React, { useMemo } from 'react';
+import { AlertTriangle, ArrowRight, Calendar, Clock3, Crosshair, Eye, Layers3, ListChecks, MessageCircle, Sparkles, TrendingUp } from 'lucide-react';
 import type { PatientBriefing } from '../services/storage';
 import './PatientBriefingCard.css';
 
-type BriefingSectionKey = 'focus' | 'recent' | 'drivers' | 'plan' | 'watch';
-
 type BriefingCardVariant = 'full' | 'compact';
 
-interface BriefingSection {
-  key: BriefingSectionKey;
-  title: string;
-  eyebrow: string;
-  tone: 'emerald' | 'sky' | 'amber' | 'violet' | 'rose';
-  body: string;
+interface StructuredBriefing {
+  hilo_terapeutico?: string;
+  ultima_sesion?: {
+    fecha?: string;
+    resumen?: string;
+  };
+  momento_del_proceso?: string;
+  pendientes?: string[];
+  patrones_observados?: string[];
+  alerta_clinica?: string;
+  frase_para_retomar?: string;
+  evolucion?: string;
 }
 
 interface PatientBriefingCardProps {
   briefing: PatientBriefing;
   variant?: BriefingCardVariant;
-  kicker?: string;
-  title?: string;
-  subtitle?: string;
-  actions?: React.ReactNode;
+  onOpenHistory?: () => void;
+  onDismiss?: () => void;
 }
 
-const SECTION_CONFIG: Record<BriefingSectionKey, Omit<BriefingSection, 'body'>> = {
-  focus: {
-    key: 'focus',
-    title: 'Foco actual',
-    eyebrow: 'Lo que mas importa hoy',
-    tone: 'emerald'
-  },
-  recent: {
-    key: 'recent',
-    title: 'Ultima sesion',
-    eyebrow: 'Trabajo mas reciente',
-    tone: 'sky'
-  },
-  drivers: {
-    key: 'drivers',
-    title: 'Mantenedores',
-    eyebrow: 'Factores que sostienen el malestar',
-    tone: 'amber'
-  },
-  plan: {
-    key: 'plan',
-    title: 'Proxima sesion',
-    eyebrow: 'Pendientes y acuerdos',
-    tone: 'violet'
-  },
-  watch: {
-    key: 'watch',
-    title: 'Recordatorio clinico',
-    eyebrow: 'Conviene no perder esto de vista',
-    tone: 'rose'
-  }
-};
+const parseStructuredBriefing = (summaryText: string): StructuredBriefing | null => {
+  const text = String(summaryText || '').trim();
+  if (!text) return null;
 
-const SECTION_ORDER: BriefingSectionKey[] = ['focus', 'recent', 'drivers', 'plan', 'watch'];
-
-const SECTION_LABELS: Record<BriefingSectionKey, string[]> = {
-  focus: ['foco actual', 'motivo actual', 'motivo principal', 'foco principal'],
-  recent: ['ultima sesion', 'sesion mas reciente', 'ultima consulta', 'trabajo reciente'],
-  drivers: ['mantenedores', 'factores mantenedores', 'areas afectadas', 'factores relevantes'],
-  plan: ['proxima sesion', 'tareas', 'acuerdos', 'objetivos', 'pendientes'],
-  watch: ['recordatorio clinico', 'recordatorios clinicos', 'alerta clinica', 'sensibles']
-};
-
-const normalizeLabel = (value: string) => value
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .toLowerCase()
-  .replace(/[^a-z0-9\s]/g, ' ')
-  .replace(/\s+/g, ' ')
-  .trim();
-
-const resolveSectionKey = (label: string): BriefingSectionKey | null => {
-  const normalized = normalizeLabel(label);
-  return SECTION_ORDER.find((key) => SECTION_LABELS[key].includes(normalized)) || null;
-};
-
-const splitBriefingLines = (summaryText: string) => String(summaryText || '')
-  .replace(/\r/g, '')
-  .split('\n')
-  .map((line) => line.trim())
-  .filter(Boolean);
-
-const parseBriefingSections = (summaryText: string): { sections: BriefingSection[]; extras: string[] } => {
-  const rawLines = splitBriefingLines(summaryText);
-  const foundSections = new Map<BriefingSectionKey, string>();
-  const extras: string[] = [];
-
-  rawLines.forEach((line) => {
-    const match = line.match(/^([^:]+):\s*(.+)$/);
-    if (!match) {
-      extras.push(line);
-      return;
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && (parsed.hilo_terapeutico || parsed.ultima_sesion)) {
+      return parsed as StructuredBriefing;
     }
-
-    const sectionKey = resolveSectionKey(match[1]);
-    if (!sectionKey) {
-      extras.push(line);
-      return;
-    }
-
-    const body = match[2].trim();
-    if (!body || foundSections.has(sectionKey)) return;
-    foundSections.set(sectionKey, body);
-  });
-
-  if (foundSections.size === 0 && rawLines.length > 0) {
-    rawLines.slice(0, SECTION_ORDER.length).forEach((line, index) => {
-      const sectionKey = SECTION_ORDER[index];
-      if (sectionKey) {
-        foundSections.set(sectionKey, line);
-      }
-    });
-    rawLines.slice(SECTION_ORDER.length).forEach((line) => extras.push(line));
+  } catch {
+    // Not structured JSON
   }
-
-  const sections = SECTION_ORDER
-    .map((key) => {
-      const body = foundSections.get(key);
-      if (!body) return null;
-      return {
-        ...SECTION_CONFIG[key],
-        body
-      };
-    })
-    .filter((section): section is BriefingSection => Boolean(section));
-
-  return { sections, extras };
+  return null;
 };
 
-const formatDate = (value: string) => {
-  if (!value) return 'Sin fecha';
+const parseLegacyBriefing = (summaryText: string): string[] => {
+  return String(summaryText || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+};
+
+const formatBriefingDate = (value: string) => {
+  if (!value) return '';
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return 'Sin fecha';
-  return parsed.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString('es-ES', { day: 'numeric', month: 'long' });
 };
 
-const getSourceKindLabel = (sourceKind: PatientBriefing['source_kind']) => {
-  if (sourceKind === 'legacy') return 'Contexto importado';
-  if (sourceKind === 'mixed') return 'Contexto mixto';
-  return 'Sesiones recientes';
+const getSourceLabel = (sourceKind: PatientBriefing['source_kind']) => {
+  if (sourceKind === 'legacy') return 'Importado';
+  if (sourceKind === 'mixed') return 'Mixto';
+  return 'Sesiones';
 };
 
 export const PatientBriefingCard: React.FC<PatientBriefingCardProps> = ({
   briefing,
   variant = 'full',
-  kicker = 'Preparacion clinica',
-  title = 'Antes de la sesion',
-  subtitle = 'Contexto accionable generado con IA para retomar el caso sin releer toda la historia.',
-  actions
+  onOpenHistory,
+  onDismiss
 }) => {
-  const { sections, extras } = parseBriefingSections(briefing.summary_text);
-  const focusSection = sections.find((section) => section.key === 'focus') || sections[0] || null;
-  const secondarySections = sections.filter((section) => section !== focusSection);
+  const structured = useMemo(() => parseStructuredBriefing(briefing.summary_text), [briefing.summary_text]);
+  const legacyLines = useMemo(() => structured ? null : parseLegacyBriefing(briefing.summary_text), [structured, briefing.summary_text]);
 
-  return (
-    <section className={`patient-briefing-card patient-briefing-card--${variant}`}>
-      <div className="patient-briefing-card__header">
-        <div className="patient-briefing-card__headline">
-          <div className="patient-briefing-card__kicker">
-            <Sparkles size={14} />
-            <span>{kicker}</span>
+  // Structured briefing (new format)
+  if (structured) {
+    return (
+      <section className={`pbcard pbcard--${variant}`} data-has-alert={Boolean(structured.alerta_clinica) || undefined}>
+        {/* Header */}
+        <div className="pbcard__header">
+          <div className="pbcard__kicker">
+            <Sparkles size={13} />
+            <span>Preparación clínica</span>
           </div>
-          <h2>{title}</h2>
-          <p>{subtitle}</p>
+          <div className="pbcard__meta">
+            <span className="pbcard__pill">
+              <Layers3 size={12} />
+              {briefing.generated_from_count} {briefing.generated_from_count === 1 ? 'sesión' : 'sesiones'}
+            </span>
+            <span className="pbcard__pill">
+              <Calendar size={12} />
+              {getSourceLabel(briefing.source_kind)}
+            </span>
+          </div>
         </div>
-        <div className="patient-briefing-card__meta">
-          <span className="patient-briefing-card__badge">
-            <Clock3 size={14} />
-            <span>{briefing.generated_from_count} sesiones</span>
-          </span>
-          <span className="patient-briefing-card__badge">
-            <Calendar size={14} />
-            <span>{formatDate(briefing.latest_consultation_at)}</span>
-          </span>
-          <span className="patient-briefing-card__badge">
-            <Layers3 size={14} />
-            <span>{getSourceKindLabel(briefing.source_kind)}</span>
-          </span>
+
+        {/* Hilo terapéutico — the hero */}
+        {structured.hilo_terapeutico && (
+          <div className="pbcard__hilo">
+            <div className="pbcard__hilo-icon">
+              <Crosshair size={16} />
+            </div>
+            <div className="pbcard__hilo-content">
+              <span className="pbcard__hilo-label">Hilo del caso</span>
+              <p className="pbcard__hilo-text">{structured.hilo_terapeutico}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Main grid */}
+        <div className={`pbcard__grid ${variant === 'compact' ? 'pbcard__grid--single' : ''}`}>
+          {/* Última sesión */}
+          {structured.ultima_sesion?.resumen && (
+            <div className="pbcard__cell pbcard__cell--sky">
+              <div className="pbcard__cell-header">
+                <Clock3 size={14} />
+                <span className="pbcard__cell-label">Última sesión</span>
+                {structured.ultima_sesion.fecha && (
+                  <span className="pbcard__cell-date">{formatBriefingDate(structured.ultima_sesion.fecha)}</span>
+                )}
+              </div>
+              <p className="pbcard__cell-body">{structured.ultima_sesion.resumen}</p>
+            </div>
+          )}
+
+          {/* Momento del proceso */}
+          {structured.momento_del_proceso && (
+            <div className="pbcard__cell pbcard__cell--violet">
+              <div className="pbcard__cell-header">
+                <TrendingUp size={14} />
+                <span className="pbcard__cell-label">Momento del proceso</span>
+              </div>
+              <p className="pbcard__cell-body">{structured.momento_del_proceso}</p>
+            </div>
+          )}
+
+          {/* Pendientes */}
+          {structured.pendientes && structured.pendientes.length > 0 && (
+            <div className="pbcard__cell pbcard__cell--amber">
+              <div className="pbcard__cell-header">
+                <ListChecks size={14} />
+                <span className="pbcard__cell-label">Pendientes</span>
+              </div>
+              <ul className="pbcard__cell-list">
+                {structured.pendientes.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Patrones observados */}
+          {structured.patrones_observados && structured.patrones_observados.length > 0 && (
+            <div className="pbcard__cell pbcard__cell--emerald">
+              <div className="pbcard__cell-header">
+                <Eye size={14} />
+                <span className="pbcard__cell-label">Patrones observados</span>
+              </div>
+              <ul className="pbcard__cell-list">
+                {structured.patrones_observados.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Evolución */}
+          {structured.evolucion && (
+            <div className="pbcard__cell pbcard__cell--teal">
+              <div className="pbcard__cell-header">
+                <TrendingUp size={14} />
+                <span className="pbcard__cell-label">Evolución</span>
+              </div>
+              <p className="pbcard__cell-body">{structured.evolucion}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Alerta clínica */}
+        {structured.alerta_clinica && (
+          <div className="pbcard__alert">
+            <AlertTriangle size={15} />
+            <p>{structured.alerta_clinica}</p>
+          </div>
+        )}
+
+        {/* Frase para retomar */}
+        {structured.frase_para_retomar && (
+          <div className="pbcard__retomar">
+            <MessageCircle size={14} />
+            <p>{structured.frase_para_retomar}</p>
+          </div>
+        )}
+
+        {/* Footer actions */}
+        {(onOpenHistory || onDismiss) && (
+          <div className="pbcard__actions">
+            {onOpenHistory && (
+              <button type="button" className="pbcard__action" onClick={onOpenHistory}>
+                Ver historial completo
+                <ArrowRight size={14} />
+              </button>
+            )}
+            {onDismiss && (
+              <button type="button" className="pbcard__action pbcard__action--muted" onClick={onDismiss}>
+                Ocultar
+              </button>
+            )}
+          </div>
+        )}
+      </section>
+    );
+  }
+
+  // Legacy fallback (plain text briefing)
+  return (
+    <section className={`pbcard pbcard--${variant} pbcard--legacy`}>
+      <div className="pbcard__header">
+        <div className="pbcard__kicker">
+          <Sparkles size={13} />
+          <span>Contexto del caso</span>
         </div>
       </div>
-
-      {focusSection && (
-        <div className={`patient-briefing-card__focus patient-briefing-card__focus--${focusSection.tone}`}>
-          <span className="patient-briefing-card__focus-label">{focusSection.title}</span>
-          <p>{focusSection.body}</p>
+      <div className="pbcard__legacy-body">
+        {legacyLines?.map((line, i) => (
+          <p key={i}>{line}</p>
+        ))}
+      </div>
+      {(onOpenHistory || onDismiss) && (
+        <div className="pbcard__actions">
+          {onOpenHistory && (
+            <button type="button" className="pbcard__action" onClick={onOpenHistory}>
+              Ver historial completo
+              <ArrowRight size={14} />
+            </button>
+          )}
+          {onDismiss && (
+            <button type="button" className="pbcard__action pbcard__action--muted" onClick={onDismiss}>
+              Ocultar
+            </button>
+          )}
         </div>
       )}
-
-      {secondarySections.length > 0 && (
-        <div className="patient-briefing-card__grid">
-          {secondarySections.map((section) => (
-            <article
-              key={section.key}
-              className={`patient-briefing-card__section patient-briefing-card__section--${section.tone}`}
-            >
-              <span className="patient-briefing-card__section-eyebrow">{section.eyebrow}</span>
-              <h3>{section.title}</h3>
-              <p>{section.body}</p>
-            </article>
-          ))}
-        </div>
-      )}
-
-      {extras.length > 0 && (
-        <div className="patient-briefing-card__extras">
-          <span className="patient-briefing-card__extras-label">Puntos clave</span>
-          <ul>
-            {extras.map((line) => <li key={line}>{line}</li>)}
-          </ul>
-        </div>
-      )}
-
-      {actions ? <div className="patient-briefing-card__actions">{actions}</div> : null}
     </section>
   );
 };

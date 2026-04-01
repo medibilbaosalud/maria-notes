@@ -995,10 +995,27 @@ ${String(learningContext.promptContext).slice(0, 4000)}
 No cites estas reglas en la salida. No inventes datos para cumplirlas.`;
 };
 
-const buildGenerateHistoryPrompt = (transcription, patientName, consultationType, learningContext, clinicianName) => {
+const formatStyleReferencePrompt = (styleReference) => {
+    const referenceStory = String(styleReference?.referenceStory || '').trim();
+    const generatedTemplate = String(styleReference?.generatedTemplate || '').trim();
+    if (!referenceStory && !generatedTemplate) return '';
+    return `REFERENCIA DE ESTILO DEL PROFESIONAL (ACTIVA)
+- Usa esta referencia solo para imitar tono, orden, longitud y estructura.
+- NO copies nombres, antecedentes, sintomas ni otros datos clinicos de la referencia.
+- La historia final debe salir SOLO de la transcripcion actual.
+
+PLANTILLA EDITABLE PREFERIDA:
+${generatedTemplate ? generatedTemplate.slice(0, 5000) : 'No consta'}
+
+HISTORIA DE REFERENCIA:
+${referenceStory ? referenceStory.slice(0, 8000) : 'No consta'}`;
+};
+
+const buildGenerateHistoryPrompt = (transcription, patientName, consultationType, learningContext, clinicianName, styleReference) => {
     const specialty = getSpecialtyConfig(consultationType);
     const specialtyRole = specialty.specialty === 'psicologia' ? 'psicologia clinica' : 'otorrinolaringologia';
     const psychologyClinicianStyle = specialty.specialty === 'psicologia' ? getPsychologyClinicianStyle(clinicianName) : null;
+    const activeTemplate = String(styleReference?.generatedTemplate || '').trim() || specialty.historyTemplate;
     return `Eres un asistente clinico experto en ${specialtyRole}. Responde SOLO JSON valido.
 Objetivo: generar historia clinica final y extraccion estructurada en una sola respuesta.
 Reglas:
@@ -1006,12 +1023,13 @@ Reglas:
 - Si falta un dato, usa "No consta" en la historia y null/[]/"" en extraccion segun corresponda.
 - Respeta negaciones y temporalidad.
 - Mantiene exactamente este formato Markdown:
-${specialty.historyTemplate}
+${activeTemplate}
 - No incluyas bloques internos del sistema.
 
 ${specialty.styleProfile}
 ${psychologyClinicianStyle ? `\n${psychologyClinicianStyle.historyProfile}\n\n${psychologyClinicianStyle.historyExamples}` : ''}
 ${formatLearningPromptContext(learningContext)}
+${formatStyleReferencePrompt(styleReference)}
 
 Paciente: ${patientName || 'Paciente'}
 
@@ -1067,7 +1085,7 @@ ${formatLearningPromptContext(learningContext)}
 TRANSCRIPCION:
 ${String(transcription || '').slice(0, 18000)}`;
 
-const buildSectionPrompt = ({ transcription, currentHistory, sectionTitle, patientName, consultationType, learningContext, clinicianName }) => `Eres un asistente medico experto en ${normalizeConsultationType(consultationType) === 'psicologia' ? 'psicologia clinica' : 'otorrinolaringologia'}. Reescribe SOLO la seccion solicitada.
+const buildSectionPrompt = ({ transcription, currentHistory, sectionTitle, patientName, consultationType, learningContext, clinicianName, styleReference }) => `Eres un asistente medico experto en ${normalizeConsultationType(consultationType) === 'psicologia' ? 'psicologia clinica' : 'otorrinolaringologia'}. Reescribe SOLO la seccion solicitada.
 Paciente: ${patientName || 'Paciente'}
 Seccion objetivo: ${sectionTitle}
 Reglas:
@@ -1077,6 +1095,7 @@ Reglas:
 - Si falta dato, escribe "No consta".
 ${normalizeConsultationType(consultationType) === 'psicologia' ? getPsychologyClinicianStyle(clinicianName).historyProfile : ''}
 ${formatLearningPromptContext(learningContext)}
+${formatStyleReferencePrompt(styleReference)}
 
 TRANSCRIPCION:
 ${String(transcription || '').slice(0, 18000)}
@@ -1089,6 +1108,16 @@ const cleanBriefingLine = (value) => cleanText(String(value || '').replace(/^[-*
 const normalizeBriefingText = (rawText) => {
     const text = String(rawText || '').trim();
     if (!text) return '';
+
+    // Try to parse as structured JSON first
+    try {
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed === 'object' && parsed.hilo_terapeutico) {
+            return JSON.stringify(parsed);
+        }
+    } catch {
+        // Not JSON, fall through to legacy text normalization
+    }
 
     const lines = text
         .split(/\r?\n/)
@@ -1105,47 +1134,6 @@ const normalizeBriefingText = (rawText) => {
     return lines.slice(0, 5).join('\n');
 };
 
-const compactBriefingSnippet = (value, maxLength = 180) => {
-    const cleaned = cleanText(String(value || ''));
-    if (!cleaned) return '';
-    if (cleaned.length <= maxLength) return cleaned;
-    const softBreak = cleaned.lastIndexOf(' ', maxLength);
-    if (softBreak > Math.floor(maxLength * 0.6)) {
-        return `${cleaned.slice(0, softBreak).trim()}...`;
-    }
-    return `${cleaned.slice(0, maxLength).trim()}...`;
-};
-
-const buildFallbackBriefingText = ({ patientName, consultationType, clinicianName, timelineItems }) => {
-    const items = Array.isArray(timelineItems) ? timelineItems.filter(Boolean) : [];
-    const latest = items[0] || null;
-    const latestDate = cleanText(String(latest?.consultationAt || latest?.consultation_at || ''));
-    const latestHistory = cleanText(String(latest?.medicalHistory || latest?.medical_history || ''));
-    const priorCount = Math.max(0, items.length - 1);
-    const lines = [];
-
-    if (latestDate || latestHistory) {
-        lines.push(compactBriefingSnippet(
-            `${latestDate ? `Ultima sesion ${latestDate}: ` : 'Ultima sesion: '}${latestHistory || 'revisar historial clinico.'}`,
-            190
-        ));
-    }
-
-    if (priorCount > 0) {
-        lines.push(`Hay ${priorCount} sesion${priorCount === 1 ? '' : 'es'} previa${priorCount === 1 ? '' : 's'} en historial.`);
-    }
-
-    if (clinicianName) {
-        lines.push(`Profesional de referencia: ${clinicianName}.`);
-    }
-
-    if (!lines.length) {
-        lines.push(`Briefing breve para ${patientName || 'paciente'} sin historial suficiente en ${consultationType || 'consulta actual'}.`);
-    }
-
-    return lines.slice(0, 4).join('\n');
-};
-
 const buildBriefingPrompt = ({ patientName, consultationType, clinicianName, timelineItems }) => {
     const specialty = normalizeConsultationType(consultationType);
     const items = Array.isArray(timelineItems) ? timelineItems : [];
@@ -1155,7 +1143,7 @@ const buildBriefingPrompt = ({ patientName, consultationType, clinicianName, tim
             const consultationAt = String(item?.consultationAt || item?.consultation_at || '').trim();
             const clinician = String(item?.clinicianName || item?.clinician_profile || clinicianName || '').trim() || 'Sin profesional';
             const source = String(item?.source || '').trim() || 'current';
-            const history = String(item?.medicalHistory || item?.medical_history || '').trim().slice(0, 1800);
+            const history = String(item?.medicalHistory || item?.medical_history || '').trim().slice(0, 2400);
             return [
                 `${index + 1}. Fecha: ${consultationAt || 'No consta'}`,
                 `   Fuente: ${source}`,
@@ -1165,38 +1153,55 @@ const buildBriefingPrompt = ({ patientName, consultationType, clinicianName, tim
         })
         .join('\n\n');
 
-    return `Eres un asistente clinico de psicologia. Redacta un briefing ultra-breve para la psicologa que va a ver este caso.
-El objetivo es que la psicologa lo lea en 15 segundos antes de que entre la paciente y recuerde lo esencial.
+    const sessionCount = items.length;
+    const hasMultipleSessions = sessionCount > 1;
 
-Resume en maximo 3-4 lineas concretas:
-1. Que se trabajo en la ultima sesion (fecha y tema concreto).
-2. Que tareas, compromisos o pendientes quedaron (solo si constan explicitamente).
-3. Si hay algun dato sensible o importante que no deba olvidarse (solo si consta explicitamente).
+    return `Eres una asistente clinica experta en psicologia. Genera un briefing estructurado para la psicologa que va a atender este caso.
+El objetivo: que lo lea en 20 segundos antes de que entre el/la paciente y recuerde lo esencial, se reoriente en el caso, y sepa exactamente por donde retomar.
 
-Reglas estrictas:
-- Usa SOLO informacion explicitamente presente en las notas.
-- No inventes diagnosticos, gravedad, riesgos, ni proximos pasos.
-- Si no hay informacion suficiente para un punto, OMITELO. No escribas "No consta".
-- Prioriza lo concreto: fechas, temas, tareas, datos literales. No prosa generica.
-- Tono: como una nota rapida pegada en la carpeta del paciente. Breve, directa, util.
-- No repitas informacion entre lineas.
+Devuelve un JSON con exactamente esta estructura (si un campo no tiene datos suficientes, OMITE ese campo del JSON, no pongas null ni "No consta"):
+
+{
+  "hilo_terapeutico": "Frase breve que capture el tema central del proceso terapeutico, el 'para que' viene esta persona. Ej: 'Duelo por separacion con impacto en autoestima y vinculo con hijos'",
+  "ultima_sesion": {
+    "fecha": "fecha de la ultima sesion si consta",
+    "resumen": "Que se trabajo, que temas surgieron, como estaba el/la paciente. Concreto y util, no generico."
+  },
+  "momento_del_proceso": "Donde esta el/la paciente en su proceso: fase inicial (exploracion/vinculacion), fase intermedia (trabajo activo), fase avanzada (consolidacion/cierre). Solo si hay suficientes sesiones para inferirlo.",
+  "pendientes": ["Tarea o compromiso concreto que quedo pendiente", "Otro pendiente si existe"],
+  "patrones_observados": ["Patron recurrente que la psicologa deberia tener presente. Ej: 'Tiende a intelectualizar cuando se acerca a contenido emocional'", "Otro patron si se observa"],
+  "alerta_clinica": "Solo si hay algo sensible: ideacion suicida, autolesiones, abuso, consumo, riesgo. NO inventar alertas.",
+  "frase_para_retomar": "Sugerencia concreta de como abrir la sesion. Ej: 'La ultima vez hablamos de X y quedaste con la tarea de Y, ¿como te fue?'. Debe ser natural, no robotica."${hasMultipleSessions ? `,
+  "evolucion": "Si hay varias sesiones: una linea sobre como ha evolucionado el/la paciente. Mejoria, estancamiento, retroceso, ambivalencia. Solo lo que se observe en las notas."` : ''}
+}
+
+REGLAS ESTRICTAS:
+- Usa SOLO informacion explicitamente presente en las notas clinicas. No inferir diagnosticos, gravedad ni riesgos que no consten.
+- Prioriza lo CONCRETO y ACCIONABLE: temas, tareas, frases literales, datos especificos.
+- Tono: como una nota entre colegas clinicas. Breve, precisa, util. No prosa academica.
+- El "hilo_terapeutico" es lo mas importante: debe capturar la esencia del caso en una frase.
+- La "frase_para_retomar" debe sonar natural, como algo que la psicologa diria de verdad.
+- Si solo hay 1 sesion, omite "momento_del_proceso", "patrones_observados" y "evolucion".
+- NO repitas informacion entre campos.
+- Responde SOLO con el JSON, sin explicaciones ni comentarios adicionales.
 
 Paciente: ${patientName || 'Paciente'}
 Especialidad: ${specialty}
 Profesional de referencia: ${clinicianName || 'No especificado'}
+Numero de sesiones en historial: ${sessionCount}
 
 HISTORIAL CLINICO:
-${timelineText || 'Sin historial disponible'}`;
+${timelineText || 'Sin historial disponible'}`
 };
 
 const buildProvisionalHistory = (reason, consultationType) => getSpecialtyConfig(consultationType).provisionalHistory(reason);
 
-export const generateMedicalHistoryPayload = async ({ transcription, patientName, consultationType, learningContext, clinicianName }) => {
+export const generateMedicalHistoryPayload = async ({ transcription, patientName, consultationType, learningContext, clinicianName, styleReference }) => {
     const specialty = normalizeConsultationType(consultationType);
     const startedAt = Date.now();
     try {
         const historyResponse = await callPreferredTextModel({
-            prompt: buildGenerateHistoryPrompt(transcription, patientName, specialty, learningContext, clinicianName),
+            prompt: buildGenerateHistoryPrompt(transcription, patientName, specialty, learningContext, clinicianName, styleReference),
             jsonMode: true,
             temperature: 0.1,
             maxTokens: 2600,
@@ -1425,28 +1430,20 @@ export const regenerateHistorySectionPayload = async (params) => {
 };
 
 export const generatePatientBriefingPayload = async ({ patientName, consultationType, clinicianName, timelineItems }) => {
-    try {
-        const response = await callGroqChat({
-            prompt: buildBriefingPrompt({ patientName, consultationType, clinicianName, timelineItems }),
-            jsonMode: false,
-            temperature: 0.15,
-            maxTokens: 450
-        });
-        const normalizedText = normalizeBriefingText(response.text);
-        if (!normalizedText) {
-            throw new Error('briefing_empty_response');
-        }
-        return {
-            text: normalizedText,
-            model: response.model
-        };
-    } catch (error) {
-        console.warn('[aiServer] generatePatientBriefingPayload fallback:', error instanceof Error ? error.message : error);
-        return {
-            text: buildFallbackBriefingText({ patientName, consultationType, clinicianName, timelineItems }),
-            model: 'fallback:timeline-briefing'
-        };
+    const response = await callPreferredTextModel({
+        prompt: buildBriefingPrompt({ patientName, consultationType, clinicianName, timelineItems }),
+        jsonMode: true,
+        temperature: 0.15,
+        maxTokens: 900
+    });
+    const normalizedText = normalizeBriefingText(response.text);
+    if (!normalizedText) {
+        throw new Error('briefing_empty_response');
     }
+    return {
+        text: normalizedText,
+        model: response.model
+    };
 };
 
 export const transcribeAudioPayload = async ({ audioBase64, audioUrl, mimeType, consultationType, clinicianName, clientTrace }) => {

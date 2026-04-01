@@ -95,6 +95,17 @@
   line-height: 1;
   color: var(--text-primary);
   text-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  transition: opacity 0.4s ease, font-size 0.4s ease;
+}
+
+.recorder-card[data-ui-state="idle"] .timer-display-large {
+  opacity: 0.25;
+  font-size: 3.5rem;
+}
+
+.recorder-card[data-ui-state="recording"] .timer-display-large {
+  opacity: 1;
+  font-size: 5rem;
 }
 
 /* Input Area */
@@ -116,10 +127,57 @@
   box-shadow: 0 18px 38px -28px rgba(15, 23, 42, 0.32);
 }
 
-.recorder-context-loading {
-  font-size: 0.94rem;
-  color: #0f766e;
-  font-weight: 600;
+.recorder-context-card[data-context-kind="briefing"] {
+  background: none;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.recorder-context-loading-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.5rem 0;
+}
+
+.recorder-context-loading-skeleton .skeleton-header {
+  margin-bottom: 0.2rem;
+}
+
+.recorder-context-loading-skeleton .skeleton-kicker {
+  width: 80px;
+  height: 10px;
+  background: rgba(13, 148, 136, 0.15);
+  border-radius: 4px;
+  margin-bottom: 8px;
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+.recorder-context-loading-skeleton .skeleton-title {
+  width: 140px;
+  height: 18px;
+  background: rgba(13, 148, 136, 0.15);
+  border-radius: 6px;
+  animation: pulse 1.5s infinite ease-in-out 0.2s;
+}
+
+.recorder-context-loading-skeleton .skeleton-line {
+  height: 12px;
+  background: rgba(13, 148, 136, 0.1);
+  border-radius: 4px;
+  animation: pulse 1.5s infinite ease-in-out 0.4s;
+}
+
+.recorder-context-loading-skeleton .skeleton-line.full { width: 100%; }
+.recorder-context-loading-skeleton .skeleton-line.medium { width: 85%; }
+.recorder-context-loading-skeleton .skeleton-line.short { width: 60%; }
+
+@keyframes pulse {
+  0% { opacity: 0.5; }
+  50% { opacity: 1; }
+  100% { opacity: 0.5; }
 }
 
 .recorder-context-header {
@@ -396,7 +454,7 @@
   position: absolute;
   left: 1.25rem;
   top: 50%;
-  transform: scale(0.98);
+  transform: translateY(-50%) scale(0.98);
   color: var(--brand-primary);
   opacity: 0.6;
   pointer-events: none;
@@ -506,11 +564,21 @@
 /* Actions Area */
 .recorder-actions-area {
   display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
   width: 100%;
   margin-top: 1rem;
-  height: 90px;
-  /* Fixed height to prevent layout jumps */
+  min-height: 90px;
+  gap: 0.5rem;
+}
+
+.recorder-start-hint {
+  font-size: 0.82rem;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  text-align: center;
+  margin: 0;
 }
 
 .action-btn-large {
@@ -542,7 +610,7 @@
   background: #cbd5e1;
   box-shadow: none;
   cursor: not-allowed;
-  opacity: 0.8;
+  opacity: 0.55;
 }
 
 .action-btn-large.stop {

@@ -163,7 +163,7 @@ const LoadingMessages = () => {
     count += LOADING_STEPS[i].messages.length;
     if (index < count) { stepIdx = i; break; }
   }
-  const progress = Math.min(((index + 1) / allMessages.length) * 100, 95);
+  const progress = Math.round(((index + 1) / allMessages.length) * 100);
 
   return createPortal(
     <div className="loading-container">
@@ -1114,17 +1114,27 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   if (!content) {
     return (
       <div className="history-view-container">
-        <div className="empty-state">
-          <FileText size={48} className="empty-icon" strokeWidth={1.5} />
+        <motion.div
+          className="empty-state"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, ease: 'easeOut' }}
+        >
           {processingError ? (
             <>
-              <p>{`No se pudo completar el procesamiento (${processingError.code}).`}</p>
-              <p className="empty-hint">{processingError.message}</p>
+              <div className="empty-icon-wrap empty-icon-wrap--error">
+                <AlertTriangle size={32} strokeWidth={1.5} />
+              </div>
+              <p>{processingError.message || 'No se pudo completar el procesamiento.'}</p>
+              <p className="empty-hint">Código: {processingError.code}</p>
             </>
           ) : (
             <>
-              <p>No hay historia clínica generada aún</p>
-              <p className="empty-hint">Graba una consulta para generar automáticamente la historia clínica</p>
+              <div className="empty-icon-wrap">
+                <Sparkles size={28} strokeWidth={1.5} />
+              </div>
+              <p>Aún no hay historia para esta consulta</p>
+              <p className="empty-hint">Graba la sesión y la historia clínica se generará automáticamente</p>
             </>
           )}
           <div className="doc-actions" style={{ marginTop: '0.75rem' }}>
@@ -1140,7 +1150,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               </button>
             )}
           </div>
-        </div>
+        </motion.div>
       </div>
     );
   }
@@ -1389,10 +1399,22 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             {metadata?.resultStatus === 'provisional' && (
               <div className="provisional-review-banner" role="alert" aria-live="polite">
                 <AlertTriangle size={16} />
-                <span>
-                  Revision obligatoria antes de finalizar.
-                  {metadata.provisionalReason ? ` Motivo: ${metadata.provisionalReason.replace(/_/g, ' ')}` : ''}
-                </span>
+                <div>
+                  <span>
+                    Revisión obligatoria antes de finalizar.
+                    {metadata.provisionalReason ? ` ${({
+                      'high_risk_detected_requires_manual_review': 'Se han detectado datos de alto riesgo clínico.',
+                      'quality_gate_blocked': 'No superó el control de calidad automático.',
+                    } as Record<string, string>)[metadata.provisionalReason] || metadata.provisionalReason.replace(/_/g, ' ') + '.'}` : ''}
+                  </span>
+                  {(metadata.criticalGaps?.length || 0) > 0 && (
+                    <div className="provisional-gaps-chips">
+                      {metadata.criticalGaps!.slice(0, 4).map((gap, i) => (
+                        <span key={i} className="provisional-gap-chip">{gap.field}: {gap.reason}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
             {processingError && (
@@ -2029,6 +2051,21 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           </motion.div>
         )}
       </AnimatePresence>
+
+      <div className="keyboard-shortcuts-overlay">
+        <div className="shortcut-item">
+          <kbd>Ctrl/⌘</kbd> + <kbd>S</kbd>
+          <span>Guardar cambios</span>
+        </div>
+        <div className="shortcut-item">
+          <kbd>Shift</kbd> + <kbd>R</kbd>
+          <span>Ver informe</span>
+        </div>
+        <div className="shortcut-item">
+          <kbd>Shift</kbd> + <kbd>E</kbd>
+          <span>Validación</span>
+        </div>
+      </div>
     </div>
   );
 };

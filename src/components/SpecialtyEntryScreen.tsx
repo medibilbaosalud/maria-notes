@@ -23,12 +23,8 @@ const iconBySpecialty: Record<ClinicalSpecialtyId, React.ReactNode> = {
 export const SpecialtyEntryScreen: React.FC<SpecialtyEntryScreenProps> = ({
   selectedSpecialty,
   onSelectSpecialty,
-  psychologyClinicianName,
-  onSelectPsychologyClinician,
   onContinue
 }) => {
-  const isPsychology = selectedSpecialty === 'psicologia';
-
   return (
     <div className="specialty-entry-screen">
       <div className="specialty-entry-backdrop" aria-hidden="true" />
@@ -48,8 +44,8 @@ export const SpecialtyEntryScreen: React.FC<SpecialtyEntryScreenProps> = ({
         </div>
 
         <p className="specialty-entry-copy">
-          Elige la especialidad con la que vas a trabajar en esta sesion. La estructura clinica
-          y la documentacion se adaptaran desde el inicio.
+          Elige la especialidad con la que vas a trabajar en esta sesion. Despues podras pegar una
+          historia de referencia para ajustar la estructura de redaccion a tu forma de escribir.
         </p>
 
         <div className="specialty-entry-grid" role="radiogroup" aria-label="Seleccionar especialidad">
@@ -73,41 +69,9 @@ export const SpecialtyEntryScreen: React.FC<SpecialtyEntryScreenProps> = ({
           })}
         </div>
 
-        {isPsychology && (
-          <div className="specialty-entry-clinician-block">
-            <div className="specialty-entry-clinician-copy">
-              <p className="specialty-entry-clinician-eyebrow">Perfil profesional</p>
-              <h2>Elige con quien vas a trabajar</h2>
-              <span>La estructura clinica y la documentacion se adaptaran desde el inicio.</span>
-            </div>
-
-            <div className="specialty-entry-grid specialty-entry-grid-clinicians" role="radiogroup" aria-label="Seleccionar profesional de psicologia">
-              {(['Ainhoa', 'June'] as const).map((clinicianName) => {
-                const isActive = clinicianName === psychologyClinicianName;
-                return (
-                  <button
-                    key={clinicianName}
-                    type="button"
-                    className={`specialty-entry-option specialty-entry-clinician-option ${isActive ? 'active' : ''}`}
-                    aria-pressed={isActive}
-                    onClick={() => onSelectPsychologyClinician(clinicianName)}
-                  >
-                    <div className="specialty-entry-option-icon specialty-entry-clinician-icon">
-                      {clinicianName.slice(0, 1)}
-                    </div>
-                    <div className="specialty-entry-option-body">
-                      <strong>{clinicianName}</strong>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         <div className="specialty-entry-actions">
           <button type="button" className="specialty-entry-continue" onClick={onContinue}>
-            Entrar en modo {selectedSpecialty === 'psicologia' ? `Psicologia · ${psychologyClinicianName}` : 'Otorrino'}
+            Entrar en modo {selectedSpecialty === 'psicologia' ? 'Psicologia' : 'Otorrino'}
             <ChevronRight size={16} />
           </button>
         </div>

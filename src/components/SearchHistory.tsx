@@ -13,7 +13,6 @@ import {
   Search,
   Shield,
   Sparkles,
-  Trash2,
   User,
   X
 } from 'lucide-react';
@@ -21,7 +20,6 @@ import ReactMarkdown from 'react-markdown';
 import { AIService } from '../services/ai';
 import {
   buildPsychologyCaseSummary,
-  deleteMedicalRecord,
   ensurePatientBriefing,
   getMedicalRecordByUuid,
   getPatientBriefing,
@@ -40,6 +38,7 @@ import { safeCopyToClipboard } from '../utils/safeBrowser';
 import { buildPrintableDocument } from '../utils/printTemplates';
 import { getClinicalSpecialtyConfig, normalizeClinicalSpecialty } from '../clinical/specialties';
 import { useSimulation } from './Simulation/SimulationContext';
+import { PatientBriefingCard } from './PatientBriefingCard';
 import './SearchHistory.css';
 
 interface SearchHistoryProps {
@@ -80,10 +79,8 @@ const modalContentVariants = {
 export const SearchHistory: React.FC<SearchHistoryProps> = ({
   apiKey,
   focusedPatientName = '',
-  psychologyClinicianName,
   onFocusedPatientNameConsumed,
-  onLoadRecord,
-  onUseAsContext
+  onLoadRecord
 }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PatientTimelineGroup[]>([]);
@@ -97,7 +94,6 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const [briefing, setBriefing] = useState<PatientBriefing | null>(null);
   const [timelineExpanded, setTimelineExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [isDeletingRecord, setIsDeletingRecord] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportContent, setReportContent] = useState('');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -122,8 +118,6 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const normalizedDemoPatientName = demoData?.patientName?.trim().toLowerCase() || '';
   const selectedGroupName = selectedGroup?.patientName || '';
   const selectedGroupNormalizedName = selectedGroup?.normalizedPatientName || '';
-  const selectedGroupLegacyCount = selectedGroup?.sourceCounts.legacy || 0;
-  const selectedGroupCurrentCount = selectedGroup?.sourceCounts.current || 0;
   const isDemoSelectedGroup = Boolean(
     demoContinuity
     && selectedGroupNormalizedName
@@ -133,10 +127,8 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const effectiveCaseSummaryLoading = isDemoSelectedGroup ? false : caseSummaryLoading;
 
   const selectedSpecialty = normalizeClinicalSpecialty(selectedItem?.specialty || 'psicologia');
-  const selectedBriefingClinician = selectedItem?.clinicianProfile || selectedItem?.clinicianName || selectedGroup?.clinicians[0];
   const activeContent = selectedItem?.medicalHistory || '';
   const { history: activeHistory, notes: activeNotes } = parseContent(activeContent);
-  const isLegacySelection = selectedItem?.source === 'legacy';
   const canOpenCurrent = selectedItem?.source === 'current' && Boolean(onLoadRecord) && Boolean(selectedItem?.recordUuid);
 
   const getDemoGroups = useCallback((searchTerm: string) => {
@@ -159,7 +151,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       const effectiveQuery = typeof nextQuery === 'string' ? nextQuery : queryRef.current;
       const groups = demoContinuity
         ? getDemoGroups(effectiveQuery)
-        : await searchPatientTimeline(effectiveQuery, 'psicologia', psychologyClinicianName);
+        : await searchPatientTimeline(effectiveQuery, 'psicologia', undefined, { includeLegacy: false });
       setResults(groups);
       const normalizedPreferredPatient = preferredPatientName?.trim().toLowerCase();
       const previousSelectedGroup = selectedGroupRef.current;
@@ -175,7 +167,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [demoContinuity, getDemoGroups, psychologyClinicianName]);
+  }, [demoContinuity, getDemoGroups]);
 
   const refreshResults = useCallback(async () => {
     if (syncingRef.current) return;
@@ -256,7 +248,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       }
       setCaseSummaryLoading(true);
       try {
-        const summary = await buildPsychologyCaseSummary(selectedGroupName, selectedBriefingClinician);
+        const summary = await buildPsychologyCaseSummary(selectedGroupName, undefined, { includeLegacy: false });
         if (!cancelled) setCaseSummary(summary);
       } finally {
         if (!cancelled) setCaseSummaryLoading(false);
@@ -266,7 +258,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [demoContinuity, normalizedDemoPatientName, selectedBriefingClinician, selectedGroupName, selectedGroupNormalizedName]);
+  }, [demoContinuity, normalizedDemoPatientName, selectedGroupName, selectedGroupNormalizedName]);
 
   useEffect(() => {
     let cancelled = false;
@@ -282,20 +274,20 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
 
       const currentRequest = ++briefingRequestRef.current;
       try {
-        const existing = await getPatientBriefing(selectedGroupName, 'psicologia', selectedBriefingClinician);
+        const existing = await getPatientBriefing(selectedGroupName, 'psicologia');
         if (cancelled || currentRequest !== briefingRequestRef.current) return;
         if (existing) {
           setBriefing(existing);
           return;
         }
 
-        const shouldGenerate = selectedGroupLegacyCount > 0 && selectedGroupCurrentCount === 0;
+        const shouldGenerate = false;
         if (!shouldGenerate) {
           setBriefing(null);
           return;
         }
 
-        const generated = await ensurePatientBriefing(selectedGroupName, 'psicologia', selectedBriefingClinician);
+        const generated = await ensurePatientBriefing(selectedGroupName, 'psicologia');
         if (cancelled || currentRequest !== briefingRequestRef.current) return;
         setBriefing(generated);
       } catch (error) {
@@ -313,9 +305,6 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   }, [
     demoContinuity,
     normalizedDemoPatientName,
-    selectedBriefingClinician,
-    selectedGroupCurrentCount,
-    selectedGroupLegacyCount,
     selectedGroupName,
     selectedGroupNormalizedName,
     selectedSpecialty
@@ -400,29 +389,6 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     printWindow.document.close();
   }, [selectedSpecialty]);
 
-  const handleDeleteSelectedRecord = useCallback(async () => {
-    if (!selectedItem || selectedItem.source !== 'current' || !selectedItem.recordUuid || isDeletingRecord) return;
-    const confirmed = window.confirm(`¿Quieres borrar la consulta actual de "${selectedGroup?.patientName || selectedItem.patientName}"? Esta acción también la eliminará de Supabase.`);
-    if (!confirmed) return;
-
-    setIsDeletingRecord(true);
-    try {
-      const deleted = await deleteMedicalRecord(selectedItem.recordUuid);
-      if (!deleted) {
-        window.alert('No se pudo borrar la consulta.');
-        return;
-      }
-
-      setSelectedRecord(null);
-      await loadResults(queryRef.current, selectedGroup?.patientName || selectedItem.patientName);
-    } catch (error) {
-      console.error('[SearchHistory] record deletion failed:', error);
-      window.alert('Ha fallado el borrado de la consulta.');
-    } finally {
-      setIsDeletingRecord(false);
-    }
-  }, [isDeletingRecord, loadResults, selectedGroup?.patientName, selectedItem]);
-
   const renderTimelineSnippet = (item: PatientTimelineItem) => {
     const value = item.medicalHistory.replace(/\s+/g, ' ').trim();
     return value.length > 160 ? `${value.slice(0, 160)}...` : value;
@@ -477,6 +443,9 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
             </div>
           ) : results.length === 0 ? (
             <div className="empty-state">
+              <div className="empty-icon-wrap">
+                <User size={24} strokeWidth={1.5} />
+              </div>
               <p>{emptyStateMessage}</p>
             </div>
           ) : (
@@ -505,7 +474,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                     </div>
                     <h3 className="card-name">{group.patientName}</h3>
                     <div className="card-type">
-                      {group.sessionCount} sesiones · {group.sourceCounts.current} actual · {group.sourceCounts.legacy} legado
+                      {group.sessionCount} sesiones
                     </div>
                     <div className="card-tags">
                       {group.clinicians.slice(0, 2).map((clinician) => (
@@ -564,53 +533,17 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                         <span>Abrir resultado</span>
                       </button>
                     )}
-                    {isLegacySelection && onUseAsContext && (
-                      <button
-                        id="history-use-context-btn"
-                        className="search-history-btn-secondary"
-                        onClick={() => onUseAsContext({
-                          patientName: selectedGroup.patientName,
-                          specialty: selectedSpecialty,
-                          clinicianProfile: selectedItem.clinicianProfile,
-                          clinicianName: selectedItem.clinicianName
-                        })}
-                      >
-                        <span>Usar como contexto para nueva consulta</span>
-                      </button>
-                    )}
                     {canOpenCurrent && (
                       <button className="search-history-btn-secondary" onClick={handleOpenReport}>
                         <FileText size={16} />
                         <span>Informe</span>
                       </button>
                     )}
-                    {canOpenCurrent && (
-                      <button
-                        className="search-history-btn-secondary search-history-btn-danger"
-                        onClick={() => void handleDeleteSelectedRecord()}
-                        disabled={isDeletingRecord}
-                      >
-                        <Trash2 size={16} />
-                        <span>{isDeletingRecord ? 'Borrando...' : 'Borrar'}</span>
-                      </button>
-                    )}
                   </div>
                 </div>
 
                 {briefing && (
-                  <div id="history-briefing-card" className="briefing-card">
-                    <div className="case-hub-header">
-                      <div>
-                        <div className="case-hub-kicker">Contexto del caso</div>
-                        <h2>Antes de la sesión</h2>
-                      </div>
-                    </div>
-                    <div className="briefing-lines">
-                      {briefing.summary_text.split('\n').filter(l => l.trim()).map((line, index) => (
-                        <p key={`${index}-${line}`} className="briefing-line">{line}</p>
-                      ))}
-                    </div>
-                  </div>
+                  <PatientBriefingCard briefing={briefing} variant="full" />
                 )}
 
                 <div id="history-case-hub" className="case-hub-card">
@@ -739,7 +672,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                 <div className="detail-scroll-area">
                   <div className="paper-document">
                     <div className="document-header">
-                      <span className="doc-label">{isLegacySelection ? 'Historial importado' : 'Historia Medica'}</span>
+                      <span className="doc-label">Historia Medica</span>
                       <div className="doc-actions">
                         <button className="search-icon-btn copy-doc" onClick={() => void handleCopy(selectedContent)} title="Copiar" aria-label="Copiar historia" data-ui-state={copied ? 'success' : 'idle'}>
                           {copied ? <Copy size={16} /> : <Copy size={16} />}

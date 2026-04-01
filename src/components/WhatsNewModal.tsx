@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertTriangle, Brain, ChevronRight, Check, ShieldCheck, Layers, Cpu, Scale, MessageSquare, BarChart2, Clock, Sparkles, Zap, Star } from 'lucide-react';
+import { X, AlertTriangle, Brain, ChevronRight, ShieldCheck, Layers, Cpu, MessageSquare, BarChart2, Sparkles, Zap, Star } from 'lucide-react';
 import './WhatsNewModal.css';
 
 interface WhatsNewModalProps {
@@ -142,40 +142,10 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
             )
         },
         {
-            icon: Brain,
-            color: '#ec4899',
-            title: "2. Machine Learning Profundo",
-            description: "Hemos dotado a tu asistente de un ciclo de sueño biológico. 1) Durante el día, aprende correcciones rápidas. 2) Por la noche, mientras 'descansa', consolida esas lecciones para aplicarlas siempre a futuro.",
-            visual: (
-                <div className="mock-memory-arch">
-                    <div className="memory-layer short">
-                        <div className="memory-icon"><Brain size={20} color="#f59e0b" /></div>
-                        <div className="memory-details">
-                            <div className="memory-title">Memoria de Sesión (Día)</div>
-                            <div className="memory-desc">Aprende al momento: "Ah, hoy prefieres 'mm/hg' en minúsculas".</div>
-                        </div>
-                    </div>
-
-                    <div className="memory-arrow">
-                        <Clock size={16} />
-                        <span>Consolidación Nocturna</span>
-                    </div>
-
-                    <div className="memory-layer long">
-                        <div className="memory-icon"><Brain size={20} color="#8b5cf6" /></div>
-                        <div className="memory-details">
-                            <div className="memory-title">Reglas Maestras (Noche)</div>
-                            <div className="memory-desc">Generaliza: "La Dra. siempre usa minúsculas para unidades de presión".</div>
-                        </div>
-                    </div>
-                </div>
-            )
-        },
-        {
             icon: Layers,
             color: '#3b82f6',
-            title: "3. La Nueva Arquitectura",
-            description: "Antes, una sola IA intentaba hacerlo todo (audio a texto, y luego resumen) y se saturaba. Ahora, hemos dividido el trabajo en 4 especialistas: Escucha perfecta, Extracción quirúgica, Redacción clínica y Verificación. Divide y vencerás.",
+            title: "2. La Nueva Arquitectura",
+            description: "Antes, una sola IA intentaba hacerlo todo (audio a texto, y luego resumen) y se saturaba. Ahora, hemos dividido el trabajo en 4 especialistas: Escucha perfecta, Extracción quirúrgica, Redacción clínica y Verificación. Divide y vencerás.",
             visual: (
                 <div className="mock-pipeline-comparison">
                     <div className="pipeline-row old">
@@ -221,30 +191,10 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
             )
         },
         {
-            icon: Scale,
-            color: '#64748b',
-            title: "4. Comparativa Técnica",
-            description: "ANTES: Usábamos 'Llama-8b', un modelo pequeño y rápido pero olvidadizo. AHORA: Usamos 'Orquestación'. Combinamos Llama para velocidad con modelos gigantes (GPT-120b) para pensar. Es como cambiar un becario por un equipo de consultores.",
-            visual: (
-                <div className="mock-comparison-ui">
-                    <div className="comparison-col before">
-                        <div className="comparison-title">Antes</div>
-                        <div className="comparison-icon">🛵</div>
-                        <div className="comparison-desc">Modelo Único (Llama)<br />Rápido pero simple<br />Se pierde fácil</div>
-                    </div>
-                    <div className="comparison-col after">
-                        <div className="comparison-title">Ahora</div>
-                        <div className="comparison-icon">🚀</div>
-                        <div className="comparison-desc">Enjambre de IAs<br />Potencia Industrial<br />Razonamiento Profundo</div>
-                    </div>
-                </div>
-            )
-        },
-        {
             icon: Cpu,
             color: '#6366f1',
-            title: "5. Flujo Multifase & Auto-Corrección",
-            description: "¿Router? No, es algo mejor: un Flujo Continuo con Bucle de Calidad. 1) Whisper Turbo escucha. 2) Llama 3.3 (el modelo más potente) piensa y estructura. 3) Si la Verificación final detecta el más mínimo error, el sistema repite el proceso automáticamente hasta garantizar el 100%.",
+            title: "3. Auto-Corrección Inteligente",
+            description: "Un Flujo Continuo con Bucle de Calidad. 1) Whisper Turbo escucha. 2) Llama 3.3 piensa y estructura. 3) Si la Verificación final detecta el más mínimo error, el sistema repite el proceso automáticamente hasta garantizar el 100%.",
             visual: (
                 <div className="mock-swarm-flow">
                     <div className="swarm-stage">
@@ -260,7 +210,6 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                             <div className="agent-header"><Zap size={14} color="#d97706" /> Oído</div>
                             <span className="agent-task">Transcripción</span>
                             <span className="agent-model">Whisper V3 Turbo</span>
-                            <span style={{ fontSize: '0.6rem', color: '#cbd5e1' }}>(Backup: V3)</span>
                         </div>
                         <div className="swarm-agent-card reasoning">
                             <div className="agent-header"><Brain size={14} color="#7c3aed" /> Cerebro</div>
@@ -292,43 +241,10 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
             )
         },
         {
-            icon: MessageSquare,
-            color: '#8b5cf6',
-            title: "6. Comprensión Semántica",
-            description: "Adiós a las correcciones tontas. El sistema antiguo marcaba error si decías 'cefalea' y él escribía 'dolor de cabeza'. El nuevo sistema entiende que significan lo mismo y respeta el contexto clínico.",
-            visual: (
-                <div className="mock-semantic-ui">
-                    <div className="chat-bubble doc">"Refiere cefalea tensional..."</div>
-                    <div className="chat-bubble ai">IA: Escribe "Dolor de cabeza tipo tensión" <Check size={14} /></div>
-                    <div className="semantic-match">
-                        <span className="match-text">Validación Semántica: OK</span>
-                        <span className="icon-equals">≈</span>
-                        <Check size={16} color="#10b981" />
-                    </div>
-                </div>
-            )
-        },
-        {
-            icon: ShieldCheck,
-            color: '#10b981',
-            title: "7. Seguridad 'Abogado del Diablo'",
-            description: "Para tu tranquilidad, hemos integrado un sistema de validación adversarial. UNA IA escribe la historia, y OTRA IA intenta atacarla buscando fallos. Solo si sobrevive al ataque, te la mostramos.",
-            visual: (
-                <div className="mock-shield-ui">
-                    <div className="shield-icon-large">
-                        <ShieldCheck size={64} color="#10b981" />
-                    </div>
-                    <div className="shield-status">
-                        <Check size={16} /> 0 Alucinaciones (Garantizado)
-                    </div>
-                </div>
-            )
-        },
-        {
             icon: AlertTriangle,
             color: '#f59e0b',
-            title: "8. Transparencia Total",
-            description: "Si el sistema duda, te lo dice. Verás alertas amarillas para confirmar datos confusos. Además, puedes hacer clic en cualquier dato (Fuentes) para ver qué dijo exactamente el paciente. Cero cajas negras.",
+            title: "4. Transparencia Total",
+            description: "Si el sistema duda, te lo dice. Verás alertas amarillas para confirmar datos confusos. Además, puedes hacer clic en cualquier dato para ver qué dijo exactamente el paciente. Cero cajas negras.",
             visual: (
                 <div className="mock-uncertainty-panel">
                     <div className="mock-uncertainty-item">
@@ -373,19 +289,25 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ onClose }) => {
                     <button className="close-btn-absolute" onClick={onClose}><X size={20} /></button>
 
                     <div className="whats-new-content">
-                        {currentSlide === 0 ? (
-                            <CoverSlide onStart={() => setCurrentSlide(1)} />
-                        ) : currentSlide === totalSlides - 1 ? (
-                            <FinalSlide onFinish={onClose} />
-                        ) : (
-                            <FeatureSlide
-                                {...features[currentSlide - 1]}
-                            />
-                        )}
+                        <AnimatePresence mode="wait">
+                            {currentSlide === 0 ? (
+                                <CoverSlide key="cover" onStart={() => setCurrentSlide(1)} />
+                            ) : currentSlide === totalSlides - 1 ? (
+                                <FinalSlide key="final" onFinish={onClose} />
+                            ) : (
+                                <FeatureSlide
+                                    key={`feature-${currentSlide}`}
+                                    {...features[currentSlide - 1]}
+                                />
+                            )}
+                        </AnimatePresence>
                     </div>
 
                     {currentSlide > 0 && currentSlide < totalSlides - 1 && (
                         <div className="whats-new-footer">
+                            <button className="skip-btn" onClick={onClose}>
+                                Saltar
+                            </button>
                             <div className="dots-indicator">
                                 {features.map((_, idx) => (
                                     <div

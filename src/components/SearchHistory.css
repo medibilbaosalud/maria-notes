@@ -587,23 +587,6 @@
   color: var(--brand-primary);
 }
 
-.search-history-btn-secondary:disabled {
-  opacity: 0.65;
-  cursor: wait;
-}
-
-.search-history-btn-danger {
-  color: #b91c1c;
-  border-color: rgba(239, 68, 68, 0.18);
-  background: #fff7f7;
-}
-
-.search-history-btn-danger:hover:not(:disabled) {
-  color: #ffffff;
-  background: #ef4444;
-  border-color: #ef4444;
-}
-
 .timeline-grid .detail-view {
   gap: 1rem;
 }
@@ -855,6 +838,38 @@
 
 .timeline-entry-action:hover {
   background: #115e59;
+}
+
+/* ─── Empty State (list) ─── */
+.list-column .empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1.5rem;
+  gap: 0.5rem;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.list-column .empty-state .empty-icon-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(38, 166, 154, 0.12), rgba(38, 166, 154, 0.04));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.25rem;
+  color: var(--brand-primary, #26a69a);
+}
+
+.list-column .empty-state p {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+  max-width: 260px;
+  line-height: 1.45;
 }
 
 /* ─── Empty Selection ─── */

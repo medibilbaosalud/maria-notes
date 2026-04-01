@@ -18,6 +18,11 @@ export interface AIResult<T> {
     debug_trace?: TranscriptionDebugTrace;
 }
 
+export interface ClinicalStyleReferencePayload {
+    referenceStory: string;
+    generatedTemplate: string;
+}
+
 export interface AIResultWithMetadata extends AIResult<string> {
     extraction?: ExtractionResult;
     extraction_meta?: ExtractionMeta[];
@@ -602,7 +607,8 @@ export class AIService {
         patientName: string = '',
         specialty: ClinicalSpecialtyId = 'otorrino',
         clinicianName?: string,
-        clinicianProfile?: string
+        clinicianProfile?: string,
+        styleReference?: ClinicalStyleReferencePayload
     ): Promise<AIResultWithMetadata> {
         this.emitInvocation('single_shot_history', 'single_shot_history_generation', 'start', SERVER_TEXT_MODEL);
         try {
@@ -612,7 +618,8 @@ export class AIService {
                 patientName,
                 consultationType: specialty,
                 learningContext,
-                clinicianName
+                clinicianName,
+                styleReference
             });
             this.emitInvocation('single_shot_history', 'single_shot_history_generation', 'success', result.model, undefined, {
                 specialty,
@@ -721,7 +728,8 @@ export class AIService {
         patientName: string = '',
         specialty: ClinicalSpecialtyId = 'otorrino',
         clinicianName?: string,
-        clinicianProfile?: string
+        clinicianProfile?: string,
+        styleReference?: ClinicalStyleReferencePayload
     ): Promise<AIResult<string>> {
         this.emitInvocation('generation', 'section_regeneration', 'start', SERVER_GROQ_TEXT_MODEL);
         try {
@@ -740,7 +748,8 @@ export class AIService {
                 patientName,
                 consultationType: specialty,
                 learningContext,
-                clinicianName
+                clinicianName,
+                styleReference
             });
             this.emitInvocation('generation', 'section_regeneration', 'success', result.model, undefined, {
                 specialty,

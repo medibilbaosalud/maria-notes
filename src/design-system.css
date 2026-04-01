@@ -19,29 +19,29 @@
     --brand-gradient: linear-gradient(135deg, #26A69A 0%, #00BFA5 100%);
 
     /* Backgrounds */
-    --bg-app: #F8FAFC;
-    --bg-gradient: linear-gradient(120deg, #F0FDF4 0%, #F8FAFC 50%, #E0F2F1 100%);
+    --bg-app: #F5F5F7;
+    --bg-gradient: #F5F5F7;
     --bg-sidebar: #FFFFFF;
     --bg-card: #FFFFFF;
-    --bg-secondary: #F8FAFC;
-    --bg-tertiary: #EEF2F7;
+    --bg-secondary: transparent;
+    --bg-tertiary: rgba(0,0,0,0.02);
     --surface-1: #FFFFFF;
-    --surface-2: #F8FAFC;
-    --surface-3: #F1F5F9;
-    --border-soft: rgba(15, 23, 42, 0.08);
-    --border-strong: rgba(15, 23, 42, 0.16);
+    --surface-2: #F5F5F7;
+    --surface-3: #EBEBEB;
+    --border-soft: rgba(0, 0, 0, 0.04);
+    --border-strong: rgba(0, 0, 0, 0.08);
     --glass-border: rgba(255, 255, 255, 0.45);
 
     /* Text Colors */
-    --text-primary: #1E293B;
-    --text-secondary: #64748B;
-    --text-tertiary: #94A3B8;
+    --text-primary: #1D1D1F;
+    --text-secondary: #86868B;
+    --text-tertiary: #98989D;
 
     /* UI Elements */
     --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
-    --radius-xl: 20px;
+    --radius-md: 14px;
+    --radius-lg: 18px;
+    --radius-xl: 24px;
     --radius-full: 9999px;
     --space-2: 0.5rem;
     --space-3: 0.75rem;
@@ -52,10 +52,10 @@
     --space-10: 2.5rem;
 
     /* Shadows */
-    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-    --shadow-xl: 0 22px 48px -16px rgba(15, 23, 42, 0.35);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.03), 0 2px 4px rgba(0, 0, 0, 0.02);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.02);
+    --shadow-xl: 0 24px 48px rgba(0, 0, 0, 0.06), 0 12px 24px rgba(0, 0, 0, 0.04);
     --shadow-glow: 0 0 20px rgba(38, 166, 154, 0.15);
     --focus-ring: 0 0 0 3px rgba(38, 166, 154, 0.24);
     --z-modal: 1200;
@@ -114,7 +114,7 @@
     --duration-normal: var(--motion-duration-normal);
 }
 
-/* Dark Mode Support */
+/* Dark Mode Support — disabled until per-component styles are token-ready
 @media (prefers-color-scheme: dark) {
     :root {
         --bg-app: #0F172A;
@@ -144,6 +144,7 @@
         --glass-text-shadow: 0 0 8px rgba(0, 0, 0, 0.3);
     }
 }
+*/
 
 /* Global Reset & Base Styles */
 * {
@@ -240,7 +241,7 @@ body {
     border: none;
     cursor: pointer;
     white-space: nowrap;
-    box-shadow: var(--btn-shadow-rest);
+    box-shadow: none;
     transition:
         background-color var(--motion-duration-fast) var(--motion-ease-base),
         border-color var(--motion-duration-fast) var(--motion-ease-base),
@@ -251,13 +252,13 @@ body {
 }
 
 .btn:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--btn-shadow-hover);
+    transform: none;
+    opacity: 0.9;
 }
 
 .btn:active {
-    transform: translateY(0px) scale(0.98);
-    box-shadow: var(--btn-shadow-active);
+    transform: scale(0.97);
+    opacity: 0.8;
 }
 
 .btn:disabled {

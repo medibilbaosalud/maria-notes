@@ -109,7 +109,7 @@
 /* ─── Provisional / Error Banners (unified alert system) ─── */
 .provisional-review-banner {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.6rem;
   margin: 0.75rem 2rem 0;
   padding: 0.7rem 0.9rem;
@@ -118,6 +118,23 @@
   color: var(--surface-warning-text);
   border-radius: var(--radius-md);
   font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.provisional-gaps-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+}
+
+.provisional-gap-chip {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-sm);
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--surface-warning-text);
+  font-size: 0.78rem;
   font-weight: 600;
 }
 
@@ -634,9 +651,21 @@
   padding: 3rem;
 }
 
-.history-view-container .empty-state .empty-icon {
-  opacity: 0.35;
+.history-view-container .empty-state .empty-icon-wrap {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(38, 166, 154, 0.12), rgba(38, 166, 154, 0.04));
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-bottom: 0.5rem;
+  color: var(--brand-primary, #26a69a);
+}
+
+.history-view-container .empty-state .empty-icon-wrap--error {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(239, 68, 68, 0.04));
+  color: #dc2626;
 }
 
 .history-view-container .empty-state p {
@@ -929,10 +958,11 @@
 
 /* ─── Doctor Feedback Card ─── */
 .doctor-feedback-card {
-  margin-top: 1rem;
-  padding: 1rem 1.1rem;
+  margin-top: 2rem;
+  padding: 1.5rem 1.1rem 1rem;
   border-radius: var(--radius-lg);
   border: 1px solid var(--surface-info-border);
+  border-top: 1px solid var(--border-soft);
   background: linear-gradient(135deg, var(--surface-info-bg) 0%, var(--surface-success-bg) 100%);
   box-shadow: 0 12px 28px rgba(15, 118, 110, 0.06);
 }
@@ -1597,3 +1627,55 @@
     right: auto;
   }
 }
+
+/* --- Keyboard Shortcuts Overlay --- */
+.keyboard-shortcuts-overlay {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 0.8rem 1rem;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 14px rgba(15, 118, 110, 0.08);
+  border: 1px solid rgba(13, 148, 136, 0.15);
+  backdrop-filter: blur(8px);
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+@media (max-width: 768px) {
+  .keyboard-shortcuts-overlay {
+    display: none;
+  }
+}
+
+.keyboard-shortcuts-overlay:hover {
+  opacity: 1;
+}
+
+.shortcut-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.shortcut-item kbd {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 0.15rem 0.35rem;
+  font-family: inherit;
+  font-size: 0.7rem;
+  color: var(--brand-dark);
+  font-weight: 700;
+  box-shadow: 0 1px 1px rgba(0,0,0,0.05);
+}
+

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Brain,
@@ -6,17 +6,23 @@ import {
     ChevronRight,
     FileText,
     Mic,
-    PlayCircle
+    PlayCircle,
+    Sparkles
 } from 'lucide-react';
 
 import type { ClinicalSpecialtyId } from '../clinical/specialties';
+import { buildEditableTemplateFromReferenceStory } from '../services/clinical-style-profile';
 import './OnboardingModal.css';
 
 interface OnboardingModalProps {
     specialty: ClinicalSpecialtyId;
     clinicianName?: string;
+    referenceStory?: string;
+    generatedTemplate?: string;
+    isProfileLoading?: boolean;
     onClose: () => void;
     onStartDemo: () => void;
+    onSaveStyleProfile: (referenceStory: string, generatedTemplate: string) => Promise<void>;
 }
 
 interface TunnelSlide {
@@ -43,18 +49,11 @@ const PSYCHOLOGY_SLIDES: TunnelSlide[] = [
         accent: 'teal'
     },
     {
-        icon: FileText,
         id: 'historial',
+        icon: FileText,
         headline: 'En Historial lo ves todo mas claro',
         body: 'Cada paciente tiene su propio espacio, con lo importante del caso a mano y la evolucion lista para consultarla cuando la necesites.',
         accent: 'sunrise'
-    },
-    {
-        id: 'aprende',
-        icon: Brain,
-        headline: 'Y cuando corriges, Maria se adapta a ti',
-        body: 'Cada ajuste ayuda a que Maria se acerque mas a tu manera real de escribir, revisar y cerrar la historia clinica.',
-        accent: 'paper'
     }
 ];
 
@@ -65,6 +64,13 @@ const GENERIC_SLIDES: TunnelSlide[] = [
         headline: 'Graba, revisa y documenta sin salir del flujo',
         body: 'Maria Notes captura la consulta, genera la historia y te deja cerrar el informe desde la misma interfaz.',
         accent: 'teal'
+    },
+    {
+        id: 'history',
+        icon: FileText,
+        headline: 'Todo queda ordenado por paciente',
+        body: 'Desde Historial puedes volver a cualquier consulta actual sin mezclar trabajo antiguo que no quieras ver.',
+        accent: 'paper'
     }
 ];
 
@@ -79,24 +85,67 @@ const slideVariants = {
 
 export const OnboardingModal = ({
     specialty,
-    clinicianName,
+    referenceStory = '',
+    generatedTemplate = '',
+    isProfileLoading = false,
     onClose,
-    onStartDemo
+    onStartDemo,
+    onSaveStyleProfile
 }: OnboardingModalProps) => {
     const slides = getSlidesForSpecialty(specialty);
+    const setupIndex = slides.length;
+    const totalSteps = slides.length + 1;
     const [index, setIndex] = useState(0);
-    const isLastSlide = index >= slides.length - 1;
-    const slide = slides[index];
+    const [referenceValue, setReferenceValue] = useState(referenceStory);
+    const [templateValue, setTemplateValue] = useState(generatedTemplate);
+    const [isSaving, setIsSaving] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [hasSaved, setHasSaved] = useState(false);
+    const isSetupStep = index === setupIndex;
+    const isLastInfoStep = index === slides.length - 1;
+    const slide = slides[Math.min(index, slides.length - 1)];
     const SlideIcon = slide.icon;
     const isPsychology = specialty === 'psicologia';
-    const name = clinicianName || 'profesional';
+
+    useEffect(() => {
+        setReferenceValue(referenceStory);
+    }, [referenceStory]);
+
+    useEffect(() => {
+        setTemplateValue(generatedTemplate);
+    }, [generatedTemplate]);
+
+    const currentAccent = isSetupStep ? 'paper' : slide.accent;
+    const canSave = referenceValue.trim().length >= 40 && templateValue.trim().length >= 20 && !isSaving;
+    const generatedPreview = useMemo(() => {
+        return buildEditableTemplateFromReferenceStory(specialty, referenceValue);
+    }, [referenceValue, specialty]);
 
     const handleNext = () => {
-        if (isLastSlide) {
-            onStartDemo();
+        if (isSetupStep) return;
+        setIndex((current) => Math.min(current + 1, setupIndex));
+    };
+
+    const handleGenerateTemplate = () => {
+        setTemplateValue(generatedPreview);
+        setError(null);
+    };
+
+    const handleSave = async (startDemoAfterSave = false) => {
+        if (!canSave) return;
+        setIsSaving(true);
+        setError(null);
+        try {
+            await onSaveStyleProfile(referenceValue, templateValue);
+            setHasSaved(true);
+            if (startDemoAfterSave) {
+                onStartDemo();
+            }
             onClose();
-        } else {
-            setIndex((i) => i + 1);
+        } catch (saveError) {
+            setError(saveError instanceof Error ? saveError.message : 'No se pudo guardar la referencia');
+        } finally {
+            setIsSaving(false);
         }
     };
 
@@ -106,62 +155,150 @@ export const OnboardingModal = ({
                 initial={{ opacity: 0, scale: 0.96, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-                className={`onboarding-tunnel-card tone-${slide.accent}`}
+                className={`onboarding-tunnel-card tone-${currentAccent} ${isSetupStep ? 'is-setup-step' : ''}`}
             >
-                {/* Greeting */}
                 <p className="onboarding-tunnel-kicker">
-                    {isPsychology
-                        ? `Hola ${name}, vamos a verlo juntas en un minuto`
-                        : 'Guia rapida de Maria Notes'}
+                    {isSetupStep
+                        ? 'Configura una historia de referencia'
+                        : isPsychology
+                            ? 'Vamos a dejar esto listo'
+                            : 'Guia rapida de Maria Notes'}
                 </p>
 
-                {/* Animated slide */}
                 <AnimatePresence mode="wait">
-                    <motion.div
-                        key={slide.id}
-                        className="onboarding-tunnel-slide"
-                        variants={slideVariants}
-                        initial="enter"
-                        animate="center"
-                        exit="exit"
-                        transition={{ duration: 0.25, ease: 'easeOut' }}
-                    >
-                        <div className="onboarding-tunnel-icon-ring">
-                            <SlideIcon size={28} />
-                        </div>
-                        <h2 id="onboarding-title">{slide.headline}</h2>
-                        <p>{slide.body}</p>
-                    </motion.div>
+                    {!isSetupStep ? (
+                        <motion.div
+                            key={slide.id}
+                            className="onboarding-tunnel-slide"
+                            variants={slideVariants}
+                            initial="enter"
+                            animate="center"
+                            exit="exit"
+                            transition={{ duration: 0.25, ease: 'easeOut' }}
+                        >
+                            <div className="onboarding-tunnel-icon-ring">
+                                <SlideIcon size={28} />
+                            </div>
+                            <h2 id="onboarding-title">{slide.headline}</h2>
+                            <p>{slide.body}</p>
+                        </motion.div>
+                    ) : (
+                        <motion.div
+                            key="style-setup"
+                            className="onboarding-style-setup"
+                            variants={slideVariants}
+                            initial="enter"
+                            animate="center"
+                            exit="exit"
+                            transition={{ duration: 0.25, ease: 'easeOut' }}
+                        >
+                            <div className="onboarding-tunnel-icon-ring">
+                                <Sparkles size={28} />
+                            </div>
+                            <h2 id="onboarding-title">Pega una historia real como referencia</h2>
+                            <p className="onboarding-style-copy">
+                                Maria sacara de aqui una estructura editable para escribir como tu. Guardamos la muestra y la plantilla en Supabase para reutilizarla despues.
+                            </p>
+
+                            <label className="onboarding-style-field">
+                                <span>Historia de referencia</span>
+                                <textarea
+                                    value={referenceValue}
+                                    onChange={(event) => {
+                                        setReferenceValue(event.target.value);
+                                        setHasSaved(false);
+                                    }}
+                                    placeholder="Pega aqui una historia ya escrita por vosotras..."
+                                    disabled={isProfileLoading || isSaving}
+                                />
+                            </label>
+
+                            <div className="onboarding-style-actions">
+                                <button
+                                    type="button"
+                                    className="onboarding-style-secondary"
+                                    onClick={handleGenerateTemplate}
+                                    disabled={referenceValue.trim().length < 20 || isProfileLoading || isSaving}
+                                >
+                                    Sacar estructura
+                                </button>
+                                <span className="onboarding-style-hint">
+                                    {isProfileLoading ? 'Cargando estilo guardado...' : 'Puedes editar la estructura antes de guardarla.'}
+                                </span>
+                            </div>
+
+                            <label className="onboarding-style-field">
+                                <span>Estructura editable</span>
+                                <textarea
+                                    value={templateValue}
+                                    onChange={(event) => {
+                                        setTemplateValue(event.target.value);
+                                        setHasSaved(false);
+                                    }}
+                                    placeholder="Aqui aparecera la estructura base que usare despues."
+                                    disabled={isProfileLoading || isSaving}
+                                />
+                            </label>
+
+                            {error && <div className="onboarding-style-error">{error}</div>}
+                            {hasSaved && !error && <div className="onboarding-style-success">Referencia guardada correctamente.</div>}
+                        </motion.div>
+                    )}
                 </AnimatePresence>
 
-                {/* Footer: progress dots + CTA */}
                 <div className="onboarding-tunnel-footer">
                     <div className="onboarding-tunnel-dots" aria-label="Progreso">
-                        {slides.map((s, i) => (
+                        {Array.from({ length: totalSteps }).map((_, stepIndex) => (
                             <span
-                                key={s.id}
-                                className={`onboarding-tunnel-dot ${i === index ? 'active' : ''} ${i < index ? 'done' : ''}`}
+                                key={`step-${stepIndex}`}
+                                className={`onboarding-tunnel-dot ${stepIndex === index ? 'active' : ''} ${stepIndex < index ? 'done' : ''}`}
                             />
                         ))}
                     </div>
 
-                    <button
-                        type="button"
-                        className="onboarding-tunnel-cta"
-                        onClick={handleNext}
-                    >
-                        {isLastSlide ? (
-                            <>
+                    {!isSetupStep ? (
+                        <button
+                            type="button"
+                            className="onboarding-tunnel-cta"
+                            onClick={handleNext}
+                        >
+                            {isLastInfoStep ? (
+                                <>
+                                    Configurar estilo
+                                    <ChevronRight size={18} />
+                                </>
+                            ) : (
+                                <>
+                                    Siguiente
+                                    <ChevronRight size={18} />
+                                </>
+                            )}
+                        </button>
+                    ) : (
+                        <div className="onboarding-style-footer">
+                            <button
+                                type="button"
+                                className="onboarding-style-secondary"
+                                onClick={() => {
+                                    onStartDemo();
+                                    onClose();
+                                }}
+                                disabled={isSaving}
+                            >
                                 <PlayCircle size={18} />
-                                Iniciar demo
-                            </>
-                        ) : (
-                            <>
-                                Siguiente
-                                <ChevronRight size={18} />
-                            </>
-                        )}
-                    </button>
+                                Entrar sin guardar
+                            </button>
+                            <button
+                                type="button"
+                                className="onboarding-tunnel-cta"
+                                onClick={() => void handleSave(true)}
+                                disabled={!canSave}
+                            >
+                                <Sparkles size={18} />
+                                {isSaving ? 'Guardando...' : 'Guardar y entrar'}
+                            </button>
+                        </div>
+                    )}
                 </div>
             </motion.div>
         </div>

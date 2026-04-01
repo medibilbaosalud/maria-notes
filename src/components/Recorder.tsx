@@ -8,6 +8,7 @@ import { buildPsychologyCaseSummary, getPatientBriefing, getPatientNameSuggestio
 import { fadeSlideInSmall, motionEase, motionTransitions, softScaleTap, statusPulseSoft } from '../features/ui/motion-tokens';
 import type { ClinicalSpecialtyId } from '../clinical/specialties';
 import { useSimulation } from './Simulation/SimulationContext';
+import { PatientBriefingCard } from './PatientBriefingCard';
 import './Recorder.css';
 
 type ActiveEngine = 'whisper' | 'gemini' | 'groq' | 'llm' | 'storage' | 'idle';
@@ -36,8 +37,7 @@ export const Recorder: React.FC<RecorderProps> = ({
   processingLabel = 'Listo para grabar',
   activeEngine = 'idle',
   activeModel = '',
-  selectedSpecialty,
-  psychologyClinicianName = 'Ainhoa'
+  selectedSpecialty
 }) => {
   const turboBatchIntervalMs = Number(import.meta.env.VITE_TURBO_RECORDER_BATCH_INTERVAL_MS || 600_000);
   const listboxId = useId();
@@ -199,7 +199,13 @@ export const Recorder: React.FC<RecorderProps> = ({
         if (cancelled) return;
         console.error('[RecorderUI] Microphone preview failed:', error);
         setMicState('error');
-        setMicErrorMessage('No se pudo activar el microfono. Revisa el permiso del navegador.');
+        const domName = (error as DOMException)?.name;
+        setMicErrorMessage(
+          domName === 'NotAllowedError' ? 'Permiso de micrófono denegado. Actívalo en los ajustes del navegador.'
+          : domName === 'NotFoundError' ? 'No se detectó ningún micrófono. Conecta uno e inténtalo de nuevo.'
+          : domName === 'NotReadableError' ? 'El micrófono está ocupado por otra aplicación. Ciérrala e inténtalo de nuevo.'
+          : 'No se pudo activar el micrófono. Revisa los permisos del navegador.'
+        );
       }
     };
 
@@ -227,7 +233,8 @@ export const Recorder: React.FC<RecorderProps> = ({
           patientName,
           8,
           selectedSpecialty,
-          selectedSpecialty === 'psicologia' ? psychologyClinicianName : 'Dra. Gotxi'
+          undefined,
+          { includeLegacy: false }
         );
         if (currentRequest !== suggestionRequestRef.current) return;
         setSuggestions(next);
@@ -241,7 +248,7 @@ export const Recorder: React.FC<RecorderProps> = ({
     }, patientName.trim().length > 0 ? 90 : 40);
 
     return () => window.clearTimeout(timer);
-  }, [patientName, isRecording, psychologyClinicianName, selectedSpecialty]);
+  }, [patientName, isRecording, selectedSpecialty]);
 
   useEffect(() => {
     let cancelled = false;
@@ -267,7 +274,7 @@ export const Recorder: React.FC<RecorderProps> = ({
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const summary = await buildPsychologyCaseSummary(trimmed, psychologyClinicianName);
+          const summary = await buildPsychologyCaseSummary(trimmed, undefined, { includeLegacy: false });
           if (cancelled || currentRequest !== caseSummaryRequestRef.current) return;
           setCaseSummary(summary);
         } catch (error) {
@@ -287,7 +294,7 @@ export const Recorder: React.FC<RecorderProps> = ({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [demoData, isPlaying, normalizedDemoPatientName, patientName, psychologyClinicianName, selectedSpecialty]);
+  }, [demoData, isPlaying, normalizedDemoPatientName, patientName, selectedSpecialty]);
 
   useEffect(() => {
     let cancelled = false;
@@ -310,7 +317,11 @@ export const Recorder: React.FC<RecorderProps> = ({
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const existing = await getPatientBriefing(trimmed, 'psicologia', psychologyClinicianName);
+          const timeoutMs = 8000;
+          const existing = await Promise.race([
+            getPatientBriefing(trimmed, 'psicologia'),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+          ]);
           if (cancelled || currentRequest !== briefingRequestRef.current) return;
           setBriefing(existing);
         } catch (error) {
@@ -326,7 +337,7 @@ export const Recorder: React.FC<RecorderProps> = ({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [demoData, isPlaying, normalizedDemoPatientName, patientName, psychologyClinicianName, selectedSpecialty]);
+  }, [demoData, isPlaying, normalizedDemoPatientName, patientName, selectedSpecialty]);
 
   const patientNameValid = patientNameRef.current.trim().length >= 2;
   const canStartRecording = canStart && patientNameValid && !isFinalizing;
@@ -483,6 +494,12 @@ export const Recorder: React.FC<RecorderProps> = ({
                 ref={inputRef}
                 id="patient-name-input"
                 type="text"
+                role="combobox"
+                aria-expanded={isSuggestionsOpen && suggestions.length > 0}
+                aria-controls={listboxId}
+                aria-activedescendant={highlightedSuggestion >= 0 ? `${listboxId}-option-${highlightedSuggestion}` : undefined}
+                aria-autocomplete="list"
+                aria-label="Nombre del paciente"
                 placeholder="Nombre del paciente..."
                 value={patientName}
                 onChange={(e) => {
@@ -499,6 +516,7 @@ export const Recorder: React.FC<RecorderProps> = ({
                 }}
                 onKeyDown={handleInputKeyDown}
                 disabled={isRecording}
+                title={isRecording ? 'El nombre no se puede cambiar durante la grabación' : undefined}
                 className="recorder-text-input-large"
               />
               <AnimatePresence>
@@ -551,38 +569,25 @@ export const Recorder: React.FC<RecorderProps> = ({
             data-context-kind={briefing ? 'briefing' : caseSummary ? 'summary' : 'empty'}
           >
             {briefing ? (
-              <>
-                <div className="recorder-context-header">
-                  <div>
-                    <div className="recorder-context-kicker">Antes de empezar</div>
-                    <h3>Contexto del caso</h3>
-                  </div>
-                </div>
-                <div className="recorder-context-main briefing-context-main">
-                  {briefing.summary_text.split('\n').filter(l => l.trim()).map((line, index) => (
-                    <p key={`${index}-${line}`} className="recorder-context-line">{line}</p>
-                  ))}
-                </div>
-                <div className="recorder-context-actions">
-                  {onOpenHistory && (
-                    <button id="recorder-open-history-btn" type="button" className="recorder-context-link" onClick={onOpenHistory}>
-                      Ver historial completo
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="recorder-context-link secondary"
-                    onClick={() => {
-                      setBriefing(null);
-                      setCaseSummary(null);
-                    }}
-                  >
-                    Ocultar
-                  </button>
-                </div>
-              </>
+              <PatientBriefingCard
+                briefing={briefing}
+                variant="compact"
+                onOpenHistory={onOpenHistory}
+                onDismiss={() => {
+                  setBriefing(null);
+                  setCaseSummary(null);
+                }}
+              />
             ) : caseSummaryLoading && !caseSummary ? (
-              <div className="recorder-context-loading">Preparando el contexto del caso...</div>
+              <div className="recorder-context-loading-skeleton">
+                <div className="skeleton-header">
+                  <div className="skeleton-kicker"></div>
+                  <div className="skeleton-title"></div>
+                </div>
+                <div className="skeleton-line full"></div>
+                <div className="skeleton-line medium"></div>
+                <div className="skeleton-line short"></div>
+              </div>
             ) : caseSummary ? (
               <>
                 <div className="recorder-context-header">
@@ -702,6 +707,19 @@ export const Recorder: React.FC<RecorderProps> = ({
                   <span className="btn-sublabel">Generar historia clínica</span>
                 </div>
               </motion.button>
+            )}
+          </AnimatePresence>
+          <AnimatePresence>
+            {!isRecording && !canStartRecording && !isFinalizing && (
+              <motion.p
+                className="recorder-start-hint"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.2 }}
+              >
+                {!patientNameValid ? 'Escribe el nombre del paciente para empezar' : startBlockReason || 'Esperando preflight...'}
+              </motion.p>
             )}
           </AnimatePresence>
         </div>

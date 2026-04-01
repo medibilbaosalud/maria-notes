@@ -92,6 +92,11 @@
   box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
 }
 
+.specialty-entry-option:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(38, 166, 154, 0.24), 0 14px 34px rgba(15, 23, 42, 0.08);
+}
+
 .specialty-entry-option.active {
   border-color: rgba(13, 148, 136, 0.44);
   background: linear-gradient(135deg, rgba(20, 184, 166, 0.14) 0%, rgba(255, 255, 255, 0.98) 100%);
@@ -197,6 +202,11 @@
   transform: translateY(-1px);
   box-shadow: 0 22px 42px rgba(15, 118, 110, 0.28);
   filter: saturate(1.04);
+}
+
+.specialty-entry-continue:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.35), 0 18px 36px rgba(15, 118, 110, 0.24);
 }
 
 @media (max-width: 760px) {

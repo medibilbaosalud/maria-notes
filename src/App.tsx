@@ -30,6 +30,12 @@ import {
     upsertTranscriptChunk
 } from './services/supabase';
 import { MemoryService } from './services/memory';
+import {
+    type ClinicalStyleProfile,
+    getStyleReferencePayload,
+    loadClinicalStyleProfile,
+    saveClinicalStyleProfile
+} from './services/clinical-style-profile';
 import { ConsultationPipelineOrchestrator } from './services/pipeline-orchestrator';
 import { enqueueAuditEvent, startAuditWorker, stopAuditWorker } from './services/audit-worker';
 import { startErrorMonitoring } from './services/error-monitor';
@@ -273,6 +279,8 @@ const AppContent = () => {
     const [showWhatsNew, setShowWhatsNew] = useState(false);
     const [currentRecordId, setCurrentRecordId] = useState<string | null>(null);
     const [historyFocusedPatientName, setHistoryFocusedPatientName] = useState<string>('');
+    const [clinicalStyleProfile, setClinicalStyleProfile] = useState<ClinicalStyleProfile | null>(null);
+    const [clinicalStyleProfileLoading, setClinicalStyleProfileLoading] = useState(false);
     const [livePipelineState, setLivePipelineState] = useState<
         'idle'
         | 'recovering'
@@ -311,14 +319,20 @@ const AppContent = () => {
         safeSetLocalStorage(PSYCHOLOGY_CLINICIAN_STORAGE_KEY, clinicianName);
     }, []);
 
-    const resolveClinicianNameForSpecialty = useCallback((specialty: ClinicalSpecialtyId): string | undefined => {
-        return specialty === 'psicologia' ? psychologyClinicianName : undefined;
-    }, [psychologyClinicianName]);
+    const resolveClinicianNameForSpecialty = useCallback((_specialty: ClinicalSpecialtyId): string | undefined => {
+        return undefined;
+    }, []);
 
-    const resolveClinicianProfileForSpecialty = useCallback((specialty: ClinicalSpecialtyId): string | undefined => {
-        if (specialty !== 'psicologia') return undefined;
-        return normalizePsychologyClinician(psychologyClinicianName).toLowerCase();
-    }, [psychologyClinicianName]);
+    const resolveClinicianProfileForSpecialty = useCallback((_specialty: ClinicalSpecialtyId): string | undefined => {
+        return undefined;
+    }, []);
+
+    const resolveStyleReferenceForSpecialty = useCallback((specialty: ClinicalSpecialtyId) => {
+        if (!clinicalStyleProfile) return undefined;
+        return clinicalStyleProfile.specialty === specialty
+            ? getStyleReferencePayload(clinicalStyleProfile)
+            : undefined;
+    }, [clinicalStyleProfile]);
 
     const refreshPsychologyBriefing = useCallback(async (
         patientName: string,
@@ -354,6 +368,33 @@ const AppContent = () => {
             console.warn('[App] Initial cloud sync failed:', error);
         });
     }, [isCloudAuthenticated, isCloudEnabled]);
+
+    useEffect(() => {
+        if (!hasChosenWorkspaceMode) return;
+        let cancelled = false;
+        setClinicalStyleProfileLoading(true);
+        void loadClinicalStyleProfile(activeSpecialty)
+            .then((profile) => {
+                if (!cancelled) {
+                    setClinicalStyleProfile(profile);
+                }
+            })
+            .catch((error) => {
+                console.warn('[App] Failed to load clinical style profile:', error);
+                if (!cancelled) {
+                    setClinicalStyleProfile(null);
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setClinicalStyleProfileLoading(false);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [activeSpecialty, hasChosenWorkspaceMode]);
 
     useEffect(() => {
         void purgeDemoArtifacts();
@@ -480,6 +521,18 @@ const AppContent = () => {
     const handleOpenWelcomeModal = useCallback(() => {
         setShowWelcomeModal(true);
     }, []);
+
+    const handleSaveClinicalStyleProfile = useCallback(async (
+        referenceStory: string,
+        generatedTemplate: string
+    ) => {
+        const savedProfile = await saveClinicalStyleProfile({
+            specialty: activeSpecialty,
+            referenceStory,
+            generatedTemplate
+        });
+        setClinicalStyleProfile(savedProfile);
+    }, [activeSpecialty]);
 
 
     // ════════════════════════════════════════════════════════════════
@@ -2049,7 +2102,8 @@ const AppContent = () => {
             patientName,
             contextSpecialtyRef.current,
             resolveClinicianNameForSpecialty(contextSpecialtyRef.current),
-            resolveClinicianProfileForSpecialty(contextSpecialtyRef.current)
+            resolveClinicianProfileForSpecialty(contextSpecialtyRef.current),
+            resolveStyleReferenceForSpecialty(contextSpecialtyRef.current)
         );
         if (runId) {
             recordDiagnosticEvent(runId, {
@@ -2333,7 +2387,8 @@ const AppContent = () => {
                             patientName,
                             hardenedSpecialty,
                             resolveClinicianNameForSpecialty(hardenedSpecialty),
-                            resolveClinicianProfileForSpecialty(hardenedSpecialty)
+                            resolveClinicianProfileForSpecialty(hardenedSpecialty),
+                            resolveStyleReferenceForSpecialty(hardenedSpecialty)
                         );
                         if (!isSessionVersionCurrent(sessionId, sessionVersion)) return;
                         const hardenedOutputTier: 'draft' | 'final' = 'final';
@@ -3093,7 +3148,8 @@ const AppContent = () => {
                 patientName,
                 specialty,
                 resolveClinicianNameForSpecialty(specialty),
-                resolveClinicianProfileForSpecialty(specialty)
+                resolveClinicianProfileForSpecialty(specialty),
+                resolveStyleReferenceForSpecialty(specialty)
             );
             let runStatus = result.pipeline_status || 'completed';
             let resultStatus = result.result_status || (runStatus === 'completed' ? 'completed' : 'provisional');
@@ -3429,7 +3485,8 @@ const AppContent = () => {
                 currentPatientName,
                 activeSpecialty,
                 resolveClinicianNameForSpecialty(activeSpecialty),
-                resolveClinicianProfileForSpecialty(activeSpecialty)
+                resolveClinicianProfileForSpecialty(activeSpecialty),
+                resolveStyleReferenceForSpecialty(activeSpecialty)
             );
             return replaceHistorySection(currentContent, sectionTitle, regenerated.data);
         } catch (error) {
@@ -3699,8 +3756,12 @@ const AppContent = () => {
                             <OnboardingModal
                                 specialty={activeSpecialty}
                                 clinicianName={activeSpecialty === 'psicologia' ? psychologyClinicianName : undefined}
+                                referenceStory={clinicalStyleProfile?.referenceStory}
+                                generatedTemplate={clinicalStyleProfile?.generatedTemplate}
+                                isProfileLoading={clinicalStyleProfileLoading}
                                 onClose={handleCloseWelcomeModal}
                                 onStartDemo={() => startSimulation(activeSpecialty, activeSpecialty === 'psicologia' ? psychologyClinicianName : undefined)}
+                                onSaveStyleProfile={handleSaveClinicalStyleProfile}
                             />
                         )}
                     </AnimatePresence>

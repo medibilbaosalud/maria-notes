@@ -31,6 +31,11 @@
     contain: layout paint style;
 }
 
+.onboarding-tunnel-card.is-setup-step {
+    width: min(760px, 96vw);
+    text-align: left;
+}
+
 /* Accent-based backgrounds */
 .onboarding-tunnel-card.tone-sunrise {
     background:
@@ -111,6 +116,94 @@
     line-height: 1.55;
 }
 
+.onboarding-style-setup {
+    display: grid;
+    gap: 1rem;
+}
+
+.onboarding-style-copy {
+    margin: 0;
+    color: #475569;
+    line-height: 1.55;
+}
+
+.onboarding-style-field {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.onboarding-style-field span {
+    color: #0f172a;
+    font-size: 0.92rem;
+    font-weight: 700;
+}
+
+.onboarding-style-field textarea {
+    min-height: 180px;
+    width: 100%;
+    resize: vertical;
+    border-radius: 1rem;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    background: rgba(255, 255, 255, 0.86);
+    padding: 0.95rem 1rem;
+    color: #0f172a;
+    font: inherit;
+    line-height: 1.5;
+    box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.onboarding-style-field textarea:focus {
+    outline: none;
+    border-color: rgba(13, 148, 136, 0.45);
+    box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.14);
+}
+
+.onboarding-style-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.onboarding-style-hint {
+    color: #64748b;
+    font-size: 0.86rem;
+}
+
+.onboarding-style-secondary {
+    min-height: 2.85rem;
+    border-radius: 0.95rem;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    padding: 0 1rem;
+    background: rgba(255, 255, 255, 0.88);
+    color: #0f172a;
+    font-size: 0.95rem;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    cursor: pointer;
+}
+
+.onboarding-style-error,
+.onboarding-style-success {
+    border-radius: 0.9rem;
+    padding: 0.8rem 0.9rem;
+    font-size: 0.92rem;
+}
+
+.onboarding-style-error {
+    background: rgba(254, 242, 242, 0.92);
+    color: #b91c1c;
+}
+
+.onboarding-style-success {
+    background: rgba(236, 253, 245, 0.92);
+    color: #0f766e;
+}
+
 /* Footer: dots + CTA */
 .onboarding-tunnel-footer {
     display: grid;
@@ -168,6 +261,21 @@
     transform: translateY(0);
 }
 
+.onboarding-tunnel-cta:disabled,
+.onboarding-style-secondary:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.onboarding-style-footer {
+    display: flex;
+    justify-content: center;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+}
+
 /* Responsive */
 @media (max-width: 560px) {
     .onboarding-tunnel-card {
@@ -177,5 +285,15 @@
 
     .onboarding-tunnel-slide {
         min-height: 150px;
+    }
+
+    .onboarding-style-actions,
+    .onboarding-style-footer {
+        align-items: stretch;
+    }
+
+    .onboarding-style-secondary,
+    .onboarding-tunnel-cta {
+        width: 100%;
     }
 }

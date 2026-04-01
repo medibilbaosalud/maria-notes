@@ -72,6 +72,7 @@ const GEMINI_TEXT_CHAIN_LOW: ModelCandidate[] = [
 
 const GEMINI_TEXT_CHAIN_MEDIUM: ModelCandidate[] = [
     candidate('gemini', 'gemini-3-flash-preview', { thinking: 'medium' }),
+    candidate('gemini', 'gemini-3.1-flash-lite-preview', { thinking: 'low' }),
     candidate('gemini', 'gemini-3-flash', { thinking: 'medium' }),
     candidate('gemini', 'gemini-2.5-flash', { thinking: 'medium' }),
     candidate('gemini', 'gemini-2.5-pro', { thinking: 'medium' }), // Added
@@ -267,6 +268,7 @@ const buildTaskPreferences = (): Record<TaskType, ModelCandidate[]> => {
     if (GEMINI_ONE_CALL_STRICT) {
         const strictSingleShot = withAllowlist([
             candidate('gemini', 'gemini-3-flash-preview', { thinking: 'low' }),
+            candidate('gemini', 'gemini-3.1-flash-lite-preview', { thinking: 'low' }),
             ...GROQ_CORE_FALLBACK
         ]);
         if (strictSingleShot.length > 0) {
