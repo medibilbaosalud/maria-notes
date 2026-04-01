@@ -323,9 +323,9 @@ const AppContent = () => {
         return undefined;
     }, []);
 
-    const resolveClinicianProfileForSpecialty = useCallback((_specialty: ClinicalSpecialtyId): string | undefined => {
-        return undefined;
-    }, []);
+    const resolveClinicianProfileForSpecialty = useCallback((specialty: ClinicalSpecialtyId): string | undefined => {
+        return specialty === 'psicologia' ? psychologyClinicianName : undefined;
+    }, [psychologyClinicianName]);
 
     const resolveStyleReferenceForSpecialty = useCallback((specialty: ClinicalSpecialtyId) => {
         if (!clinicalStyleProfile) return undefined;
@@ -337,12 +337,12 @@ const AppContent = () => {
     const refreshPsychologyBriefing = useCallback(async (
         patientName: string,
         specialty: ClinicalSpecialtyId,
-        clinicianName?: string
+        clinicianProfile?: string
     ) => {
         if (normalizeClinicalSpecialty(specialty) !== 'psicologia') return;
         try {
-            await markPatientBriefingStale(patientName, specialty, clinicianName);
-            void ensurePatientBriefing(patientName, specialty, clinicianName).catch((error) => {
+            await markPatientBriefingStale(patientName, specialty, clinicianProfile);
+            void ensurePatientBriefing(patientName, specialty, clinicianProfile).catch((error) => {
                 console.warn('[App] Failed to generate psychology briefing:', error);
             });
         } catch (error) {
@@ -373,7 +373,10 @@ const AppContent = () => {
         if (!hasChosenWorkspaceMode) return;
         let cancelled = false;
         setClinicalStyleProfileLoading(true);
-        void loadClinicalStyleProfile(activeSpecialty)
+        void loadClinicalStyleProfile(
+            activeSpecialty,
+            resolveClinicianProfileForSpecialty(activeSpecialty)
+        )
             .then((profile) => {
                 if (!cancelled) {
                     setClinicalStyleProfile(profile);
@@ -394,7 +397,7 @@ const AppContent = () => {
         return () => {
             cancelled = true;
         };
-    }, [activeSpecialty, hasChosenWorkspaceMode]);
+    }, [activeSpecialty, hasChosenWorkspaceMode, resolveClinicianProfileForSpecialty]);
 
     useEffect(() => {
         void purgeDemoArtifacts();
@@ -529,10 +532,11 @@ const AppContent = () => {
         const savedProfile = await saveClinicalStyleProfile({
             specialty: activeSpecialty,
             referenceStory,
-            generatedTemplate
+            generatedTemplate,
+            clinicianProfile: resolveClinicianProfileForSpecialty(activeSpecialty)
         });
         setClinicalStyleProfile(savedProfile);
-    }, [activeSpecialty]);
+    }, [activeSpecialty, resolveClinicianProfileForSpecialty]);
 
 
     // ════════════════════════════════════════════════════════════════
@@ -1554,7 +1558,7 @@ const AppContent = () => {
                 void refreshPsychologyBriefing(
                     currentPatientName,
                     contextSpecialtyRef.current,
-                    resolveClinicianNameForSpecialty(contextSpecialtyRef.current)
+                    resolveClinicianProfileForSpecialty(contextSpecialtyRef.current)
                 );
             } catch (error) {
                 console.error('[App] Error updating medical record:', error);
@@ -2345,7 +2349,7 @@ const AppContent = () => {
             void refreshPsychologyBriefing(
                 patientName,
                 contextSpecialtyRef.current,
-                resolveClinicianNameForSpecialty(contextSpecialtyRef.current)
+                resolveClinicianProfileForSpecialty(contextSpecialtyRef.current)
             );
             if (QUALITY_TRIAGE_ENABLED && savedRecord?.record_uuid) {
                 void upsertConsultationQualitySummary({
@@ -2421,7 +2425,7 @@ const AppContent = () => {
                         void refreshPsychologyBriefing(
                             patientName,
                             hardenedSpecialty,
-                            resolveClinicianNameForSpecialty(hardenedSpecialty)
+                            resolveClinicianProfileForSpecialty(hardenedSpecialty)
                         );
 
                         setHistory(hardenedResult.data);

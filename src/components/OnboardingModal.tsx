@@ -85,6 +85,7 @@ const slideVariants = {
 
 export const OnboardingModal = ({
     specialty,
+    clinicianName,
     referenceStory = '',
     generatedTemplate = '',
     isProfileLoading = false,
@@ -106,6 +107,7 @@ export const OnboardingModal = ({
     const slide = slides[Math.min(index, slides.length - 1)];
     const SlideIcon = slide.icon;
     const isPsychology = specialty === 'psicologia';
+    const name = clinicianName || 'profesional';
 
     useEffect(() => {
         setReferenceValue(referenceStory);
@@ -161,7 +163,7 @@ export const OnboardingModal = ({
                     {isSetupStep
                         ? 'Configura una historia de referencia'
                         : isPsychology
-                            ? 'Vamos a dejar esto listo'
+                            ? `Perfil ${name}: vamos a dejar esto listo`
                             : 'Guia rapida de Maria Notes'}
                 </p>
 

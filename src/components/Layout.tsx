@@ -29,7 +29,9 @@ export const Layout: React.FC<LayoutProps> = ({
   currentView,
   onNavigate,
   activeSpecialty,
-  onSpecialtyChange
+  onSpecialtyChange,
+  psychologyClinicianName,
+  onPsychologyClinicianChange
 }) => {
   return (
     <div className="app-layout">
@@ -95,22 +97,44 @@ export const Layout: React.FC<LayoutProps> = ({
 
       <main className="main-content">
         <div className="workspace-utility-bar">
-          <div className="workspace-specialty-switcher" role="radiogroup" aria-label="Modo clínico activo">
-            {getClinicalSpecialtyOptions().map((option) => {
-              const active = option.id === activeSpecialty;
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  className={`workspace-specialty-pill ${active ? 'active' : ''}`}
-                  onClick={() => onSpecialtyChange(option.id)}
-                  aria-pressed={active}
-                  title={`Cambiar a modo ${option.shortLabel}`}
-                >
-                  {option.shortLabel}
-                </button>
-              );
-            })}
+          <div className="workspace-utility-groups">
+            <div className="workspace-specialty-switcher" role="radiogroup" aria-label="Modo clinico activo">
+              {getClinicalSpecialtyOptions().map((option) => {
+                const active = option.id === activeSpecialty;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={`workspace-specialty-pill ${active ? 'active' : ''}`}
+                    onClick={() => onSpecialtyChange(option.id)}
+                    aria-pressed={active}
+                    title={`Cambiar a modo ${option.shortLabel}`}
+                  >
+                    {option.shortLabel}
+                  </button>
+                );
+              })}
+            </div>
+
+            {activeSpecialty === 'psicologia' && psychologyClinicianName && onPsychologyClinicianChange && (
+              <div className="workspace-clinician-switcher" role="radiogroup" aria-label="Perfil de psicologia activo">
+                {(['Ainhoa', 'June'] as const).map((clinicianName) => {
+                  const active = clinicianName === psychologyClinicianName;
+                  return (
+                    <button
+                      key={clinicianName}
+                      type="button"
+                      className={`workspace-clinician-pill ${active ? 'active' : ''}`}
+                      onClick={() => onPsychologyClinicianChange(clinicianName)}
+                      aria-pressed={active}
+                      title={`Trabajar como ${clinicianName}`}
+                    >
+                      {clinicianName}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
         <div className="content-wrapper">{children}</div>

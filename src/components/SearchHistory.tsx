@@ -79,6 +79,7 @@ const modalContentVariants = {
 export const SearchHistory: React.FC<SearchHistoryProps> = ({
   apiKey,
   focusedPatientName = '',
+  psychologyClinicianName,
   onFocusedPatientNameConsumed,
   onLoadRecord
 }) => {
@@ -118,6 +119,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const normalizedDemoPatientName = demoData?.patientName?.trim().toLowerCase() || '';
   const selectedGroupName = selectedGroup?.patientName || '';
   const selectedGroupNormalizedName = selectedGroup?.normalizedPatientName || '';
+  const activeClinicianProfile = psychologyClinicianName;
   const isDemoSelectedGroup = Boolean(
     demoContinuity
     && selectedGroupNormalizedName
@@ -151,7 +153,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       const effectiveQuery = typeof nextQuery === 'string' ? nextQuery : queryRef.current;
       const groups = demoContinuity
         ? getDemoGroups(effectiveQuery)
-        : await searchPatientTimeline(effectiveQuery, 'psicologia', undefined, { includeLegacy: false });
+        : await searchPatientTimeline(effectiveQuery, 'psicologia', activeClinicianProfile, { includeLegacy: false });
       setResults(groups);
       const normalizedPreferredPatient = preferredPatientName?.trim().toLowerCase();
       const previousSelectedGroup = selectedGroupRef.current;
@@ -167,7 +169,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [demoContinuity, getDemoGroups]);
+  }, [activeClinicianProfile, demoContinuity, getDemoGroups]);
 
   const refreshResults = useCallback(async () => {
     if (syncingRef.current) return;
@@ -248,7 +250,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       }
       setCaseSummaryLoading(true);
       try {
-        const summary = await buildPsychologyCaseSummary(selectedGroupName, undefined, { includeLegacy: false });
+        const summary = await buildPsychologyCaseSummary(selectedGroupName, activeClinicianProfile, { includeLegacy: false });
         if (!cancelled) setCaseSummary(summary);
       } finally {
         if (!cancelled) setCaseSummaryLoading(false);
@@ -258,7 +260,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [demoContinuity, normalizedDemoPatientName, selectedGroupName, selectedGroupNormalizedName]);
+  }, [activeClinicianProfile, demoContinuity, normalizedDemoPatientName, selectedGroupName, selectedGroupNormalizedName]);
 
   useEffect(() => {
     let cancelled = false;
@@ -274,7 +276,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
 
       const currentRequest = ++briefingRequestRef.current;
       try {
-        const existing = await getPatientBriefing(selectedGroupName, 'psicologia');
+        const existing = await getPatientBriefing(selectedGroupName, 'psicologia', activeClinicianProfile);
         if (cancelled || currentRequest !== briefingRequestRef.current) return;
         if (existing) {
           setBriefing(existing);
@@ -287,7 +289,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
           return;
         }
 
-        const generated = await ensurePatientBriefing(selectedGroupName, 'psicologia');
+        const generated = await ensurePatientBriefing(selectedGroupName, 'psicologia', activeClinicianProfile);
         if (cancelled || currentRequest !== briefingRequestRef.current) return;
         setBriefing(generated);
       } catch (error) {
@@ -303,6 +305,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       cancelled = true;
     };
   }, [
+    activeClinicianProfile,
     demoContinuity,
     normalizedDemoPatientName,
     selectedGroupName,

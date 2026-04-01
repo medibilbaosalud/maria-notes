@@ -37,7 +37,8 @@ export const Recorder: React.FC<RecorderProps> = ({
   processingLabel = 'Listo para grabar',
   activeEngine = 'idle',
   activeModel = '',
-  selectedSpecialty
+  selectedSpecialty,
+  psychologyClinicianName
 }) => {
   const turboBatchIntervalMs = Number(import.meta.env.VITE_TURBO_RECORDER_BATCH_INTERVAL_MS || 600_000);
   const listboxId = useId();
@@ -66,6 +67,7 @@ export const Recorder: React.FC<RecorderProps> = ({
   const [micErrorMessage, setMicErrorMessage] = useState('');
   const { isPlaying, demoData } = useSimulation();
   const normalizedDemoPatientName = demoData?.patientName?.trim().toLowerCase() || '';
+  const activeClinicianProfile = selectedSpecialty === 'psicologia' ? psychologyClinicianName : undefined;
 
   useEffect(() => {
     patientNameRef.current = patientName;
@@ -230,11 +232,11 @@ export const Recorder: React.FC<RecorderProps> = ({
           return;
         }
         const next = await getPatientNameSuggestions(
-          patientName,
-          8,
-          selectedSpecialty,
-          undefined,
-          { includeLegacy: false }
+            patientName,
+            8,
+            selectedSpecialty,
+            activeClinicianProfile,
+            { includeLegacy: false }
         );
         if (currentRequest !== suggestionRequestRef.current) return;
         setSuggestions(next);
@@ -274,7 +276,7 @@ export const Recorder: React.FC<RecorderProps> = ({
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const summary = await buildPsychologyCaseSummary(trimmed, undefined, { includeLegacy: false });
+          const summary = await buildPsychologyCaseSummary(trimmed, activeClinicianProfile, { includeLegacy: false });
           if (cancelled || currentRequest !== caseSummaryRequestRef.current) return;
           setCaseSummary(summary);
         } catch (error) {
@@ -294,7 +296,7 @@ export const Recorder: React.FC<RecorderProps> = ({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [demoData, isPlaying, normalizedDemoPatientName, patientName, selectedSpecialty]);
+  }, [activeClinicianProfile, demoData, isPlaying, normalizedDemoPatientName, patientName, selectedSpecialty]);
 
   useEffect(() => {
     let cancelled = false;
@@ -319,7 +321,7 @@ export const Recorder: React.FC<RecorderProps> = ({
         try {
           const timeoutMs = 8000;
           const existing = await Promise.race([
-            getPatientBriefing(trimmed, 'psicologia'),
+            getPatientBriefing(trimmed, 'psicologia', activeClinicianProfile),
             new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
           ]);
           if (cancelled || currentRequest !== briefingRequestRef.current) return;
@@ -337,7 +339,7 @@ export const Recorder: React.FC<RecorderProps> = ({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [demoData, isPlaying, normalizedDemoPatientName, patientName, selectedSpecialty]);
+  }, [activeClinicianProfile, demoData, isPlaying, normalizedDemoPatientName, patientName, selectedSpecialty]);
 
   const patientNameValid = patientNameRef.current.trim().length >= 2;
   const canStartRecording = canStart && patientNameValid && !isFinalizing;

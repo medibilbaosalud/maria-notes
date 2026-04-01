@@ -136,6 +136,12 @@
   pointer-events: none;
 }
 
+.workspace-utility-groups {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
 .workspace-specialty-switcher {
   display: inline-flex;
   gap: 0.3rem;
@@ -172,6 +178,44 @@
   color: white;
   background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%);
   box-shadow: 0 8px 18px rgba(15, 118, 110, 0.22);
+}
+
+.workspace-clinician-switcher {
+  display: inline-flex;
+  gap: 0.3rem;
+  padding: 0.28rem;
+  border-radius: 999px;
+  background: rgba(255, 250, 245, 0.9);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+
+.workspace-clinician-pill {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-base),
+    color var(--motion-duration-fast) var(--motion-ease-base),
+    transform var(--motion-duration-fast) var(--motion-ease-base);
+}
+
+.workspace-clinician-pill:hover {
+  color: var(--text-primary);
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.workspace-clinician-pill.active {
+  color: #0f172a;
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.28), rgba(255, 255, 255, 0.96));
+  box-shadow: 0 8px 18px rgba(245, 158, 11, 0.2);
 }
 
 .content-wrapper {
@@ -294,5 +338,9 @@
   .workspace-utility-bar {
     top: 0.7rem;
     right: 0.7rem;
+  }
+
+  .workspace-utility-groups {
+    gap: 0.35rem;
   }
 }
