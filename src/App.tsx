@@ -338,19 +338,18 @@ const AppContent = () => {
             : undefined;
     }, [clinicalStyleProfile]);
 
-    const refreshPsychologyBriefing = useCallback(async (
+    const refreshPatientBriefing = useCallback(async (
         patientName: string,
         specialty: ClinicalSpecialtyId,
         clinicianProfile?: string
     ) => {
-        if (normalizeClinicalSpecialty(specialty) !== 'psicologia') return;
         try {
             await markPatientBriefingStale(patientName, specialty, clinicianProfile);
             void ensurePatientBriefing(patientName, specialty, clinicianProfile).catch((error) => {
-                console.warn('[App] Failed to generate psychology briefing:', error);
+                console.warn('[App] Failed to generate patient briefing:', error);
             });
         } catch (error) {
-            console.warn('[App] Failed to mark psychology briefing stale:', error);
+            console.warn('[App] Failed to mark patient briefing stale:', error);
         }
     }, []);
 
@@ -1560,7 +1559,7 @@ const AppContent = () => {
                 await updateMedicalRecord(currentRecordId, {
                     medical_history: newContent
                 });
-                void refreshPsychologyBriefing(
+                void refreshPatientBriefing(
                     currentPatientName,
                     contextSpecialtyRef.current,
                     resolveClinicianProfileForSpecialty(contextSpecialtyRef.current)
@@ -2351,7 +2350,7 @@ const AppContent = () => {
                 outputTier,
                 recordId: savedRecord?.record_uuid
             });
-            void refreshPsychologyBriefing(
+            void refreshPatientBriefing(
                 patientName,
                 contextSpecialtyRef.current,
                 resolveClinicianProfileForSpecialty(contextSpecialtyRef.current)
@@ -2427,7 +2426,7 @@ const AppContent = () => {
                             outputTier: hardenedOutputTier,
                             recordId: promotedRecord?.record_uuid
                         });
-                        void refreshPsychologyBriefing(
+                        void refreshPatientBriefing(
                             patientName,
                             hardenedSpecialty,
                             resolveClinicianProfileForSpecialty(hardenedSpecialty)

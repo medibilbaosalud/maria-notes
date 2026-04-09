@@ -713,6 +713,22 @@ export class GroqService {
         return text.slice(0, maxChars);
     }
 
+    private fitPromptToModelBudget(prompt: string, routeKey: string, maxOutputTokens: number): string {
+        const limits = getModelLimits(routeKey);
+        const hardBudget = Math.max(
+            MIN_CHUNK_TOKENS,
+            limits.contextWindowTokens - maxOutputTokens - PROMPT_OVERHEAD_TOKENS
+        );
+        const currentTokens = this.estimateTokens(prompt);
+        if (currentTokens <= hardBudget) return prompt;
+        const maxChars = Math.max(0, hardBudget * CHARS_PER_TOKEN);
+        const preservedTailChars = Math.min(4_000, Math.floor(maxChars * 0.25));
+        const preservedHeadChars = Math.max(0, maxChars - preservedTailChars);
+        const head = prompt.slice(0, preservedHeadChars);
+        const tail = preservedTailChars > 0 ? prompt.slice(-preservedTailChars) : '';
+        return `${head}\n\n[transcription_truncated_for_model_budget]\n\n${tail}`.slice(0, maxChars);
+    }
+
     private splitTextIntoChunks(text: string, maxTokens: number): string[] {
         const safeMaxTokens = Math.max(MIN_CHUNK_TOKENS, maxTokens);
         const maxChars = safeMaxTokens * CHARS_PER_TOKEN;
@@ -1369,7 +1385,8 @@ ${schemaHint}`;
         ): Promise<{ text: string; model: string }> => {
             const routeKey = candidate.routeKey || buildRouteKey(candidate.provider, candidate.model);
             this.assertAllowedModel(routeKey);
-            const estimatedTokens = this.estimateTokens(prompt) + maxTokens;
+            const effectivePrompt = this.fitPromptToModelBudget(prompt, routeKey, maxTokens);
+            const estimatedTokens = this.estimateTokens(effectivePrompt) + maxTokens;
             const startedAt = Date.now();
             let routeAcquired = false;
 
@@ -1391,7 +1408,7 @@ ${schemaHint}`;
                 routeAcquired = true;
                 await rateLimiter.consume(routeKey, estimatedTokens, 1);
 
-                const text = await this.callCandidateWithKeys(candidate, prompt, {
+                const text = await this.callCandidateWithKeys(candidate, effectivePrompt, {
                     temperature: options.temperature,
                     jsonMode: options.jsonMode,
                     maxTokens,

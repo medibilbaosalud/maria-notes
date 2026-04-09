@@ -1086,34 +1086,42 @@ const processDoctorFeedbackLegacy = async (
 
         if (createdEventId) eventIds.push(String(createdEventId));
 
-        const candidate = await upsertRuleCandidateFromEvent(normalizedEvent, ruleSummary);
-        if (candidate.candidate_id) candidateIds.push(candidate.candidate_id);
-        if (!firstLifecycleState && candidate.lifecycle_state) firstLifecycleState = candidate.lifecycle_state;
+        let candidate: Awaited<ReturnType<typeof upsertRuleCandidateFromEvent>> = {};
+        try {
+            candidate = await upsertRuleCandidateFromEvent(normalizedEvent, ruleSummary);
+            if (candidate.candidate_id) candidateIds.push(candidate.candidate_id);
+            if (!firstLifecycleState && candidate.lifecycle_state) firstLifecycleState = candidate.lifecycle_state;
+        } catch (error) {
+            console.warn('[doctor-feedback] Candidate upsert unavailable, continuing with local lesson capture:', error);
+        }
 
-        // Keep legacy lessons table for backward compatibility and migration safety.
-        const isFormat = effectiveCategory === 'formatting' || effectiveCategory === 'style';
-        const similarLessons = await supabase
-            .from('ai_improvement_lessons')
-            .select('lesson_summary, recurrence_count')
-            .neq('status', 'rejected')
-            .order('created_at', { ascending: false })
-            .limit(20);
-        const similar = similarLessons.data?.find((lesson) => similarityScore(String(lesson.lesson_summary || ''), ruleSummary) >= 0.6);
-        const recurrenceCount = similar ? Number(similar.recurrence_count || 1) + 1 : 1;
+        try {
+            const isFormat = effectiveCategory === 'formatting' || effectiveCategory === 'style';
+            const similarLessons = await supabase
+                .from('ai_improvement_lessons')
+                .select('lesson_summary, recurrence_count')
+                .neq('status', 'rejected')
+                .order('created_at', { ascending: false })
+                .limit(20);
+            const similar = similarLessons.data?.find((lesson) => similarityScore(String(lesson.lesson_summary || ''), ruleSummary) >= 0.6);
+            const recurrenceCount = similar ? Number(similar.recurrence_count || 1) + 1 : 1;
 
-        await saveAiImprovementLesson({
-            original_transcription: transcription,
-            ai_generated_history: aiHistory,
-            doctor_edited_history: doctorHistory,
-            changes_detected: changes,
-            lesson_summary: ruleSummary,
-            improvement_category: effectiveCategory === 'clinical' ? 'missing_data' : effectiveCategory,
-            is_format: isFormat,
-            status: candidate.lifecycle_state ? stateToLessonStatus(candidate.lifecycle_state) : 'learning',
-            recurrence_count: recurrenceCount,
-            record_id: recordId,
-            last_seen_at: new Date().toISOString()
-        });
+            await saveAiImprovementLesson({
+                original_transcription: transcription,
+                ai_generated_history: aiHistory,
+                doctor_edited_history: doctorHistory,
+                changes_detected: changes,
+                lesson_summary: ruleSummary,
+                improvement_category: effectiveCategory === 'clinical' ? 'missing_data' : effectiveCategory,
+                is_format: isFormat,
+                status: candidate.lifecycle_state ? stateToLessonStatus(candidate.lifecycle_state) : 'learning',
+                recurrence_count: recurrenceCount,
+                record_id: recordId,
+                last_seen_at: new Date().toISOString()
+            });
+        } catch (error) {
+            console.warn('[doctor-feedback] Improvement lesson capture failed:', error);
+        }
     }
 
     if (eventIds.length > 0) {
@@ -1329,42 +1337,55 @@ export const processDoctorFeedbackV2 = async (
                 metadata
             };
             acceptedStructuredEvents.push(acceptedEvent);
-            await updateEvidenceRollup(acceptedEvent);
+            try {
+                await updateEvidenceRollup(acceptedEvent);
+            } catch (error) {
+                console.warn('[doctor-feedback] Evidence rollup unavailable, learning event kept locally:', error);
+            }
         }
 
-        const candidate = await upsertRuleCandidateFromEvent(
-            {
-                ...normalizedEvent,
-                metadata
-            },
-            ruleSummary
-        );
-        if (candidate.candidate_id) candidateIds.push(candidate.candidate_id);
-        if (!firstLifecycleState && candidate.lifecycle_state) firstLifecycleState = candidate.lifecycle_state;
+        let candidate: Awaited<ReturnType<typeof upsertRuleCandidateFromEvent>> = {};
+        try {
+            candidate = await upsertRuleCandidateFromEvent(
+                {
+                    ...normalizedEvent,
+                    metadata
+                },
+                ruleSummary
+            );
+            if (candidate.candidate_id) candidateIds.push(candidate.candidate_id);
+            if (!firstLifecycleState && candidate.lifecycle_state) firstLifecycleState = candidate.lifecycle_state;
+        } catch (error) {
+            console.warn('[doctor-feedback] Candidate upsert unavailable, keeping base learning event only:', error);
+        }
 
-        const isFormat = effectiveCategory === 'formatting' || effectiveCategory === 'style';
-        const similarLessons = await supabase
-            .from('ai_improvement_lessons')
-            .select('lesson_summary, recurrence_count')
-            .neq('status', 'rejected')
-            .order('created_at', { ascending: false })
-            .limit(20);
-        const similar = similarLessons.data?.find((lesson) => similarityScore(String(lesson.lesson_summary || ''), ruleSummary) >= 0.6);
-        const recurrenceCount = similar ? Number(similar.recurrence_count || 1) + 1 : 1;
+        try {
+            const isFormat = effectiveCategory === 'formatting' || effectiveCategory === 'style';
+            const similarLessons = await supabase
+                .from('ai_improvement_lessons')
+                .select('lesson_summary, recurrence_count')
+                .neq('status', 'rejected')
+                .order('created_at', { ascending: false })
+                .limit(20);
+            const similar = similarLessons.data?.find((lesson) => similarityScore(String(lesson.lesson_summary || ''), ruleSummary) >= 0.6);
+            const recurrenceCount = similar ? Number(similar.recurrence_count || 1) + 1 : 1;
 
-        await saveAiImprovementLesson({
-            original_transcription: params.transcription || '',
-            ai_generated_history: aiText,
-            doctor_edited_history: doctorText,
-            changes_detected: changes,
-            lesson_summary: ruleSummary,
-            improvement_category: effectiveCategory === 'clinical' ? 'missing_data' : effectiveCategory,
-            is_format: isFormat,
-            status: candidate.lifecycle_state ? stateToLessonStatus(candidate.lifecycle_state) : 'learning',
-            recurrence_count: recurrenceCount,
-            record_id: params.recordId,
-            last_seen_at: new Date().toISOString()
-        });
+            await saveAiImprovementLesson({
+                original_transcription: params.transcription || '',
+                ai_generated_history: aiText,
+                doctor_edited_history: doctorText,
+                changes_detected: changes,
+                lesson_summary: ruleSummary,
+                improvement_category: effectiveCategory === 'clinical' ? 'missing_data' : effectiveCategory,
+                is_format: isFormat,
+                status: candidate.lifecycle_state ? stateToLessonStatus(candidate.lifecycle_state) : 'learning',
+                recurrence_count: recurrenceCount,
+                record_id: params.recordId,
+                last_seen_at: new Date().toISOString()
+            });
+        } catch (error) {
+            console.warn('[doctor-feedback] Improvement lesson capture failed:', error);
+        }
     }
 
     if (dedupedCount > 0) {

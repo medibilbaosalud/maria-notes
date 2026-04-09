@@ -85,6 +85,7 @@ export const PatientBriefingCard: React.FC<PatientBriefingCardProps> = ({
 }) => {
   const structured = useMemo(() => parseStructuredBriefing(briefing.summary_text), [briefing.summary_text]);
   const legacyLines = useMemo(() => structured ? null : parseLegacyBriefing(briefing.summary_text), [structured, briefing.summary_text]);
+  const isOrl = briefing.specialty === 'otorrino';
 
   // Structured briefing (new format)
   if (structured) {
@@ -115,7 +116,7 @@ export const PatientBriefingCard: React.FC<PatientBriefingCardProps> = ({
               <Crosshair size={16} />
             </div>
             <div className="pbcard__hilo-content">
-              <span className="pbcard__hilo-label">Hilo del caso</span>
+              <span className="pbcard__hilo-label">{isOrl ? 'Motivo ORL a retomar' : 'Hilo del caso'}</span>
               <p className="pbcard__hilo-text">{structured.hilo_terapeutico}</p>
             </div>
           </div>
@@ -142,7 +143,7 @@ export const PatientBriefingCard: React.FC<PatientBriefingCardProps> = ({
             <div className="pbcard__cell pbcard__cell--violet">
               <div className="pbcard__cell-header">
                 <TrendingUp size={14} />
-                <span className="pbcard__cell-label">Momento del proceso</span>
+                <span className="pbcard__cell-label">{isOrl ? 'Situación actual' : 'Momento del proceso'}</span>
               </div>
               <p className="pbcard__cell-body">{structured.momento_del_proceso}</p>
             </div>
@@ -153,7 +154,7 @@ export const PatientBriefingCard: React.FC<PatientBriefingCardProps> = ({
             <div className="pbcard__cell pbcard__cell--amber">
               <div className="pbcard__cell-header">
                 <ListChecks size={14} />
-                <span className="pbcard__cell-label">Pendientes</span>
+                <span className="pbcard__cell-label">{isOrl ? 'Plan pendiente' : 'Pendientes'}</span>
               </div>
               <ul className="pbcard__cell-list">
                 {structured.pendientes.map((item, i) => (
@@ -168,7 +169,7 @@ export const PatientBriefingCard: React.FC<PatientBriefingCardProps> = ({
             <div className="pbcard__cell pbcard__cell--emerald">
               <div className="pbcard__cell-header">
                 <Eye size={14} />
-                <span className="pbcard__cell-label">Patrones observados</span>
+                <span className="pbcard__cell-label">{isOrl ? 'Hallazgos a recordar' : 'Patrones observados'}</span>
               </div>
               <ul className="pbcard__cell-list">
                 {structured.patrones_observados.map((item, i) => (

@@ -77,6 +77,8 @@ const nowIso = () => new Date().toISOString();
 
 const getCloudClient = () => (supabase && isCloudSyncEnabled() ? supabase : null);
 
+const CLOUD_SYNC_PAGE_SIZE = 1000;
+
 const normalizeKey = (value: string): string => value
     .trim()
     .replace(/\s+/g, ' ')
@@ -472,7 +474,7 @@ export const saveAiLearningEvent = async (event: Omit<AiLearningEvent, 'id'>): P
 
         const client = getCloudClient();
         if (client) {
-            const { error } = await client.from('ai_learning_events').insert([event]);
+            const { error } = await client.from('ai_learning_events').insert([localEvent]);
             if (error) console.error('[Cloud Sync] AiLearningEvent insert error:', error.message);
         }
         return id ?? null;
@@ -490,7 +492,7 @@ export const saveAiImprovementLesson = async (lesson: Omit<AiImprovementLesson, 
 
         const client = getCloudClient();
         if (client) {
-            const { error } = await client.from('ai_improvement_lessons').insert([lesson]);
+            const { error } = await client.from('ai_improvement_lessons').insert([localLesson]);
             if (error) console.error('[Cloud Sync] AiImprovementLesson insert error:', error.message);
         }
         return id ?? null;
@@ -522,7 +524,9 @@ export const saveMedicalRecord = async (
                     updated_at: now
                 });
                 const updated = await db.medical_records.get(existing.id);
-                if (updated) syncToCloud(updated, 'update');
+                if (updated) {
+                    await syncToCloud(updated, 'update');
+                }
                 return updated ? [updated] : null;
             }
         }
@@ -536,8 +540,9 @@ export const saveMedicalRecord = async (
         const id = await db.medical_records.add(newRecord);
         const saved = await db.medical_records.get(id);
 
-        // Cloud sync
-        if (saved) syncToCloud(saved, 'insert');
+        if (saved) {
+            await syncToCloud(saved, 'insert');
+        }
 
         return saved ? [saved] : null;
     } catch (error) {
@@ -972,8 +977,9 @@ export const deleteMedicalRecord = async (idOrUuid: string | number): Promise<bo
 
         if (record?.id) await db.medical_records.delete(record.id);
 
-        // Cloud sync
-        if (record) syncToCloud(record, 'delete');
+        if (record) {
+            await syncToCloud(record, 'delete');
+        }
 
         return true;
     } catch (error) {
@@ -996,8 +1002,9 @@ export const updateMedicalRecord = async (idOrUuid: string | number, updates: Pa
         await db.medical_records.update(record.id, normalizedUpdates);
         const updated = await db.medical_records.get(record.id);
 
-        // Cloud sync
-        if (updated) syncToCloud(updated, 'update');
+        if (updated) {
+            await syncToCloud(updated, 'update');
+        }
 
         return updated ? [updated] : null;
     } catch (error) {
@@ -1069,23 +1076,34 @@ export const syncFromCloud = async (): Promise<number> => {
 
     try {
         console.log('[Cloud Sync] Checking for new records...');
+        const fetchAllRows = async (
+            table: string,
+            orderColumn: string
+        ): Promise<{ data: any[]; error: { message: string } | null }> => {
+            const rows: any[] = [];
+            let from = 0;
+            while (true) {
+                const { data, error } = await client
+                    .from(table)
+                    .select('*')
+                    .order(orderColumn, { ascending: false })
+                    .range(from, from + CLOUD_SYNC_PAGE_SIZE - 1);
+                if (error) {
+                    return { data: rows, error: { message: error.message } };
+                }
+                const page: any[] = Array.isArray(data) ? data : [];
+                rows.push(...page);
+                if (page.length < CLOUD_SYNC_PAGE_SIZE) break;
+                from += CLOUD_SYNC_PAGE_SIZE;
+            }
+            return { data: rows, error: null };
+        };
+
         const [medicalResult, historyResult, legacyResult, briefingResult] = await Promise.all([
-            client
-                .from('medical_records')
-                .select('*')
-                .order('created_at', { ascending: false }),
-            client
-                .from('consultation_histories')
-                .select('*')
-                .order('created_at', { ascending: false }),
-            client
-                .from('legacy_clinical_records')
-                .select('*')
-                .order('consultation_at', { ascending: false }),
-            client
-                .from('patient_briefings')
-                .select('*')
-                .order('updated_at', { ascending: false })
+            fetchAllRows('medical_records', 'created_at'),
+            fetchAllRows('consultation_histories', 'created_at'),
+            fetchAllRows('legacy_clinical_records', 'consultation_at'),
+            fetchAllRows('patient_briefings', 'updated_at')
         ]);
 
         const cloudRecords = medicalResult.data || [];

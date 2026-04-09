@@ -26,6 +26,78 @@
   align-items: center;
 }
 
+.history-day-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.9rem;
+  margin-top: 1rem;
+}
+
+.history-day-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.history-day-picker__label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.history-day-picker__input {
+  min-width: 190px;
+  padding: 0.8rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: white;
+  color: var(--text-primary);
+  font: inherit;
+  box-shadow: var(--shadow-sm);
+}
+
+.history-day-picker__input:focus {
+  outline: none;
+  border-color: var(--brand-primary);
+  box-shadow: var(--shadow-glow);
+}
+
+.history-day-today-btn {
+  min-height: 46px;
+  padding: 0 1rem;
+  border-radius: 14px;
+  border: 1px solid rgba(38, 166, 154, 0.18);
+  background: #f0fdf4;
+  color: var(--brand-primary);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--motion-duration-fast) var(--motion-ease-base),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-base),
+    border-color var(--motion-duration-fast) var(--motion-ease-base);
+}
+
+.history-day-today-btn:hover {
+  transform: translateY(-1px);
+  border-color: var(--brand-primary);
+  box-shadow: var(--shadow-md);
+}
+
+.history-day-summary {
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.95rem;
+  border-radius: 14px;
+  background: rgba(15, 118, 110, 0.08);
+  color: #0f766e;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 .refresh-btn {
   background: white;
   border: 1px solid rgba(0, 0, 0, 0.08);
@@ -1087,6 +1159,18 @@
     gap: 1rem;
   }
 
+  .history-day-toolbar {
+    align-items: stretch;
+  }
+
+  .history-day-picker {
+    flex: 1 1 220px;
+  }
+
+  .history-day-picker__input {
+    width: 100%;
+  }
+
   .content-grid {
     grid-template-columns: 1fr;
     overflow: auto;
@@ -1123,5 +1207,21 @@
   .search-history-modal-content {
     width: 96%;
     height: 92vh;
+  }
+}
+
+@media (max-width: 640px) {
+  .search-bar-wrapper {
+    max-width: none;
+  }
+
+  .history-day-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .history-day-summary,
+  .history-day-today-btn {
+    justify-content: center;
   }
 }

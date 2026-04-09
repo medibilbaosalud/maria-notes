@@ -54,15 +54,16 @@ const candidate = (provider: ModelProvider, model: string, options: { thinking?:
 });
 
 const GEMINI_TEXT_CHAIN_LOW: ModelCandidate[] = [
+    candidate('gemini', 'gemini-3.1-flash-lite-preview', { thinking: 'low' }),
+    candidate('gemini', 'gemini-2.5-flash', { thinking: 'low' }),
+    candidate('gemini', 'gemini-2.5-flash-lite', { thinking: 'low' }),
+    candidate('gemini', 'gemini-2.5-pro', { thinking: 'low' }),
+    candidate('gemini', 'gemini-2.0-flash', { thinking: 'low' }),
+    candidate('gemini', 'gemini-2.0-flash-exp', { thinking: 'low' }),
+    candidate('gemini', 'gemini-2.0-pro-exp', { thinking: 'low' }),
     candidate('gemini', 'gemini-3-flash-preview', { thinking: 'low' }),
     candidate('gemini', 'gemini-3-flash', { thinking: 'low' }),
-    candidate('gemini', 'gemini-2.5-flash', { thinking: 'low' }),
-    candidate('gemini', 'gemini-2.5-pro', { thinking: 'low' }), // Added
-    candidate('gemini', 'gemini-3-pro-preview', { thinking: 'low' }), // Added
-    candidate('gemini', 'gemini-2.0-pro-exp', { thinking: 'low' }), // Added
-    candidate('gemini', 'gemini-2.0-flash', { thinking: 'low' }), // Added
-    candidate('gemini', 'gemini-2.0-flash-exp', { thinking: 'low' }), // Added
-    candidate('gemini', 'gemini-2.5-flash-lite', { thinking: 'low' }),
+    candidate('gemini', 'gemini-3-pro-preview', { thinking: 'low' }),
     candidate('gemini', 'gemma-3-27b-it', { thinking: 'low' }),
     candidate('gemini', 'gemma-3-12b-it', { thinking: 'low' }),
     candidate('gemini', 'gemma-3-4b-it', { thinking: 'low' }),
@@ -75,11 +76,11 @@ const GEMINI_TEXT_CHAIN_MEDIUM: ModelCandidate[] = [
     candidate('gemini', 'gemini-3.1-flash-lite-preview', { thinking: 'low' }),
     candidate('gemini', 'gemini-3-flash', { thinking: 'medium' }),
     candidate('gemini', 'gemini-2.5-flash', { thinking: 'medium' }),
-    candidate('gemini', 'gemini-2.5-pro', { thinking: 'medium' }), // Added
-    candidate('gemini', 'gemini-3-pro-preview', { thinking: 'medium' }), // Added (High reasoning fallback)
-    candidate('gemini', 'gemini-2.0-pro-exp', { thinking: 'medium' }), // Added
-    candidate('gemini', 'gemini-2.0-flash', { thinking: 'medium' }), // Added
+    candidate('gemini', 'gemini-2.5-pro', { thinking: 'medium' }),
     candidate('gemini', 'gemini-2.5-flash-lite', { thinking: 'low' }),
+    candidate('gemini', 'gemini-2.0-flash', { thinking: 'medium' }),
+    candidate('gemini', 'gemini-2.0-pro-exp', { thinking: 'medium' }),
+    candidate('gemini', 'gemini-3-pro-preview', { thinking: 'medium' }),
     candidate('gemini', 'gemma-3-27b-it', { thinking: 'low' }),
     candidate('gemini', 'gemma-3-12b-it', { thinking: 'low' }),
     candidate('gemini', 'gemma-3-4b-it', { thinking: 'low' }),
@@ -131,6 +132,8 @@ const DEFAULT_TASK_MODEL_PREFERENCES: Record<TaskType, ModelCandidate[]> = {
 
     prompt_guard: [...GROQ_PROMPT_GUARD],
     patient_briefing: [
+        candidate('gemini', 'gemini-3.1-flash-lite-preview', { thinking: 'low' }),
+        candidate('gemini', 'gemini-3-flash-preview', { thinking: 'low' }),
         candidate('groq', 'llama-3.3-70b-versatile'),
         candidate('groq', 'qwen/qwen3-32b'),
         candidate('groq', 'meta-llama/llama-4-scout-17b-16e-instruct'),
@@ -332,8 +335,9 @@ export const MODEL_LIMITS: Record<string, ModelLimits> = {
 
     // Gemini / Gemma (per-model free-tier limits from Google AI Studio, Feb 2026)
     // Flash models: higher RPM/RPD, designed for throughput
-    'gemini:gemini-3-flash-preview': { requestsPerMinute: 10, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
+    'gemini:gemini-3-flash-preview': { requestsPerMinute: 5, requestsPerDay: 20, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
     'gemini:gemini-3-flash': { requestsPerMinute: 10, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
+    'gemini:gemini-3.1-flash-lite-preview': { requestsPerMinute: 15, requestsPerDay: 500, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
     'gemini:gemini-2.5-flash': { requestsPerMinute: 10, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
     'gemini:gemini-2.5-flash-lite': { requestsPerMinute: 15, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },
     'gemini:gemini-2.0-flash': { requestsPerMinute: 10, requestsPerDay: 250, tokensPerMinute: 250000, tokensPerDay: 5000000, contextWindowTokens: 1048576 },

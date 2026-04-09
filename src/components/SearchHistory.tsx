@@ -61,8 +61,52 @@ const parseContent = (content: string) => {
   return { history: history?.trim(), notes: notes?.trim() };
 };
 
+const getLocalDateKey = (value: string | Date): string => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getTodayDateKey = (): string => getLocalDateKey(new Date());
+
 const selectBestItem = (group: PatientTimelineGroup): PatientTimelineItem | null => {
   return group.items[0] || null;
+};
+
+const filterGroupByDate = (
+  group: PatientTimelineGroup,
+  selectedDateKey: string
+): PatientTimelineGroup | null => {
+  if (!selectedDateKey) return group;
+  const filteredItems = group.items.filter((item) => getLocalDateKey(item.consultationAt) === selectedDateKey);
+  if (filteredItems.length === 0) return null;
+
+  const clinicians = Array.from(new Set(
+    filteredItems
+      .map((item) => item.clinicianName || item.clinicianProfile || '')
+      .filter(Boolean)
+  ));
+  const specialties = Array.from(new Set(filteredItems.map((item) => item.specialty)));
+  const sourceCounts = filteredItems.reduce(
+    (acc, item) => {
+      acc[item.source] += 1;
+      return acc;
+    },
+    { current: 0, legacy: 0 }
+  );
+
+  return {
+    ...group,
+    latestConsultationAt: filteredItems[0]?.consultationAt || group.latestConsultationAt,
+    sessionCount: filteredItems.length,
+    clinicians,
+    specialties,
+    sourceCounts,
+    items: filteredItems
+  };
 };
 
 const modalOverlayVariants = {
@@ -87,7 +131,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   onUseAsContext
 }) => {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<PatientTimelineGroup[]>([]);
+  const [allResults, setAllResults] = useState<PatientTimelineGroup[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<PatientTimelineGroup | null>(null);
@@ -102,6 +146,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const [reportContent, setReportContent] = useState('');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [visibleCount, setVisibleCount] = useState(40);
+  const [selectedDateKey, setSelectedDateKey] = useState<string>(getTodayDateKey);
   const briefingRequestRef = useRef(0);
   const selectedGroupRef = useRef<PatientTimelineGroup | null>(null);
   const queryRef = useRef('');
@@ -136,8 +181,25 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const activeContent = selectedItem?.medicalHistory || '';
   const { history: activeHistory, notes: activeNotes } = parseContent(activeContent);
   const canOpenCurrent = selectedItem?.source === 'current' && Boolean(onLoadRecord) && Boolean(selectedItem?.recordUuid);
+  const results = React.useMemo(
+    () => allResults
+      .map((group) => filterGroupByDate(group, selectedDateKey))
+      .filter((group): group is PatientTimelineGroup => Boolean(group)),
+    [allResults, selectedDateKey]
+  );
   const visibleResults = React.useMemo(() => results.slice(0, visibleCount), [results, visibleCount]);
   const hasMoreResults = visibleCount < results.length;
+  const selectedDateLabel = React.useMemo(() => {
+    if (!selectedDateKey) return 'todas las fechas';
+    const parsed = new Date(`${selectedDateKey}T12:00:00`);
+    if (Number.isNaN(parsed.getTime())) return selectedDateKey;
+    return parsed.toLocaleDateString(undefined, {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  }, [selectedDateKey]);
 
   const getDemoGroups = useCallback((searchTerm: string) => {
     if (!demoContinuity?.timelineGroup) return [] as PatientTimelineGroup[];
@@ -155,7 +217,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
 
   useEffect(() => {
     setVisibleCount(40);
-  }, [query, results.length, activeSpecialty, activeClinicianProfile]);
+  }, [query, results.length, activeSpecialty, activeClinicianProfile, selectedDateKey]);
 
   const loadResults = useCallback(async (nextQuery?: string, preferredPatientName?: string) => {
     setIsLoading(true);
@@ -164,12 +226,15 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       const groups = demoContinuity
         ? getDemoGroups(effectiveQuery)
         : await searchPatientTimeline(effectiveQuery, activeSpecialty, activeClinicianProfile);
-      setResults(groups);
+      const nextResults = groups
+        .map((group) => filterGroupByDate(group, selectedDateKey))
+        .filter((group): group is PatientTimelineGroup => Boolean(group));
+      setAllResults(groups);
       const normalizedPreferredPatient = preferredPatientName?.trim().toLowerCase();
       const previousSelectedGroup = selectedGroupRef.current;
-      const nextGroup = groups.find((group) => group.patientName.trim().toLowerCase() === normalizedPreferredPatient)
-        || groups.find((group) => group.normalizedPatientName === previousSelectedGroup?.normalizedPatientName)
-        || groups[0]
+      const nextGroup = nextResults.find((group) => group.patientName.trim().toLowerCase() === normalizedPreferredPatient)
+        || nextResults.find((group) => group.normalizedPatientName === previousSelectedGroup?.normalizedPatientName)
+        || nextResults[0]
         || null;
       selectedGroupRef.current = nextGroup;
       setSelectedGroup(nextGroup);
@@ -179,7 +244,30 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [activeClinicianProfile, activeSpecialty, demoContinuity, getDemoGroups]);
+  }, [activeClinicianProfile, activeSpecialty, demoContinuity, getDemoGroups, selectedDateKey]);
+
+  useEffect(() => {
+    const previousSelectedGroup = selectedGroupRef.current;
+    const nextGroup = results.find((group) => group.normalizedPatientName === previousSelectedGroup?.normalizedPatientName)
+      || results[0]
+      || null;
+
+    selectedGroupRef.current = nextGroup;
+    setSelectedGroup(nextGroup);
+
+    if (!nextGroup) {
+      setSelectedItem(null);
+      setSelectedRecord(null);
+      return;
+    }
+
+    const nextItem = nextGroup.items.find((item) => item.id === selectedItem?.id)
+      || selectBestItem(nextGroup);
+    setSelectedItem(nextItem);
+    if (!nextItem || nextItem.id !== selectedItem?.id) {
+      setSelectedRecord(null);
+    }
+  }, [results, selectedItem?.id]);
 
   const refreshResults = useCallback(async () => {
     if (syncingRef.current) return;
@@ -249,7 +337,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      if (!selectedGroupName || activeSpecialty !== 'psicologia') {
+      if (!selectedGroupName || selectedSpecialty !== 'psicologia') {
         setCaseSummary(null);
         return;
       }
@@ -271,12 +359,12 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [activeClinicianProfile, activeSpecialty, demoContinuity, normalizedDemoPatientName, selectedGroupName, selectedGroupNormalizedName]);
+  }, [activeClinicianProfile, demoContinuity, normalizedDemoPatientName, selectedGroupName, selectedGroupNormalizedName, selectedSpecialty]);
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      if (!selectedGroupName || selectedSpecialty !== 'psicologia') {
+      if (!selectedGroupName || selectedSpecialty !== 'otorrino') {
         setBriefing(null);
         return;
       }
@@ -288,14 +376,14 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       const currentRequest = ++briefingRequestRef.current;
       setBriefing(null);
       try {
-        const existing = await getPatientBriefing(selectedGroupName, 'psicologia', activeClinicianProfile);
+        const existing = await getPatientBriefing(selectedGroupName, selectedSpecialty, activeClinicianProfile);
         if (cancelled || currentRequest !== briefingRequestRef.current) return;
         if (existing) {
           setBriefing(existing);
           return;
         }
 
-        const generated = await ensurePatientBriefing(selectedGroupName, 'psicologia', activeClinicianProfile);
+        const generated = await ensurePatientBriefing(selectedGroupName, selectedSpecialty, activeClinicianProfile);
         if (cancelled || currentRequest !== briefingRequestRef.current) return;
         setBriefing(generated);
       } catch (error) {
@@ -461,6 +549,29 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
             <RefreshCcw size={20} />
           </button>
         </form>
+        <div className="history-day-toolbar">
+          <label className="history-day-picker" htmlFor="history-date-input">
+            <span className="history-day-picker__label">Día del historial</span>
+            <input
+              id="history-date-input"
+              type="date"
+              value={selectedDateKey}
+              onChange={(event) => setSelectedDateKey(event.target.value || getTodayDateKey())}
+              className="history-day-picker__input"
+            />
+          </label>
+          <button
+            type="button"
+            className="history-day-today-btn"
+            onClick={() => setSelectedDateKey(getTodayDateKey())}
+          >
+            Hoy
+          </button>
+          <div className="history-day-summary">
+            <Calendar size={15} />
+            <span>{results.length} pacientes en {selectedDateLabel}</span>
+          </div>
+        </div>
       </div>
 
       <div className="content-grid timeline-grid">
@@ -579,7 +690,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   </div>
                 </div>
 
-                {briefing && (
+                {selectedSpecialty === 'otorrino' && briefing && (
                   <PatientBriefingCard briefing={briefing} variant="full" />
                 )}
 
@@ -652,7 +763,7 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                     onClick={() => setTimelineExpanded((prev) => !prev)}
                     aria-expanded={timelineExpanded}
                   >
-                    <h3>Sesiones anteriores ({selectedGroup.items.length})</h3>
+                    <h3>Consultas del día ({selectedGroup.items.length})</h3>
                     <ChevronRight size={16} className={`timeline-chevron ${timelineExpanded ? 'expanded' : ''}`} />
                   </button>
                   {timelineExpanded && (

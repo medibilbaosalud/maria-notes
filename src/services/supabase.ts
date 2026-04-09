@@ -226,6 +226,32 @@ export interface ClinicalGenerationDiagnosticEditEntry {
     metadata?: Record<string, unknown>;
 }
 
+export interface AiModelInvocationEntry {
+    audit_id?: string | null;
+    session_id?: string | null;
+    task: string;
+    phase?: string | null;
+    provider: string;
+    model: string;
+    route_key: string;
+    attempt_index?: number;
+    is_fallback?: boolean;
+    success?: boolean;
+    error_type?: string | null;
+    error_code?: string | null;
+    latency_ms?: number | null;
+    estimated_tokens?: number | null;
+    specialty?: string | null;
+    clinician_profile?: string | null;
+    artifact_type?: string | null;
+    result_status?: string | null;
+    pipeline_status?: string | null;
+    thought_summary?: string | null;
+    thought_signature?: string | null;
+    response_preview?: string | null;
+    created_at?: string;
+}
+
 export const saveMedicalRecord = async (record: MedicalRecord) => {
     const client = getProtectedSupabase();
     if (!client) {
@@ -689,6 +715,43 @@ export const saveClinicalGenerationDiagnosticEdit = async (
         }]);
 
     if (error) console.error('Error saving clinical generation diagnostic edit:', error);
+};
+
+export const saveAiModelInvocation = async (entry: AiModelInvocationEntry): Promise<void> => {
+    const client = getProtectedSupabase();
+    if (!client) return;
+
+    const payload = {
+        audit_id: entry.audit_id || null,
+        session_id: entry.session_id || null,
+        task: String(entry.task || '').trim() || 'unknown_task',
+        phase: entry.phase || entry.task || null,
+        provider: String(entry.provider || '').trim() || 'unknown_provider',
+        model: String(entry.model || '').trim() || 'unknown_model',
+        route_key: String(entry.route_key || '').trim() || `${String(entry.provider || '').trim()}:${String(entry.model || '').trim()}`,
+        attempt_index: Number.isFinite(Number(entry.attempt_index)) ? Number(entry.attempt_index) : 0,
+        is_fallback: Boolean(entry.is_fallback),
+        success: entry.success !== false,
+        error_type: entry.error_type || null,
+        error_code: entry.error_code || null,
+        latency_ms: Number.isFinite(Number(entry.latency_ms)) ? Number(entry.latency_ms) : null,
+        estimated_tokens: Number.isFinite(Number(entry.estimated_tokens)) ? Number(entry.estimated_tokens) : null,
+        specialty: entry.specialty || null,
+        clinician_profile: entry.clinician_profile || null,
+        artifact_type: entry.artifact_type || null,
+        result_status: entry.result_status || null,
+        pipeline_status: entry.pipeline_status || null,
+        thought_summary: entry.thought_summary || null,
+        thought_signature: entry.thought_signature || null,
+        response_preview: entry.response_preview || null,
+        created_at: entry.created_at || new Date().toISOString()
+    };
+
+    const { error } = await client
+        .from('ai_model_invocations')
+        .insert([payload]);
+
+    if (error) console.error('Error saving ai_model_invocation:', error);
 };
 
 export const upsertConsultationQualitySummary = async (summary: {

@@ -153,7 +153,7 @@ type InvocationCounters = {
 
 const SERVER_TEXT_MODEL = 'gemini:gemini-3-flash-preview';
 const SERVER_GROQ_TEXT_MODEL = 'groq:chat';
-const SERVER_GROQ_BRIEFING_MODEL = 'groq:briefing';
+const SERVER_GEMINI_BRIEFING_MODEL = 'gemini:gemini-3.1-flash-lite-preview';
 const SERVER_TRANSCRIPTION_MODEL = 'groq:whisper-large-v3-turbo';
 const AUDIO_BLOB_UPLOAD_ENABLED = String(import.meta.env.VITE_AUDIO_BLOB_UPLOAD_ENABLED || 'true').toLowerCase() === 'true';
 const BLOB_UPLOAD_TIMEOUT_MS = 45_000;
@@ -690,7 +690,7 @@ export class AIService {
         timelineItems: BriefingTimelineItem[],
         signal?: AbortSignal
     ): Promise<AIResult<string>> {
-        this.emitInvocation('patient_briefing', 'briefing_generation', 'start', SERVER_GROQ_BRIEFING_MODEL);
+        this.emitInvocation('patient_briefing', 'briefing_generation', 'start', SERVER_GEMINI_BRIEFING_MODEL);
         try {
             const result = await postJson<{
                 text: string;
@@ -713,7 +713,7 @@ export class AIService {
             });
             return { data: result.text, model: result.model };
         } catch (error) {
-            this.emitInvocation('patient_briefing', 'briefing_generation', 'error', SERVER_GROQ_BRIEFING_MODEL, error, {
+            this.emitInvocation('patient_briefing', 'briefing_generation', 'error', SERVER_GEMINI_BRIEFING_MODEL, error, {
                 specialty,
                 artifact_type: 'patient_briefing'
             });

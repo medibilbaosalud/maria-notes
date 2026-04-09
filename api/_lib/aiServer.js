@@ -8,7 +8,8 @@ const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || 'llama-3.3-70b-versatile'
 const GROQ_TRANSCRIBE_MODEL = process.env.GROQ_TRANSCRIBE_MODEL || 'whisper-large-v3-turbo';
 const GROQ_TRANSCRIBE_FALLBACK_MODEL = process.env.GROQ_TRANSCRIBE_FALLBACK_MODEL || 'whisper-large-v3';
 const GEMINI_TEXT_MODEL = normalizeGeminiModelId(process.env.GEMINI_TEXT_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview');
-const GEMINI_TRANSCRIBE_MODEL = normalizeGeminiModelId(process.env.GEMINI_TRANSCRIBE_MODEL || process.env.GEMINI_MODEL || GEMINI_TEXT_MODEL);
+const GEMINI_LIGHT_MODEL = normalizeGeminiModelId(process.env.GEMINI_LIGHT_MODEL || process.env.GEMINI_TEXT_LIGHT_MODEL || 'gemini-3.1-flash-lite-preview');
+const GEMINI_TRANSCRIBE_MODEL = normalizeGeminiModelId(process.env.GEMINI_TRANSCRIBE_MODEL || process.env.GEMINI_MODEL || GEMINI_LIGHT_MODEL);
 
 const ORL_STYLE_PROFILE = `ESTILO ORL TELEGRAFICO (OBLIGATORIO)
 - Tono clinico, breve y directo.
@@ -1234,6 +1235,43 @@ const buildBriefingPrompt = ({ patientName, consultationType, clinicianName, tim
     const sessionCount = items.length;
     const hasMultipleSessions = sessionCount > 1;
 
+    if (specialty === 'otorrino') {
+        return `Eres una asistente clinica experta en otorrinolaringologia. Genera un briefing estructurado y muy practico para la otorrino que va a ver este paciente.
+El objetivo: que lo lea en 15-20 segundos antes de entrar y recuerde rapido el motivo ORL, los hallazgos previos relevantes, las pruebas, la evolucion y el plan pendiente.
+
+Devuelve un JSON con exactamente esta estructura (si un campo no tiene datos suficientes, OMITE ese campo del JSON, no pongas null ni "No consta"):
+
+{
+  "hilo_terapeutico": "Frase breve con el motivo ORL central o el problema a seguir. Ej: 'Control de perforacion timpanica OD tras cuadro catarral' o 'Hipoacusia bilateral en estudio'.",
+  "ultima_sesion": {
+    "fecha": "fecha de la ultima consulta si consta",
+    "resumen": "Motivo actual, exploracion ORL o prueba relevante y conducta tomada. Muy concreto."
+  },
+  "pendientes": ["Tratamiento, control, prueba o indicacion pendiente", "Otro pendiente si existe"],
+  "patrones_observados": ["Hallazgo recurrente o antecedente ORL a tener presente", "Otro patron si se observa"],
+  "alerta_clinica": "Solo si hay una senal clinica relevante o algo que no conviene pasar por alto. No inventar alertas.",
+  "frase_para_retomar": "Apertura breve y natural de consulta ORL. Ej: 'La ultima vez quedamos en control de la perforacion del OD, ¿como ha ido desde entonces?'."${hasMultipleSessions ? `,
+  "evolucion": "Si hay varias consultas, una linea sobre la evolucion clinica: mejoria, persistencia, recurrencia o control."` : ''}
+}
+
+REGLAS ESTRICTAS:
+- Usa SOLO informacion explicitamente presente en las notas clinicas.
+- Prioriza motivo ORL, lateralidad, hallazgos, pruebas, tratamientos y plan.
+- Tono: consulta ORL breve, directo, practico y accionable.
+- No conviertas esto en un informe largo ni academico.
+- Si solo hay 1 consulta, omite "patrones_observados" y "evolucion".
+- NO repitas informacion entre campos.
+- Responde SOLO con el JSON, sin explicaciones ni comentarios adicionales.
+
+Paciente: ${patientName || 'Paciente'}
+Especialidad: ${specialty}
+Profesional de referencia: ${clinicianName || 'No especificado'}
+Numero de sesiones en historial: ${sessionCount}
+
+HISTORIAL CLINICO:
+${timelineText || 'Sin historial disponible'}`;
+    }
+
     return `Eres una asistente clinica experta en psicologia. Genera un briefing estructurado para la psicologa que va a atender este caso.
 El objetivo: que lo lea en 20 segundos antes de que entre el/la paciente y recuerde lo esencial, se reoriente en el caso, y sepa exactamente por donde retomar.
 
@@ -1457,6 +1495,7 @@ export const extractMedicalDataPayload = async ({ transcription, consultationTyp
             jsonMode: true,
             temperature: 0,
             maxTokens: 1200,
+            modelName: GEMINI_LIGHT_MODEL,
             includeThoughts: true
         }),
         callPreferredTextModel({
@@ -1464,6 +1503,7 @@ export const extractMedicalDataPayload = async ({ transcription, consultationTyp
             jsonMode: true,
             temperature: 0,
             maxTokens: 300,
+            modelName: GEMINI_LIGHT_MODEL,
             includeThoughts: true
         })
     ]);
@@ -1512,7 +1552,8 @@ export const generatePatientBriefingPayload = async ({ patientName, consultation
         prompt: buildBriefingPrompt({ patientName, consultationType, clinicianName, timelineItems }),
         jsonMode: true,
         temperature: 0.15,
-        maxTokens: 900
+        maxTokens: 900,
+        modelName: GEMINI_LIGHT_MODEL
     });
     const normalizedText = normalizeBriefingText(response.text);
     if (!normalizedText) {
