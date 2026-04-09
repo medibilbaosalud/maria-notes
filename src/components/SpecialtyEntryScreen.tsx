@@ -28,6 +28,18 @@ export const SpecialtyEntryScreen: React.FC<SpecialtyEntryScreenProps> = ({
   onContinue
 }) => {
   const isPsychology = selectedSpecialty === 'psicologia';
+  const psychologyProfiles = [
+    {
+      name: 'Ainhoa' as const,
+      hint: 'Con onboarding guiado y demo interactiva',
+      accent: 'Guiado'
+    },
+    {
+      name: 'June' as const,
+      hint: 'Acceso directo, sin onboarding ni demo',
+      accent: 'Directo'
+    }
+  ];
 
   return (
     <div className="specialty-entry-screen">
@@ -77,25 +89,30 @@ export const SpecialtyEntryScreen: React.FC<SpecialtyEntryScreenProps> = ({
           <div className="specialty-entry-clinician-block">
             <div className="specialty-entry-clinician-copy">
               <p className="specialty-entry-clinician-eyebrow">Perfil activo</p>
-              <h2>Elige si estas trabajando como June o como Ainhoa</h2>
-              <span>La referencia de redaccion y el contexto de psicologia se cargan para ese perfil.</span>
+              <h2>Elige el perfil con el que vas a trabajar hoy</h2>
+              <span>Ainhoa mantiene onboarding guiado y demo. June entra directa a consulta, con la interfaz ya lista.</span>
             </div>
 
             <div className="specialty-entry-grid specialty-entry-grid-clinicians" role="radiogroup" aria-label="Seleccionar perfil de psicologia">
-              {(['Ainhoa', 'June'] as const).map((clinicianName) => {
-                const isActive = psychologyClinicianName === clinicianName;
+              {psychologyProfiles.map((profile) => {
+                const isActive = psychologyClinicianName === profile.name;
                 return (
                   <button
-                    key={clinicianName}
+                    key={profile.name}
                     type="button"
                     className={`specialty-entry-option specialty-entry-clinician-option ${isActive ? 'active' : ''}`}
                     aria-pressed={isActive}
-                    onClick={() => onSelectPsychologyClinician(clinicianName)}
+                    onClick={() => onSelectPsychologyClinician(profile.name)}
                   >
-                    <div className="specialty-entry-option-icon specialty-entry-clinician-icon">{clinicianName[0]}</div>
+                    <div className="specialty-entry-option-icon specialty-entry-clinician-icon">{profile.name[0]}</div>
                     <div className="specialty-entry-option-body">
-                      <strong>{clinicianName}</strong>
-                      <span>Perfil de psicologia</span>
+                      <div className="specialty-entry-clinician-row">
+                        <strong>{profile.name}</strong>
+                        <span className={`specialty-entry-clinician-badge ${profile.name === 'June' ? 'direct' : 'guided'}`}>
+                          {profile.accent}
+                        </span>
+                      </div>
+                      <span>{profile.hint}</span>
                     </div>
                   </button>
                 );

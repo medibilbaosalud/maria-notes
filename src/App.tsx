@@ -517,9 +517,10 @@ const AppContent = () => {
         if (welcomeAutoOpenedRef.current) return;
         if (showWelcomeModal) return;
         if (activeSpecialty !== 'psicologia') return;
+        if (psychologyClinicianName !== 'Ainhoa') return;
         welcomeAutoOpenedRef.current = true;
         setShowWelcomeModal(true);
-    }, [activeSpecialty, hasChosenWorkspaceMode, showWelcomeModal]);
+    }, [activeSpecialty, hasChosenWorkspaceMode, psychologyClinicianName, showWelcomeModal]);
 
     const handleCloseWelcomeModal = useCallback(() => {
         setShowWelcomeModal(false);
@@ -3765,6 +3766,7 @@ const AppContent = () => {
                             <OnboardingModal
                                 specialty={activeSpecialty}
                                 clinicianName={resolveClinicianNameForSpecialty(activeSpecialty)}
+                                guidedExperience={activeSpecialty !== 'psicologia' || psychologyClinicianName === 'Ainhoa'}
                                 referenceStory={clinicalStyleProfile?.referenceStory}
                                 generatedTemplate={clinicalStyleProfile?.generatedTemplate}
                                 isProfileLoading={clinicalStyleProfileLoading}

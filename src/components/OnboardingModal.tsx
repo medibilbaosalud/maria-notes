@@ -17,6 +17,7 @@ import './OnboardingModal.css';
 interface OnboardingModalProps {
     specialty: ClinicalSpecialtyId;
     clinicianName?: string;
+    guidedExperience?: boolean;
     referenceStory?: string;
     generatedTemplate?: string;
     isProfileLoading?: boolean;
@@ -86,6 +87,7 @@ const slideVariants = {
 export const OnboardingModal = ({
     specialty,
     clinicianName,
+    guidedExperience = true,
     referenceStory = '',
     generatedTemplate = '',
     isProfileLoading = false,
@@ -93,10 +95,10 @@ export const OnboardingModal = ({
     onStartDemo,
     onSaveStyleProfile
 }: OnboardingModalProps) => {
-    const slides = getSlidesForSpecialty(specialty);
+    const slides = guidedExperience ? getSlidesForSpecialty(specialty) : [];
     const setupIndex = slides.length;
     const totalSteps = slides.length + 1;
-    const [index, setIndex] = useState(0);
+    const [index, setIndex] = useState(guidedExperience ? 0 : setupIndex);
     const [referenceValue, setReferenceValue] = useState(referenceStory);
     const [templateValue, setTemplateValue] = useState(generatedTemplate);
     const [isSaving, setIsSaving] = useState(false);
@@ -107,8 +109,8 @@ export const OnboardingModal = ({
     const slide = slides[Math.min(index, Math.max(0, slides.length - 1))] || GENERIC_SLIDES[0];
     const SlideIcon = slide.icon;
     const isPsychology = specialty === 'psicologia';
-    const isOtorrino = specialty === 'otorrino';
     const name = clinicianName || 'profesional';
+    const canStartDemo = guidedExperience && isPsychology;
 
     useEffect(() => {
         setReferenceValue(referenceStory);
@@ -117,6 +119,10 @@ export const OnboardingModal = ({
     useEffect(() => {
         setTemplateValue(generatedTemplate);
     }, [generatedTemplate]);
+
+    useEffect(() => {
+        setIndex(guidedExperience ? 0 : setupIndex);
+    }, [guidedExperience, setupIndex]);
 
     const currentAccent = isSetupStep ? 'paper' : slide.accent;
     const canSave = referenceValue.trim().length >= 40 && templateValue.trim().length >= 20 && !isSaving;
@@ -162,7 +168,9 @@ export const OnboardingModal = ({
             >
                 <p className="onboarding-tunnel-kicker">
                     {isSetupStep
-                        ? 'Configura una historia de referencia'
+                        ? guidedExperience
+                            ? 'Configura una historia de referencia'
+                            : `Perfil ${name}: acceso directo`
                         : isPsychology
                             ? `Perfil ${name}: vamos a dejar esto listo`
                             : 'Guia rapida de Maria Notes'}
@@ -200,7 +208,9 @@ export const OnboardingModal = ({
                             </div>
                             <h2 id="onboarding-title">Pega una historia real como referencia</h2>
                             <p className="onboarding-style-copy">
-                                Maria sacara de aqui una estructura editable para escribir como tu. Guardamos la muestra y la plantilla en Supabase para reutilizarla despues.
+                                {guidedExperience
+                                    ? 'Maria sacara de aqui una estructura editable para escribir como tu. Guardamos la muestra y la plantilla en Supabase para reutilizarla despues.'
+                                    : 'Tu flujo entra ya directo a consulta. Si quieres, aqui puedes dejar una referencia de escritura para que Maria siga tu estilo sin pasar por onboarding ni demo.'}
                             </p>
 
                             <label className="onboarding-style-field">
@@ -279,7 +289,7 @@ export const OnboardingModal = ({
                         </button>
                     ) : (
                         <div className="onboarding-style-footer">
-                            {isPsychology && (
+                            {canStartDemo && (
                                 <button
                                     type="button"
                                     className="onboarding-style-secondary"
@@ -296,11 +306,11 @@ export const OnboardingModal = ({
                             <button
                                 type="button"
                                 className="onboarding-tunnel-cta"
-                                onClick={() => void handleSave(isPsychology)}
+                                onClick={() => void handleSave(canStartDemo)}
                                 disabled={!canSave}
                             >
                                 <Sparkles size={18} />
-                                {isSaving ? 'Guardando...' : isOtorrino ? 'Guardar estilo' : 'Guardar y entrar'}
+                                {isSaving ? 'Guardando...' : canStartDemo ? 'Guardar y entrar' : 'Guardar estilo'}
                             </button>
                         </div>
                     )}

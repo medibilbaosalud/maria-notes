@@ -127,7 +127,7 @@ export const Layout: React.FC<LayoutProps> = ({
                       className={`workspace-clinician-pill ${active ? 'active' : ''}`}
                       onClick={() => onPsychologyClinicianChange(clinicianName)}
                       aria-pressed={active}
-                      title={`Trabajar como ${clinicianName}`}
+                      title={clinicianName === 'June' ? 'Perfil directo sin onboarding' : `Trabajar como ${clinicianName}`}
                     >
                       {clinicianName}
                     </button>

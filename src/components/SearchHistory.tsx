@@ -3,8 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowRight,
   Calendar,
+  CheckCircle2,
   ChevronRight,
   Clock3,
+  Command,
   Copy,
   FileText,
   Layers3,
@@ -22,6 +24,7 @@ import {
   buildPsychologyCaseSummary,
   ensurePatientBriefing,
   getMedicalRecordByUuid,
+  getPatientTimeline,
   getPatientBriefing,
   searchPatientTimeline,
   syncFromCloud,
@@ -71,6 +74,13 @@ const getLocalDateKey = (value: string | Date): string => {
 };
 
 const getTodayDateKey = (): string => getLocalDateKey(new Date());
+const getRelativeDateKey = (daysOffset: number): string => {
+  const next = new Date();
+  next.setDate(next.getDate() + daysOffset);
+  return getLocalDateKey(next);
+};
+
+type HistoryViewMode = 'day' | 'patient';
 
 const selectBestItem = (group: PatientTimelineGroup): PatientTimelineItem | null => {
   return group.items[0] || null;
@@ -137,6 +147,8 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const [selectedGroup, setSelectedGroup] = useState<PatientTimelineGroup | null>(null);
   const [selectedItem, setSelectedItem] = useState<PatientTimelineItem | null>(null);
   const [selectedRecord, setSelectedRecord] = useState<MedicalRecord | null>(null);
+  const [patientTimeline, setPatientTimeline] = useState<PatientTimelineItem[]>([]);
+  const [patientTimelineLoading, setPatientTimelineLoading] = useState(false);
   const [caseSummary, setCaseSummary] = useState<PatientCaseSummary | null>(null);
   const [caseSummaryLoading, setCaseSummaryLoading] = useState(false);
   const [briefing, setBriefing] = useState<PatientBriefing | null>(null);
@@ -146,7 +158,11 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const [reportContent, setReportContent] = useState('');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [visibleCount, setVisibleCount] = useState(40);
+  const [historyViewMode, setHistoryViewMode] = useState<HistoryViewMode>(
+    activeSpecialty === 'psicologia' ? 'patient' : 'day'
+  );
   const [selectedDateKey, setSelectedDateKey] = useState<string>(getTodayDateKey);
+  const [lastRefreshAt, setLastRefreshAt] = useState<string>('');
   const briefingRequestRef = useRef(0);
   const selectedGroupRef = useRef<PatientTimelineGroup | null>(null);
   const queryRef = useRef('');
@@ -178,15 +194,26 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   const effectiveCaseSummaryLoading = isDemoSelectedGroup ? false : caseSummaryLoading;
 
   const selectedSpecialty = normalizeClinicalSpecialty(selectedItem?.specialty || activeSpecialty);
+  const selectedSpecialtyConfig = getClinicalSpecialtyConfig(selectedSpecialty);
+  const isPatientMode = historyViewMode === 'patient';
+  const selectedPatientTimeline = React.useMemo(
+    () => {
+      if (isPatientMode) return patientTimeline;
+      return selectedSpecialty === 'psicologia' ? patientTimeline : selectedGroup?.items || [];
+    },
+    [isPatientMode, patientTimeline, selectedGroup?.items, selectedSpecialty]
+  );
+  const selectedPatientSessionCount = selectedPatientTimeline.length || selectedGroup?.sessionCount || 0;
   const activeContent = selectedItem?.medicalHistory || '';
   const { history: activeHistory, notes: activeNotes } = parseContent(activeContent);
   const canOpenCurrent = selectedItem?.source === 'current' && Boolean(onLoadRecord) && Boolean(selectedItem?.recordUuid);
-  const results = React.useMemo(
+  const dayResults = React.useMemo(
     () => allResults
       .map((group) => filterGroupByDate(group, selectedDateKey))
       .filter((group): group is PatientTimelineGroup => Boolean(group)),
     [allResults, selectedDateKey]
   );
+  const results = isPatientMode ? allResults : dayResults;
   const visibleResults = React.useMemo(() => results.slice(0, visibleCount), [results, visibleCount]);
   const hasMoreResults = visibleCount < results.length;
   const selectedDateLabel = React.useMemo(() => {
@@ -200,6 +227,59 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       day: 'numeric'
     });
   }, [selectedDateKey]);
+  const refreshLabel = lastRefreshAt
+    ? new Date(lastRefreshAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : 'pendiente';
+  const cloudStatusLabel = !isCloudEnabled
+    ? 'Solo guardado local'
+    : cloudAccessMode === 'session'
+      ? 'Nube conectada'
+      : 'Nube interna activa';
+  const cloudStatusHint = !isCloudEnabled
+    ? 'La app trabaja en este equipo sin nube.'
+    : cloudAccessMode === 'session'
+      ? 'Sincronizas con una sesión autenticada.'
+      : 'Sincronizas con el acceso interno configurado.';
+  const visibilityLabel = activeSpecialty === 'psicologia'
+    ? 'Psico sin legacy ni briefings'
+    : 'ORL con histórico operativo';
+  const resultsSummaryLabel = isPatientMode
+    ? `${results.length} pacientes con continuidad disponible`
+    : `${results.length} pacientes en ${selectedDateLabel}`;
+  const patientModeCopy = activeSpecialty === 'psicologia'
+    ? 'Piensa esta vista como continuidad terapéutica: eliges un paciente y revisas su recorrido completo sin depender del calendario.'
+    : 'Piensa esta vista como continuidad clínica: eliges un paciente y revisas consultas previas, informes y evolución sin depender del calendario.';
+  const listPanelTitle = isPatientMode
+    ? (activeSpecialty === 'psicologia' ? 'Pacientes en continuidad' : 'Pacientes con historial')
+    : 'Agenda clínica del día';
+  const listPanelDescription = isPatientMode
+    ? (activeSpecialty === 'psicologia'
+      ? 'Ideal para situarte antes de una sesión y cambiar de paciente sin perder contexto.'
+      : 'Útil cuando quieres revisar evolución o volver a una consulta previa del mismo paciente.')
+    : (activeSpecialty === 'psicologia'
+      ? 'Úsalo cuando quieres ver quién pasó por consulta en una fecha concreta.'
+      : 'Úsalo para trabajar la jornada como agenda: eliges un día y entras a cada consulta desde ahí.');
+  const selectedGroupCurrentCount = selectedGroup?.sourceCounts.current || 0;
+  const selectedGroupLegacyCount = selectedGroup?.sourceCounts.legacy || 0;
+  const detailGuideTitle = isPatientMode ? 'Vista centrada en el paciente' : 'Vista centrada en el día';
+  const detailGuideBody = isPatientMode
+    ? (selectedSpecialty === 'psicologia'
+      ? 'Tienes la continuidad del caso abierta para moverte entre sesiones anteriores con un clic.'
+      : 'Tienes acceso a la continuidad clínica del paciente para comparar consultas y abrir resultados previos.')
+    : (selectedSpecialty === 'psicologia'
+      ? 'Estás viendo la selección del día, pero puedes saltar al historial completo del paciente desde la continuidad.'
+      : 'Estás viendo la agenda del día. La lista te deja entrar rápido en cada consulta y su documentación asociada.');
+  const detailActionBody = canOpenCurrent
+    ? 'Puedes usar esta sesión como contexto, abrir el resultado editable o generar informe formal desde aquí.'
+    : 'Esta sesión es importada y queda en solo lectura, pero sigue disponible para revisar continuidad y contexto.';
+  const documentLabel = selectedSpecialty === 'psicologia' ? 'Historia psicológica' : 'Historia médica';
+  const breadcrumbs = [
+    selectedSpecialtyConfig.shortLabel,
+    selectedGroup?.patientName || 'Sin paciente',
+    selectedItem?.consultationAt
+      ? `sesión del ${new Date(selectedItem.consultationAt).toLocaleDateString()}`
+      : 'sin sesión'
+  ];
 
   const getDemoGroups = useCallback((searchTerm: string) => {
     if (!demoContinuity?.timelineGroup) return [] as PatientTimelineGroup[];
@@ -216,6 +296,16 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   }, [query]);
 
   useEffect(() => {
+    setHistoryViewMode(activeSpecialty === 'psicologia' ? 'patient' : 'day');
+  }, [activeSpecialty]);
+
+  useEffect(() => {
+    if (historyViewMode === 'patient' || activeSpecialty === 'psicologia') {
+      setTimelineExpanded(true);
+    }
+  }, [activeSpecialty, historyViewMode]);
+
+  useEffect(() => {
     setVisibleCount(40);
   }, [query, results.length, activeSpecialty, activeClinicianProfile, selectedDateKey]);
 
@@ -226,9 +316,10 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       const groups = demoContinuity
         ? getDemoGroups(effectiveQuery)
         : await searchPatientTimeline(effectiveQuery, activeSpecialty, activeClinicianProfile);
-      const nextResults = groups
+      const nextDayResults = groups
         .map((group) => filterGroupByDate(group, selectedDateKey))
         .filter((group): group is PatientTimelineGroup => Boolean(group));
+      const nextResults = historyViewMode === 'patient' ? groups : nextDayResults;
       setAllResults(groups);
       const normalizedPreferredPatient = preferredPatientName?.trim().toLowerCase();
       const previousSelectedGroup = selectedGroupRef.current;
@@ -241,10 +332,11 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
       const nextItem = nextGroup ? selectBestItem(nextGroup) : null;
       setSelectedItem(nextItem);
       setSelectedRecord(null);
+      setLastRefreshAt(new Date().toISOString());
     } finally {
       setIsLoading(false);
     }
-  }, [activeClinicianProfile, activeSpecialty, demoContinuity, getDemoGroups, selectedDateKey]);
+  }, [activeClinicianProfile, activeSpecialty, demoContinuity, getDemoGroups, historyViewMode, selectedDateKey]);
 
   useEffect(() => {
     const previousSelectedGroup = selectedGroupRef.current;
@@ -337,6 +429,46 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
+      if (!selectedGroupName) {
+        setPatientTimeline([]);
+        setPatientTimelineLoading(false);
+        return;
+      }
+      if (demoContinuity && selectedGroupNormalizedName === normalizedDemoPatientName) {
+        setPatientTimeline(demoContinuity.timelineGroup.items);
+        setPatientTimelineLoading(false);
+        return;
+      }
+
+      setPatientTimelineLoading(true);
+      try {
+        const timeline = await getPatientTimeline(selectedGroupName, selectedSpecialty, activeClinicianProfile);
+        if (!cancelled) {
+          setPatientTimeline(timeline);
+        }
+      } finally {
+        if (!cancelled) {
+          setPatientTimelineLoading(false);
+        }
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeClinicianProfile,
+    demoContinuity,
+    normalizedDemoPatientName,
+    selectedGroupName,
+    selectedGroupNormalizedName,
+    selectedSpecialty
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
       if (!selectedGroupName || selectedSpecialty !== 'psicologia') {
         setCaseSummary(null);
         return;
@@ -409,16 +541,76 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
 
   const selectGroup = useCallback((group: PatientTimelineGroup) => {
     setSelectedGroup(group);
-    setTimelineExpanded(false);
+    setTimelineExpanded(historyViewMode === 'patient' || group.specialties.includes('psicologia'));
     const nextItem = selectBestItem(group);
     setSelectedItem(nextItem);
     setSelectedRecord(null);
-  }, []);
+  }, [historyViewMode]);
 
   const selectTimelineItem = useCallback((item: PatientTimelineItem) => {
     setSelectedItem(item);
     setSelectedRecord(null);
   }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isEditableTarget = Boolean(
+        target
+        && (target.tagName === 'INPUT'
+          || target.tagName === 'TEXTAREA'
+          || target.tagName === 'SELECT'
+          || target.isContentEditable)
+      );
+
+      if (event.key === '/' && !isEditableTarget) {
+        event.preventDefault();
+        const searchInput = document.getElementById('history-search-input') as HTMLInputElement | null;
+        searchInput?.focus();
+        searchInput?.select();
+        return;
+      }
+
+      if (isEditableTarget) return;
+
+      if (event.key.toLowerCase() === 'd') {
+        event.preventDefault();
+        setHistoryViewMode('day');
+        return;
+      }
+
+      if (event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        setHistoryViewMode('patient');
+        return;
+      }
+
+      if (event.key.toLowerCase() === 't' && historyViewMode === 'day') {
+        event.preventDefault();
+        setSelectedDateKey(getTodayDateKey());
+        return;
+      }
+
+      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && results.length > 0) {
+        event.preventDefault();
+        const currentIndex = results.findIndex(
+          (group) => group.normalizedPatientName === selectedGroup?.normalizedPatientName
+        );
+        const nextIndex = event.key === 'ArrowDown'
+          ? Math.min(currentIndex + 1, results.length - 1)
+          : Math.max(currentIndex - 1, 0);
+        const nextGroup = results[nextIndex] || results[0];
+        if (nextGroup) {
+          selectGroup(nextGroup);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [historyViewMode, results, selectGroup, selectedGroup?.normalizedPatientName]);
 
   const handleLoadCurrentRecord = useCallback(async (item: PatientTimelineItem) => {
     if (!onLoadRecord || item.source !== 'current' || !item.recordUuid) return;
@@ -516,11 +708,62 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
     : cloudAccessMode === 'session'
       ? 'No se han encontrado pacientes. Pulsa sincronizar para actualizar el historial desde la nube.'
       : 'No se han encontrado pacientes. Pulsa sincronizar para traer el historial interno desde Supabase.';
+  const selectedSourceLabel = selectedItem?.source === 'legacy'
+    ? 'Histórico importado · solo lectura'
+    : 'Consulta actual · editable';
+  const timelinePanelTitle = isPatientMode
+    ? `Continuidad del paciente (${selectedPatientSessionCount})`
+    : selectedSpecialty === 'psicologia'
+      ? `Sesiones del paciente (${selectedPatientSessionCount})`
+      : `Consultas del día (${selectedGroup?.items.length || 0})`;
 
   return (
     <div className="history-container">
       <div className="search-section">
         <h2 className="section-title">Historial de pacientes</h2>
+        <div className="history-status-strip">
+          <div className="history-status-card">
+            <span className="history-status-card__label">Estado de guardado</span>
+            <strong>{cloudStatusLabel}</strong>
+            <span>{cloudStatusHint}</span>
+          </div>
+          <div className="history-status-card">
+            <span className="history-status-card__label">Visibilidad actual</span>
+            <strong>{visibilityLabel}</strong>
+            <span>{activeSpecialty === 'psicologia' ? 'Solo continuidad útil para sesión.' : 'Sin cambios respecto al flujo ORL.'}</span>
+          </div>
+          <div className="history-status-card">
+            <span className="history-status-card__label">Última actualización</span>
+            <strong>{refreshLabel === 'pendiente' ? 'Pendiente' : `Actualizado ${refreshLabel}`}</strong>
+            <span>{isSyncing ? 'Sincronizando ahora mismo...' : 'Pulsa refrescar si quieres traer cambios de nube.'}</span>
+          </div>
+        </div>
+        <div className="history-mode-bar">
+          <div className="history-mode-toggle" role="tablist" aria-label="Modo de historial">
+            <button
+              type="button"
+              className={`history-mode-toggle__btn ${historyViewMode === 'day' ? 'active' : ''}`}
+              onClick={() => setHistoryViewMode('day')}
+              aria-pressed={historyViewMode === 'day'}
+            >
+              <Calendar size={15} />
+              <span>Día</span>
+            </button>
+            <button
+              type="button"
+              className={`history-mode-toggle__btn ${historyViewMode === 'patient' ? 'active' : ''}`}
+              onClick={() => setHistoryViewMode('patient')}
+              aria-pressed={historyViewMode === 'patient'}
+            >
+              <User size={15} />
+              <span>Paciente</span>
+            </button>
+          </div>
+          <div className="history-shortcuts-hint">
+            <Command size={14} />
+            <span>`/` buscar · `D` día · `P` paciente · `T` hoy</span>
+          </div>
+        </div>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -549,36 +792,77 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
             <RefreshCcw size={20} />
           </button>
         </form>
-        <div className="history-day-toolbar">
-          <label className="history-day-picker" htmlFor="history-date-input">
-            <span className="history-day-picker__label">Día del historial</span>
-            <input
-              id="history-date-input"
-              type="date"
-              value={selectedDateKey}
-              onChange={(event) => setSelectedDateKey(event.target.value || getTodayDateKey())}
-              className="history-day-picker__input"
-            />
-          </label>
-          <button
-            type="button"
-            className="history-day-today-btn"
-            onClick={() => setSelectedDateKey(getTodayDateKey())}
-          >
-            Hoy
-          </button>
-          <div className="history-day-summary">
-            <Calendar size={15} />
-            <span>{results.length} pacientes en {selectedDateLabel}</span>
+        {historyViewMode === 'day' ? (
+          <div className="history-day-toolbar">
+            <label className="history-day-picker" htmlFor="history-date-input">
+              <span className="history-day-picker__label">Día del historial</span>
+              <input
+                id="history-date-input"
+                type="date"
+                value={selectedDateKey}
+                onChange={(event) => setSelectedDateKey(event.target.value || getTodayDateKey())}
+                className="history-day-picker__input"
+              />
+            </label>
+            <div className="history-day-actions">
+              <button
+                type="button"
+                className="history-day-today-btn"
+                onClick={() => setSelectedDateKey(getTodayDateKey())}
+              >
+                Hoy
+              </button>
+              <button
+                type="button"
+                className="history-day-ghost-btn"
+                onClick={() => setSelectedDateKey(getRelativeDateKey(-1))}
+              >
+                Ayer
+              </button>
+            </div>
+            <div className="history-day-summary">
+              <Calendar size={15} />
+              <span>{resultsSummaryLabel}</span>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="history-day-toolbar history-day-toolbar--patient">
+            <div className="history-day-summary history-day-summary--patient">
+              <CheckCircle2 size={15} />
+              <span>{resultsSummaryLabel}</span>
+            </div>
+            <div className="history-patient-mode-copy">
+              {patientModeCopy}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="content-grid timeline-grid">
         <div className="list-column" onScroll={handleListScroll}>
+          <div className="history-list-panel-intro">
+            <div>
+              <div className="history-list-panel-kicker">{historyViewMode === 'patient' ? 'Continuidad' : 'Agenda'}</div>
+              <h3>{listPanelTitle}</h3>
+            </div>
+            <p>{listPanelDescription}</p>
+          </div>
           {isLoading ? (
-            <div className="search-history-loading-state">
-              <div className="search-history-spinner" />
+            <div className="history-list-skeletons" aria-hidden="true">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div key={`history-skeleton-${index}`} className="history-card-skeleton">
+                  <div className="history-card-skeleton__top">
+                    <div className="history-card-skeleton__avatar" />
+                    <div className="history-card-skeleton__date" />
+                  </div>
+                  <div className="history-card-skeleton__line history-card-skeleton__line--title" />
+                  <div className="history-card-skeleton__line history-card-skeleton__line--short" />
+                  <div className="history-card-skeleton__chips">
+                    <span />
+                    <span />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : results.length === 0 ? (
             <div className="empty-state">
@@ -620,6 +904,14 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                         <span key={clinician} className="card-tag">{clinician}</span>
                       ))}
                     </div>
+                    <div className="card-footer-meta">
+                      {group.sourceCounts.current > 0 && (
+                        <span className="card-mini-stat current">{group.sourceCounts.current} actuales</span>
+                      )}
+                      {group.sourceCounts.legacy > 0 && (
+                        <span className="card-mini-stat legacy">{group.sourceCounts.legacy} importadas</span>
+                      )}
+                    </div>
                   </div>
                   <div className="card-actions">
                     <ChevronRight size={16} className="chevron" />
@@ -648,21 +940,36 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   <div className="header-main">
                     <div className="patient-badge"><User size={24} /></div>
                     <div className="header-text">
+                      <div className="history-breadcrumbs" aria-label="Ubicación actual">
+                        {breadcrumbs.map((segment, index) => (
+                          <span key={`${segment}-${index}`} className="history-breadcrumbs__item">
+                            {segment}
+                          </span>
+                        ))}
+                      </div>
                       <div className="name-display-wrapper">
                         <h1>{selectedGroup.patientName}</h1>
                       </div>
                       <div className="meta-row">
                         <span className="meta-item">
                           <Calendar size={14} />
-                          {new Date(selectedGroup.latestConsultationAt).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                          {new Date(selectedItem.consultationAt || selectedGroup.latestConsultationAt).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                         </span>
                         <span className="meta-item">
                           <Layers3 size={14} />
-                          {selectedGroup.sessionCount} sesiones
+                          {selectedPatientSessionCount} sesiones
                         </span>
                         <span className="meta-item">
                           <Clock3 size={14} />
                           {selectedItem.clinicianName || selectedItem.clinicianProfile || 'Sin profesional'}
+                        </span>
+                      </div>
+                      <div className="history-detail-status-row">
+                        <span className={`history-detail-status-pill ${selectedItem.source}`}>
+                          {selectedSourceLabel}
+                        </span>
+                        <span className="history-detail-status-pill neutral">
+                          {historyViewMode === 'patient' ? 'Vista paciente' : `Vista día · ${selectedDateLabel}`}
                         </span>
                       </div>
                     </div>
@@ -694,11 +1001,24 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   <PatientBriefingCard briefing={briefing} variant="full" />
                 )}
 
+                <div className="history-detail-guide-grid">
+                  <div className="history-detail-guide-card">
+                    <span className="history-detail-guide-card__label">Qué estás viendo</span>
+                    <strong>{detailGuideTitle}</strong>
+                    <p>{detailGuideBody}</p>
+                  </div>
+                  <div className="history-detail-guide-card">
+                    <span className="history-detail-guide-card__label">Qué puedes hacer aquí</span>
+                    <strong>{selectedSourceLabel}</strong>
+                    <p>{detailActionBody}</p>
+                  </div>
+                </div>
+
                 <div id="history-case-hub" className="case-hub-card">
                   <div className="case-hub-header">
                     <div>
                       <div className="case-hub-kicker">Vista general</div>
-                      <h2>Continuidad del caso</h2>
+                      <h2>{isPatientMode ? 'Continuidad del caso' : 'Resumen para situarte rápido'}</h2>
                     </div>
                   <div className="case-hub-meta">
                     <Shield size={14} />
@@ -754,6 +1074,14 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                   ) : (
                     <div className="case-hub-loading">Todavía no hay suficiente contexto histórico para resumir el caso.</div>
                   )}
+                  <div className="case-hub-footer-stats">
+                    {selectedGroupCurrentCount > 0 && (
+                      <span className="case-hub-footer-pill current">{selectedGroupCurrentCount} consultas actuales</span>
+                    )}
+                    {selectedGroupLegacyCount > 0 && (
+                      <span className="case-hub-footer-pill legacy">{selectedGroupLegacyCount} importadas</span>
+                    )}
+                  </div>
                 </div>
 
                 <div id="history-timeline-panel" className="timeline-panel">
@@ -763,12 +1091,14 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                     onClick={() => setTimelineExpanded((prev) => !prev)}
                     aria-expanded={timelineExpanded}
                   >
-                    <h3>Consultas del día ({selectedGroup.items.length})</h3>
+                    <h3>{timelinePanelTitle}</h3>
                     <ChevronRight size={16} className={`timeline-chevron ${timelineExpanded ? 'expanded' : ''}`} />
                   </button>
                   {timelineExpanded && (
                   <div className="timeline-list">
-                    {selectedGroup.items.map((item, index) => {
+                    {patientTimelineLoading && (selectedSpecialty === 'psicologia' || isPatientMode) ? (
+                      <div className="case-hub-loading">Cargando sesiones previas...</div>
+                    ) : selectedPatientTimeline.map((item, index) => {
                       const active = selectedItem.id === item.id;
                       return (
                         <div
@@ -820,7 +1150,12 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({
                 <div className="detail-scroll-area">
                   <div className="paper-document">
                     <div className="document-header">
-                      <span className="doc-label">Historia Medica</span>
+                      <div className="document-header-copy">
+                        <span className="doc-label">{documentLabel}</span>
+                        <span className="document-sub-label">
+                          {selectedItem.source === 'current' ? 'Sesión editable' : 'Registro importado en solo lectura'}
+                        </span>
+                      </div>
                       <div className="doc-actions">
                         <button className="search-icon-btn copy-doc" onClick={() => void handleCopy(selectedContent)} title="Copiar" aria-label="Copiar historia" data-ui-state={copied ? 'success' : 'idle'}>
                           {copied ? <Copy size={16} /> : <Copy size={16} />}

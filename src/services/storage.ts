@@ -106,8 +106,9 @@ const shouldIncludeLegacyTimeline = (
     clinician?: string,
     options?: { includeLegacy?: boolean }
 ): boolean => {
-    if (options?.includeLegacy === true) return true;
     const normalizedSpecialty = specialty ? normalizeClinicalSpecialty(specialty) : null;
+    if (normalizedSpecialty === 'psicologia') return false;
+    if (options?.includeLegacy === true) return true;
     const normalizedClinician = getNormalizedScopedClinician(normalizedSpecialty || undefined, clinician);
     return normalizedSpecialty === 'otorrino' && normalizedClinician === 'gotxi';
 };
@@ -609,6 +610,9 @@ export const getPatientBriefing = async (
     clinician?: string
 ): Promise<PatientBriefing | null> => {
     try {
+        if (normalizeClinicalSpecialty(specialty) === 'psicologia') {
+            return null;
+        }
         const normalizedName = normalizePatientName(patientName || '');
         if (!normalizedName) return null;
 
@@ -642,6 +646,9 @@ export const markPatientBriefingStale = async (
     clinician?: string
 ): Promise<PatientBriefing | null> => {
     try {
+        if (normalizeClinicalSpecialty(specialty) === 'psicologia') {
+            return null;
+        }
         const timeline = await getPatientTimeline(patientName, specialty, clinician);
         if (!timeline.length) return null;
 
@@ -685,6 +692,9 @@ export const ensurePatientBriefing = async (
     clinician?: string
 ): Promise<PatientBriefing | null> => {
     try {
+        if (normalizeClinicalSpecialty(specialty) === 'psicologia') {
+            return null;
+        }
         const timeline = await getPatientTimeline(patientName, specialty, clinician);
         if (!timeline.length) return null;
 
