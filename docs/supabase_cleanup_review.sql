@@ -116,8 +116,8 @@ drop table if exists public.ai_audit_outbox;
 -- B) Versión antigua del sistema de reglas.
 drop table if exists public.ai_rule_versions;
 
--- C) Perfil por especialidad: definida en schema, pero no usada desde runtime.
-drop table if exists public.clinical_specialty_profiles;
+-- C) Perfil por especialidad: SI se usa desde runtime para guardar estilos clinicos.
+-- No borrar public.clinical_specialty_profiles.
 
 -- D) Contexto psicológico extendido: creada pero no conectada en la app actual.
 drop table if exists public.psychology_consultation_contexts;

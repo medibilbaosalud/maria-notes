@@ -1046,8 +1046,16 @@ const computeRiskLevel = (errors) => {
     return errors.length >= 3 ? 'medium' : 'low';
 };
 
-const formatLearningPromptContext = (learningContext) => {
+const formatLearningPromptContext = (learningContext, expected = {}) => {
     if (!learningContext || !String(learningContext.promptContext || '').trim()) return '';
+    const contextSpecialty = learningContext.specialty ? normalizeConsultationType(learningContext.specialty) : '';
+    const expectedSpecialty = expected.specialty ? normalizeConsultationType(expected.specialty) : '';
+    if (contextSpecialty && expectedSpecialty && contextSpecialty !== expectedSpecialty) return '';
+
+    const contextArtifactType = String(learningContext.artifactType || '').trim();
+    const expectedArtifactType = String(expected.artifactType || '').trim();
+    if (contextArtifactType && expectedArtifactType && contextArtifactType !== expectedArtifactType) return '';
+
     return `REGLAS DE APRENDIZAJE DEL PROFESIONAL (APLICAR SOLO SI NO CONTRADICEN LA TRANSCRIPCION):
 ${String(learningContext.promptContext).slice(0, 4000)}
 
@@ -1089,7 +1097,7 @@ ${activeTemplate}
 ${specialty.styleProfile}
 ${psychologyClinicianStyle ? `\n${psychologyClinicianStyle.historyProfile}\n\n${psychologyClinicianStyle.historyExamples}` : ''}
 ${orlClinicianStyle ? `\n${orlClinicianStyle.historyProfile}\n\n${orlClinicianStyle.historyExamples}` : ''}
-${formatLearningPromptContext(learningContext)}
+${formatLearningPromptContext(learningContext, { specialty: consultationType, artifactType: 'medical_history' })}
 ${formatStyleReferencePrompt(styleReference)}
 
 Paciente: ${patientName || 'Paciente'}
@@ -1106,7 +1114,7 @@ Reglas:
 - Usa solo datos presentes en la transcripcion.
 - No inventes diagnosticos, pruebas ni antecedentes.
 - Si falta un dato, usa [] o null segun corresponda.
-${formatLearningPromptContext(learningContext)}
+${formatLearningPromptContext(learningContext, { specialty: consultationType, artifactType: 'medical_history' })}
 
 TRANSCRIPCION:
 ${String(transcription || '').slice(0, 24000)}
@@ -1142,7 +1150,7 @@ Reglas:
 - Responde en texto Markdown simple.
 ${normalizeConsultationType(consultationType) === 'psicologia' ? getPsychologyClinicianStyle(clinicianName).reportProfile : ''}
 ${normalizeConsultationType(consultationType) === 'otorrino' ? getOrlClinicianStyle(clinicianName).reportProfile : ''}
-${formatLearningPromptContext(learningContext)}
+${formatLearningPromptContext(learningContext, { specialty: consultationType, artifactType: 'medical_report' })}
 
 TRANSCRIPCION:
 ${String(transcription || '').slice(0, 18000)}`;
@@ -1157,7 +1165,7 @@ Reglas:
 - Si falta dato, escribe "No consta".
 ${normalizeConsultationType(consultationType) === 'psicologia' ? getPsychologyClinicianStyle(clinicianName).historyProfile : ''}
 ${normalizeConsultationType(consultationType) === 'otorrino' ? getOrlClinicianStyle(clinicianName).historyProfile : ''}
-${formatLearningPromptContext(learningContext)}
+${formatLearningPromptContext(learningContext, { specialty: consultationType, artifactType: 'medical_history' })}
 ${formatStyleReferencePrompt(styleReference)}
 
 TRANSCRIPCION:

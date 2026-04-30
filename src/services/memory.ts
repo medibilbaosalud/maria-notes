@@ -28,6 +28,11 @@ interface RulePackCacheEntry {
     expiresAt: number;
 }
 
+interface HybridCacheEntry {
+    value: HybridContext;
+    expiresAt: number;
+}
+
 type ConsolidationWindowName = 'daily' | 'weekly' | 'monthly';
 
 interface RankedRuleCandidate {
@@ -52,7 +57,7 @@ interface ScopeConsolidationState {
 }
 
 export class MemoryService {
-    private static hybridCache: { value: HybridContext; expiresAt: number } | null = null;
+    private static hybridCache = new Map<string, HybridCacheEntry>();
     private static rulePackCache = new Map<string, RulePackCacheEntry>();
     private static readonly HYBRID_CACHE_TTL_MS = 60_000;
     private static readonly RULEPACK_CACHE_TTL_MS = 30_000;
@@ -76,7 +81,7 @@ export class MemoryService {
     private static readonly BREAKER_COOLDOWN_MS = 30_000;
 
     static invalidateCache() {
-        MemoryService.hybridCache = null;
+        MemoryService.hybridCache.clear();
         MemoryService.rulePackCache.clear();
     }
 
@@ -190,6 +195,28 @@ export class MemoryService {
         const section = String(context.section || 'generation').trim().toLowerCase();
         const clinicianScope = MemoryService.normalizeClinicianScope(specialty, context.clinicianProfile);
         return `${specialty}:${clinicianScope}:${artifactType}:${section}`;
+    }
+
+    private static buildHybridCacheKey(context: {
+        specialty?: string;
+        artifactType?: LearningArtifactType;
+        section?: string;
+        clinicianProfile?: string | null;
+        classification?: ConsultationClassification;
+        tokenBudget?: number;
+    }): string {
+        const specialty = normalizeClinicalSpecialty(context.specialty);
+        return JSON.stringify({
+            scope: MemoryService.buildScopeKey({
+                specialty,
+                artifactType: context.artifactType || 'medical_history',
+                section: context.section || 'generation',
+                clinicianProfile: context.clinicianProfile
+            }),
+            ent: context.classification?.ent_area || '',
+            urg: context.classification?.urgency || '',
+            budget: context.tokenBudget || 900
+        });
     }
 
     private static getCurrentWindowIds(now = new Date()): Omit<ScopeConsolidationState, 'updated_at'> {
@@ -509,6 +536,7 @@ export class MemoryService {
             .select('id, version, pack_json')
             .eq('active', true)
             .eq('specialty', context.specialty)
+            .eq('clinician_profile', clinicianProfile)
             .eq('artifact_type', context.artifactType)
             .eq('target_section', scopedTargetSection)
             .order('version', { ascending: false })
@@ -540,13 +568,21 @@ export class MemoryService {
             .maybeSingle();
 
         const nextVersion = Number(lastVersion?.version || 0) + 1;
-        await supabase.from('ai_rule_pack_versions_v2').update({ active: false }).eq('active', true);
+        await supabase
+            .from('ai_rule_pack_versions_v2')
+            .update({ active: false, updated_at: new Date().toISOString() })
+            .eq('active', true)
+            .eq('specialty', context.specialty)
+            .eq('clinician_profile', clinicianProfile)
+            .eq('artifact_type', context.artifactType)
+            .eq('target_section', scopedTargetSection);
 
         const { data: inserted } = await supabase
             .from('ai_rule_pack_versions_v2')
             .insert([{
                 version: nextVersion,
                 specialty: context.specialty,
+                clinician_profile: clinicianProfile,
                 artifact_type: context.artifactType,
                 target_section: scopedTargetSection,
                 pack_json: {
@@ -615,6 +651,7 @@ export class MemoryService {
                     evidence_count: Number(rule.evidence_count || 0),
                     priority: MemoryService.buildRulePriority(rule, { specialty, artifactType, clinicianProfile })
                 }))
+                .filter((rule) => rule.priority > 0)
                 .sort((a, b) => {
                     const aPreferred = MemoryService.isPreferredClinicalCategory(a.category) ? 1 : 0;
                     const bPreferred = MemoryService.isPreferredClinicalCategory(b.category) ? 1 : 0;
@@ -831,6 +868,7 @@ export class MemoryService {
         specialty?: string;
         artifactType?: LearningArtifactType;
         section?: string;
+        clinicianProfile?: string | null;
         classification?: ConsultationClassification;
         tokenBudget?: number;
     }): Promise<HybridContext> {
@@ -838,17 +876,31 @@ export class MemoryService {
 
         try {
             const now = Date.now();
-            if (MemoryService.hybridCache && MemoryService.hybridCache.expiresAt > now) {
-                return MemoryService.hybridCache.value;
+            const specialty = normalizeClinicalSpecialty(options?.specialty);
+            const artifactType = options?.artifactType || 'medical_history';
+            const section = options?.section || 'generation';
+            const clinicianProfile = MemoryService.normalizeClinicianScope(specialty, options?.clinicianProfile);
+            const cacheKey = MemoryService.buildHybridCacheKey({
+                specialty,
+                artifactType,
+                section,
+                clinicianProfile,
+                classification: options?.classification,
+                tokenBudget: options?.tokenBudget
+            });
+            const cached = MemoryService.hybridCache.get(cacheKey);
+            if (cached && cached.expiresAt > now) {
+                return cached.value;
             }
-            if ((MemoryService.pipelineBusy || MemoryService.isCircuitOpen()) && MemoryService.hybridCache) {
-                return MemoryService.hybridCache.value;
+            if ((MemoryService.pipelineBusy || MemoryService.isCircuitOpen()) && cached) {
+                return cached.value;
             }
 
             const rulePackContext = await MemoryService.getRulePackContext({
-                section: options?.section || 'generation',
-                specialty: normalizeClinicalSpecialty(options?.specialty),
-                artifactType: options?.artifactType || 'medical_history',
+                section,
+                specialty,
+                artifactType,
+                clinicianProfile,
                 classification: options?.classification,
                 tokenBudget: options?.tokenBudget || 900
             });
@@ -867,16 +919,15 @@ export class MemoryService {
                 global_rules_json: grouped
             };
 
-            MemoryService.hybridCache = {
+            MemoryService.hybridCache.set(cacheKey, {
                 value: result,
                 expiresAt: now + MemoryService.HYBRID_CACHE_TTL_MS
-            };
+            });
 
             return result;
         } catch (error) {
             MemoryService.markFailure();
             console.error('[MemoryService] getHybridContext failed:', error);
-            if (MemoryService.hybridCache) return MemoryService.hybridCache.value;
             return { global_rules: '', daily_lessons: '', total_lessons_count: 0 };
         }
     }

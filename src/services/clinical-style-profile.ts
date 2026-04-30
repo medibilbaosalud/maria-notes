@@ -249,6 +249,8 @@ export const loadClinicalStyleProfile = async (
 
     if (ownerUserId) {
         query = query.eq('owner_user_id', ownerUserId);
+    } else {
+        query = query.is('owner_user_id', null);
     }
 
     const { data, error } = await query.maybeSingle();
@@ -280,13 +282,9 @@ export const saveClinicalStyleProfile = async (params: {
     }
 
     const ownerUserId = await getCurrentOwnerUserId();
-    if (!ownerUserId) {
-        throw new Error('supabase_user_required');
-    }
-
     const existing = await loadClinicalStyleProfile(specialty, params.clinicianProfile);
     const payload = {
-        owner_user_id: ownerUserId,
+        owner_user_id: ownerUserId || null,
         specialty,
         clinician_profile: params.clinicianProfile || null,
         display_name: buildProfileDisplayName(specialty, params.clinicianProfile || null),

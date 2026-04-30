@@ -425,6 +425,13 @@ const toCloudRecord = (record: MedicalRecord) => {
     };
 };
 
+const isMissingAuditReferenceError = (error: unknown): boolean => {
+    const maybePostgrestError = error as { code?: string; message?: string; details?: string };
+    const text = `${maybePostgrestError?.message || ''} ${maybePostgrestError?.details || ''}`.toLowerCase();
+    return maybePostgrestError?.code === '23503'
+        && text.includes('medical_records_audit_id_fkey');
+};
+
 // Helper to sync a record to Supabase (fire-and-forget)
 const syncToCloud = async (record: MedicalRecord, operation: 'insert' | 'update' | 'delete') => {
     const client = getCloudClient();
@@ -437,6 +444,16 @@ const syncToCloud = async (record: MedicalRecord, operation: 'insert' | 'update'
                 .from('medical_records')
                 .upsert([cloudRecord], { onConflict: 'record_uuid' });
             if (error) {
+                if (cloudRecord.audit_id && isMissingAuditReferenceError(error)) {
+                    const retryRecord = { ...cloudRecord, audit_id: null };
+                    const { error: retryError } = await client
+                        .from('medical_records')
+                        .upsert([retryRecord], { onConflict: 'record_uuid' });
+                    if (!retryError) {
+                        console.warn('[Cloud Sync] Record saved without audit_id; audit worker will relink it later:', cloudRecord.record_uuid);
+                        return;
+                    }
+                }
                 console.error(`[Cloud Sync] Upsert error (${operation}):`, error.message, error.details);
                 throw error;
             }
@@ -493,7 +510,8 @@ export const saveAiImprovementLesson = async (lesson: Omit<AiImprovementLesson, 
 
         const client = getCloudClient();
         if (client) {
-            const { error } = await client.from('ai_improvement_lessons').insert([localLesson]);
+            const { updated_at: _updatedAt, ...cloudLesson } = localLesson;
+            const { error } = await client.from('ai_improvement_lessons').insert([cloudLesson]);
             if (error) console.error('[Cloud Sync] AiImprovementLesson insert error:', error.message);
         }
         return id ?? null;
